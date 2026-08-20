@@ -1,0 +1,152 @@
+/*
+ * 디자인 토큰.
+ *
+ * 이전 index.html 에서는 `[data-theme="dark"]` 블록이 닫힌 뒤 --radius / --shadow /
+ * --font / --c-* 선언이 선택자 밖에 남아 CSS 파서가 통째로 버렸다. 그래서 Pretendard 를
+ * 로드하고도 시스템 기본 폰트로 렌더링됐고, 모든 라운딩과 그림자가 무시됐다. (F-01)
+ *
+ * 테마는 세 상태다.
+ *   1. :root                                   → 라이트 (기본값이자 'system'의 라이트 쪽)
+ *   2. prefers-color-scheme: dark              → 'system'에서 OS가 다크일 때
+ *   3. [data-theme="dark"]                     → 사용자가 명시적으로 다크를 고른 경우
+ * 2번을 :not([data-theme="light"]) 로 감싸야 "OS는 다크인데 앱은 라이트로 고정"이 동작한다.
+ */
+
+:root {
+  /* ---- surface / ink ---- */
+  --bg: #ffffff;
+  --bg-soft: #fafafa;
+  --bg-elev: #ffffff;
+  --line: #ececec;
+  --line-strong: #d4d4d4;
+  --ink: #0a0a0a;
+  --ink-2: #404040;
+  --ink-3: #737373;
+  --ink-4: #a3a3a3;
+  --accent: #0a0a0a;
+  --accent-soft: #f4f4f5;
+
+  /* ---- lock screen ---- */
+  --lock-bg: #fafafa;
+  --lock-fg: #0a0a0a;
+  --lock-muted: #525252;
+  --lock-faint: #a3a3a3;
+  --lock-field-bg: #ffffff;
+  --lock-field-border: #ececec;
+  --lock-field-focus: #0a0a0a;
+  --lock-submit-bg: #0a0a0a;
+  --lock-submit-fg: #ffffff;
+  --lock-err: #b91c1c;
+
+  /* ---- 8 category colors ---- */
+  --c-red: #ef4444;
+  --c-orange: #f97316;
+  --c-amber: #eab308;
+  --c-green: #22c55e;
+  --c-cyan: #06b6d4;
+  --c-blue: #3b82f6;
+  --c-violet: #8b5cf6;
+  --c-pink: #ec4899;
+
+  /* ---- lens accents (일정 / 아이디어 / 가계부 / 전체) ---- */
+  --lens-task: #2563eb;
+  --lens-idea: #7c3aed;
+  --lens-money: #059669;
+  --lens-all: #0a0a0a;
+
+  /* ---- semantic ---- */
+  --good: #16a34a;
+  --warn: #d97706;
+  --bad: #dc2626;
+
+  /* ---- shape ---- */
+  --radius: 10px;
+  --radius-sm: 6px;
+  --radius-lg: 14px;
+
+  --shadow-1: 0 1px 2px rgba(10, 10, 10, .04), 0 1px 1px rgba(10, 10, 10, .03);
+  --shadow-2: 0 8px 24px rgba(10, 10, 10, .08), 0 2px 6px rgba(10, 10, 10, .04);
+  --shadow-3: 0 24px 60px rgba(10, 10, 10, .18);
+
+  --font: "Pretendard Variable", Pretendard, -apple-system, BlinkMacSystemFont,
+          system-ui, "Segoe UI", Roboto, "Helvetica Neue", sans-serif;
+  --font-num: var(--font);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #0a0a0a;
+    --bg-soft: #141414;
+    --bg-elev: #1a1a1a;
+    --line: #262626;
+    --line-strong: #404040;
+    --ink: #fafafa;
+    --ink-2: #d4d4d4;
+    --ink-3: #a3a3a3;
+    --ink-4: #737373;
+    --accent: #fafafa;
+    --accent-soft: #1f1f1f;
+
+    --lock-bg: #0a0a0a;
+    --lock-fg: #fafafa;
+    --lock-muted: #a3a3a3;
+    --lock-faint: #525252;
+    --lock-field-bg: rgba(255, 255, 255, .06);
+    --lock-field-border: rgba(255, 255, 255, .08);
+    --lock-field-focus: rgba(255, 255, 255, .4);
+    --lock-submit-bg: #fafafa;
+    --lock-submit-fg: #0a0a0a;
+    --lock-err: #fca5a5;
+
+    --lens-task: #60a5fa;
+    --lens-idea: #a78bfa;
+    --lens-money: #34d399;
+    --lens-all: #fafafa;
+
+    --good: #4ade80;
+    --warn: #fbbf24;
+    --bad: #f87171;
+
+    --shadow-1: 0 1px 2px rgba(0, 0, 0, .5);
+    --shadow-2: 0 8px 24px rgba(0, 0, 0, .45), 0 2px 6px rgba(0, 0, 0, .3);
+    --shadow-3: 0 24px 60px rgba(0, 0, 0, .6);
+  }
+}
+
+:root[data-theme="dark"] {
+  --bg: #0a0a0a;
+  --bg-soft: #141414;
+  --bg-elev: #1a1a1a;
+  --line: #262626;
+  --line-strong: #404040;
+  --ink: #fafafa;
+  --ink-2: #d4d4d4;
+  --ink-3: #a3a3a3;
+  --ink-4: #737373;
+  --accent: #fafafa;
+  --accent-soft: #1f1f1f;
+
+  --lock-bg: #0a0a0a;
+  --lock-fg: #fafafa;
+  --lock-muted: #a3a3a3;
+  --lock-faint: #525252;
+  --lock-field-bg: rgba(255, 255, 255, .06);
+  --lock-field-border: rgba(255, 255, 255, .08);
+  --lock-field-focus: rgba(255, 255, 255, .4);
+  --lock-submit-bg: #fafafa;
+  --lock-submit-fg: #0a0a0a;
+  --lock-err: #fca5a5;
+
+  --lens-task: #60a5fa;
+  --lens-idea: #a78bfa;
+  --lens-money: #34d399;
+  --lens-all: #fafafa;
+
+  --good: #4ade80;
+  --warn: #fbbf24;
+  --bad: #f87171;
+
+  --shadow-1: 0 1px 2px rgba(0, 0, 0, .5);
+  --shadow-2: 0 8px 24px rgba(0, 0, 0, .45), 0 2px 6px rgba(0, 0, 0, .3);
+  --shadow-3: 0 24px 60px rgba(0, 0, 0, .6);
+}
