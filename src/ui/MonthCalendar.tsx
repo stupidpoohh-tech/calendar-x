@@ -1,0 +1,194 @@
+import { useMemo, useRef } from 'react';
+import { colorHex, MONEY_TYPE_BY_ID } from '../domain/constants';
+import { isWeekend, monthGrid, normalizeDate, toISO, weekdayLabels } from '../domain/date';
+import { displayTitle, effectiveEndDate, isDone } from '../domain/entry';
+import type { Entry, LensId, WeekStart } from '../domain/types';
+import { Icon } from './Icon';
+
+interface Props {
+  cursor: Date;
+  onCursorChange: (next: Date) => void;
+  entries: readonly Entry[];
+  lens: LensId;
+  weekStart: WeekStart;
+  todayISO: string;
+  onEntryClick: (e: Entry) => void;
+  onDayOpen: (iso: string) => void;
+  onDayCreate: (iso: string) => void;
+}
+
+interface Placed {
+  entry: Entry;
+  lane: number;
+  from: number;
+  to: number;
+  continuesLeft: boolean;
+  continuesRight: boolean;
+}
+
+/** 겹치지 않는 가장 위쪽 레인에 배치한다. */
+function placeWeek(entries: readonly Entry[], weekISO: readonly string[]): { placed: Placed[]; laneCount: number } {
+  const first = weekISO[0] ?? '';
+  const last = weekISO[6] ?? '';
+
+  const visible = entries.filter((e) => {
+    const start = normalizeDate(e.startDate);
+    return start <= last && effectiveEndDate(e) >= first;
+  });
+
+  // 기간이 긴 항목을 위로 올려야 바가 계단처럼 흩어지지 않는다.
+  visible.sort((a, b) => {
+    const aSpan = effectiveEndDate(a) > a.startDate ? 0 : 1;
+    const bSpan = effectiveEndDate(b) > b.startDate ? 0 : 1;
+    if (aSpan !== bSpan) return aSpan - bSpan;
+    const aKey = `${a.startDate}T${a.startTime ?? '00:00'}`;
+    const bKey = `${b.startDate}T${b.startTime ?? '00:00'}`;
+    return aKey.localeCompare(bKey);
+  });
+
+  const lanes: { from: number; to: number }[][] = [];
+  const placed: Placed[] = visible.map((entry) => {
+    const start = normalizeDate(entry.startDate);
+    const end = effectiveEndDate(entry);
+    const rawFrom = weekISO.indexOf(start);
+    const rawTo = weekISO.indexOf(end);
+    const from = start < first ? 0 : Math.max(0, rawFrom);
+    const to = end > last ? 6 : (rawTo < 0 ? from : rawTo);
+
+    let lane = 0;
+    while (lanes[lane]?.some((r) => !(to < r.from || from > r.to))) lane++;
+    (lanes[lane] ??= []).push({ from, to });
+
+    return { entry, lane, from, to, continuesLeft: start < first, continuesRight: end > last };
+  });
+
+  return { placed, laneCount: lanes.length };
+}
+
+/**
+ * 항목을 숨기지 않는다. "+N개 더" 대신 개수에 따라 바 높이를 압축해 전부 보여 준다.
+ * 이 프로젝트의 설계 원칙이라 그대로 지킨다.
+ */
+function barMetrics(laneCount: number) {
+  if (laneCount <= 4) return { height: 21, gap: 23, showText: true };
+  if (laneCount <= 7) return { height: 14, gap: 16, showText: true };
+  return { height: 8, gap: 10, showText: false };
+}
+
+export function MonthCalendar({
+  cursor, onCursorChange, entries, lens, weekStart, todayISO,
+  onEntryClick, onDayOpen, onDayCreate,
+}: Props) {
+  const grid = useMemo(() => monthGrid(cursor, weekStart), [cursor, weekStart]);
+  const weeks = useMemo(
+    () => Array.from({ length: 6 }, (_, i) => grid.slice(i * 7, i * 7 + 7)),
+    [grid],
+  );
+  const labels = weekdayLabels(weekStart);
+  const curMonth = cursor.getMonth();
+
+  const touch = useRef({ x: 0, y: 0 });
+  const onTouchStart = (e: React.TouchEvent) => {
+    const t = e.touches[0];
+    if (t) touch.current = { x: t.clientX, y: t.clientY };
+  };
+  const onTouchEnd = (e: React.TouchEvent) => {
+    const t = e.changedTouches[0];
+    if (!t) return;
+    const dx = t.clientX - touch.current.x;
+    const dy = t.clientY - touch.current.y;
+    if (Math.abs(dx) > 60 && Math.abs(dx) > Math.abs(dy) * 1.5) {
+      onCursorChange(new Date(cursor.getFullYear(), cursor.getMonth() + (dx < 0 ? 1 : -1), 1));
+    }
+  };
+
+  return (
+    <div className="cal" onTouchStart={onTouchStart} onTouchEnd={onTouchEnd}>
+      <div className="cal-head">
+        {labels.map((l) => (
+          <div key={l} className={'cal-dow' + (l === '토' || l === '일' ? ' wknd' : '')}>{l}</div>
+        ))}
+      </div>
+
+      {weeks.map((week, wi) => {
+        const weekISO = week.map(toISO);
+        const { placed, laneCount } = placeWeek(entries, weekISO);
+        const { height, gap, showText } = barMetrics(laneCount);
+        const topOffset = 32;
+        const minHeight = topOffset + laneCount * gap + 8;
+
+        return (
+          <div className="cal-week" key={weekISO[0] ?? wi} style={{ minHeight }}>
+            <div className="cal-cells">
+              {week.map((d) => {
+                const iso = toISO(d);
+                const inMonth = d.getMonth() === curMonth;
+                const today = iso === todayISO;
+                return (
+                  <div
+                    key={iso}
+                    className={'cal-cell' + (inMonth ? '' : ' out') + (today ? ' today' : '') + (isWeekend(d) ? ' wknd' : '')}
+                    onClick={() => onDayCreate(iso)}
+                  >
+                    <button
+                      className={'cal-num' + (today ? ' is-today' : '')}
+                      onClick={(e) => { e.stopPropagation(); onDayOpen(iso); }}
+                      aria-label={`${iso} 상세 보기`}
+                    >
+                      {d.getDate()}
+                    </button>
+                    {inMonth && d.getDate() === 1 && <span className="cal-mtag">{d.getMonth() + 1}월</span>}
+                  </div>
+                );
+              })}
+            </div>
+
+            <div className="cal-bars" style={{ top: topOffset }}>
+              {placed.map(({ entry, lane, from, to, continuesLeft, continuesRight }) => {
+                const hex = colorHex(entry.color);
+                const money = entry.kind === 'money' ? entry.money : null;
+                const accent = money ? MONEY_TYPE_BY_ID[money.type].color : hex;
+                return (
+                  <button
+                    key={entry.id}
+                    className={
+                      'cal-bar'
+                      + (isDone(entry) ? ' done' : '')
+                      + (continuesLeft ? ' cont-l' : '')
+                      + (continuesRight ? ' cont-r' : '')
+                    }
+                    style={{
+                      top: lane * gap,
+                      height,
+                      left: `calc(${(from / 7) * 100}% + 3px)`,
+                      width: `calc(${((to - from + 1) / 7) * 100}% - 6px)`,
+                      ['--bar' as string]: accent,
+                    }}
+                    title={displayTitle(entry)}
+                    onClick={(e) => { e.stopPropagation(); onEntryClick(entry); }}
+                  >
+                    {showText && (
+                      <span className="cal-bar-in">
+                        {lens === 'all' && <KindDot kind={entry.kind} />}
+                        {entry.startTime && <span className="cal-bar-t">{entry.startTime}</span>}
+                        <span className="cal-bar-x">{displayTitle(entry)}</span>
+                        {entry.isRecurring && <Icon.Repeat size={9} />}
+                      </span>
+                    )}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+/** 'all' 렌즈에서 어느 축의 항목인지 한눈에 구분하는 표시. */
+function KindDot({ kind }: { kind: Entry['kind'] }) {
+  const glyph = kind === 'task' ? '●' : kind === 'idea' ? '◆' : '▮';
+  const label = kind === 'task' ? '할 일' : kind === 'idea' ? '아이디어' : '가계부';
+  return <span className="cal-kind" aria-label={label}>{glyph}</span>;
+}

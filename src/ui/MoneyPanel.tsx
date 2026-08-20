@@ -1,0 +1,247 @@
+/**
+ * 잔고와 대출.
+ *
+ * 이전에는 잔고 금액이 '::balance::' 항목의 memo 에 문자열로, 대출 목록 전체가
+ * '::loans::' 항목의 memo 에 JSON 배열로 들어갔다. 대출을 두 기기에서 각각 고치면
+ * 나중 쓰기가 앞선 편집을 통째로 덮어썼다. 지금은 각자 별도 문서다. (F-05)
+ */
+import { useState } from 'react';
+import { debtTotal, monthlyDebtTotal } from '../domain/cashflow';
+import { DEFAULT_CURRENCY } from '../domain/constants';
+import { todayISO as computeToday } from '../domain/date';
+import { uid } from '../domain/entry';
+import { formatAmount, minorToInput, parseAmountToMinor } from '../domain/money';
+import type { Account, Debt } from '../domain/types';
+import { Icon } from './Icon';
+
+interface Props {
+  accounts: readonly Account[];
+  debts: readonly Debt[];
+  collapsed: boolean;
+  onToggleCollapsed: () => void;
+  onSaveAccount: (a: Account) => void;
+  onSaveDebt: (d: Debt) => void;
+  onDeleteDebt: (d: Debt) => void;
+}
+
+export function MoneyPanel({
+  accounts, debts, collapsed, onToggleCollapsed, onSaveAccount, onSaveDebt, onDeleteDebt,
+}: Props) {
+  return (
+    <div className="mp">
+      <BalanceRow accounts={accounts} onSave={onSaveAccount} />
+      <DebtCard
+        debts={debts}
+        collapsed={collapsed}
+        onToggle={onToggleCollapsed}
+        onSave={onSaveDebt}
+        onDelete={onDeleteDebt}
+      />
+    </div>
+  );
+}
+
+function BalanceRow({ accounts, onSave }: { accounts: readonly Account[]; onSave: (a: Account) => void }) {
+  const primary = accounts[0] ?? null;
+  const [editing, setEditing] = useState(false);
+  const [text, setText] = useState('');
+
+  const total = accounts.reduce((s, a) => s + a.balanceMinor, 0);
+
+  const start = () => {
+    setText(primary ? minorToInput(primary.balanceMinor, primary.currency) : '');
+    setEditing(true);
+  };
+
+  const commit = () => {
+    const minor = parseAmountToMinor(text);
+    setEditing(false);
+    if (minor === null) return;
+    const now = new Date().toISOString();
+    onSave({
+      id: primary?.id ?? uid(),
+      name: primary?.name ?? '주계좌',
+      balanceMinor: minor,
+      currency: primary?.currency ?? DEFAULT_CURRENCY,
+      // 잔고를 고친 날이 그 값이 사실인 날이다. 현금흐름 예측의 기준점이 된다.
+      asOf: computeToday(),
+      order: primary?.order ?? 0,
+      createdAt: primary?.createdAt || now,
+      updatedAt: now,
+    });
+  };
+
+  return (
+    <div className="bal">
+      <span className="bal-l"><Icon.Wallet size={14} /> 잔고</span>
+      {editing ? (
+        <input
+          className="bal-in num" type="text" inputMode="numeric" autoFocus
+          value={text} onChange={(e) => setText(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.nativeEvent.isComposing) return;
+            if (e.key === 'Enter') commit();
+            if (e.key === 'Escape') setEditing(false);
+          }}
+          onBlur={commit}
+          placeholder="0"
+          aria-label="잔고 금액"
+        />
+      ) : (
+        <button className={'bal-v num' + (primary ? '' : ' empty')} onClick={start}>
+          {primary ? `₩ ${formatAmount(total)}` : '잔고를 입력하면 현금흐름이 계산됩니다'}
+        </button>
+      )}
+      {primary && !editing && (
+        <span className="bal-asof">{primary.asOf} 기준</span>
+      )}
+      {!editing && <button className="bal-edit" onClick={start}>수정</button>}
+    </div>
+  );
+}
+
+const emptyDebt = (order: number): Debt => ({
+  id: uid(), name: '', balanceMinor: 0, monthlyMinor: 0, rate: null,
+  currentRound: 0, totalRounds: 0, order,
+  createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(),
+});
+
+function DebtCard({
+  debts, collapsed, onToggle, onSave, onDelete,
+}: {
+  debts: readonly Debt[];
+  collapsed: boolean;
+  onToggle: () => void;
+  onSave: (d: Debt) => void;
+  onDelete: (d: Debt) => void;
+}) {
+  const [draft, setDraft] = useState<Debt | null>(null);
+  const [fields, setFields] = useState({ balance: '', monthly: '', rate: '', current: '', total: '' });
+
+  const startEdit = (d: Debt) => {
+    setDraft(d);
+    setFields({
+      balance: d.balanceMinor ? minorToInput(d.balanceMinor) : '',
+      monthly: d.monthlyMinor ? minorToInput(d.monthlyMinor) : '',
+      rate: d.rate != null ? String(d.rate) : '',
+      current: d.currentRound ? String(d.currentRound) : '',
+      total: d.totalRounds ? String(d.totalRounds) : '',
+    });
+  };
+
+  const commit = () => {
+    if (!draft) return;
+    if (!draft.name.trim()) { setDraft(null); return; }
+    const int = (s: string) => Math.max(0, Math.trunc(Number(s.replace(/[^0-9]/g, '')) || 0));
+    const rate = Number(fields.rate.replace(/[^0-9.]/g, ''));
+    onSave({
+      ...draft,
+      name: draft.name.trim(),
+      balanceMinor: parseAmountToMinor(fields.balance) ?? 0,
+      monthlyMinor: parseAmountToMinor(fields.monthly) ?? 0,
+      rate: Number.isFinite(rate) && rate > 0 ? rate : null,
+      currentRound: int(fields.current),
+      totalRounds: int(fields.total),
+      updatedAt: new Date().toISOString(),
+    });
+    setDraft(null);
+  };
+
+  const total = debtTotal(debts);
+  const monthly = monthlyDebtTotal(debts);
+
+  return (
+    <div className="debt">
+      <button className="debt-h" onClick={onToggle} aria-expanded={!collapsed}>
+        <Icon.Chevron size={13} dir={collapsed ? 'right' : 'down'} />
+        <span className="debt-h-t">대출 현황</span>
+        {debts.length > 0 && (
+          <span className="debt-h-n num">
+            {debts.length}건 · 잔액 {formatAmount(total)} · 월 {formatAmount(monthly)}
+          </span>
+        )}
+      </button>
+
+      {!collapsed && (
+        <div className="debt-b">
+          {debts.map((d) => (
+            draft?.id === d.id ? (
+              <DebtForm
+                key={d.id} draft={draft} fields={fields}
+                onName={(name) => setDraft({ ...draft, name })}
+                onField={(k, v) => setFields((f) => ({ ...f, [k]: v }))}
+                onCancel={() => setDraft(null)} onSave={commit}
+              />
+            ) : (
+              <div key={d.id} className="debt-i">
+                <button className="debt-i-main" onClick={() => startEdit(d)}>
+                  <span className="debt-n">{d.name}</span>
+                  <span className="debt-d num">
+                    잔액 {formatAmount(d.balanceMinor)} · 월 {formatAmount(d.monthlyMinor)}
+                    {d.rate != null && ` · ${d.rate}%`}
+                  </span>
+                  {(d.currentRound > 0 || d.totalRounds > 0) && (
+                    <span className="debt-r num">{d.currentRound}/{d.totalRounds || '?'}회차</span>
+                  )}
+                </button>
+                <button className="debt-x" onClick={() => onDelete(d)} aria-label={`${d.name} 삭제`}>
+                  <Icon.X size={12} />
+                </button>
+              </div>
+            )
+          ))}
+
+          {draft && !debts.some((d) => d.id === draft.id) ? (
+            <DebtForm
+              draft={draft} fields={fields}
+              onName={(name) => setDraft({ ...draft, name })}
+              onField={(k, v) => setFields((f) => ({ ...f, [k]: v }))}
+              onCancel={() => setDraft(null)} onSave={commit}
+            />
+          ) : (
+            <button className="debt-add" onClick={() => { startEdit(emptyDebt(debts.length)); }}>
+              + 대출 추가
+            </button>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function DebtForm({
+  draft, fields, onName, onField, onCancel, onSave,
+}: {
+  draft: Debt;
+  fields: { balance: string; monthly: string; rate: string; current: string; total: string };
+  onName: (v: string) => void;
+  onField: (k: 'balance' | 'monthly' | 'rate' | 'current' | 'total', v: string) => void;
+  onCancel: () => void;
+  onSave: () => void;
+}) {
+  return (
+    <div className="debt-f">
+      <input
+        className="mod-input" placeholder="명칭 (예: 카카오뱅크)" value={draft.name} autoFocus
+        onChange={(e) => onName(e.target.value)}
+        onKeyDown={(e) => { if (!e.nativeEvent.isComposing && e.key === 'Enter') onSave(); }}
+      />
+      <div className="debt-grid">
+        <label>잔액<input className="mod-input num" inputMode="numeric" value={fields.balance} onChange={(e) => onField('balance', e.target.value)} placeholder="0" /></label>
+        <label>월 상환<input className="mod-input num" inputMode="numeric" value={fields.monthly} onChange={(e) => onField('monthly', e.target.value)} placeholder="0" /></label>
+        <label>이자율<input className="mod-input num" inputMode="decimal" value={fields.rate} onChange={(e) => onField('rate', e.target.value)} placeholder="예: 3.5" /></label>
+        <label>회차
+          <span className="debt-round">
+            <input className="mod-input num" inputMode="numeric" value={fields.current} onChange={(e) => onField('current', e.target.value)} placeholder="현재" aria-label="현재 회차" />
+            <i>/</i>
+            <input className="mod-input num" inputMode="numeric" value={fields.total} onChange={(e) => onField('total', e.target.value)} placeholder="전체" aria-label="전체 회차" />
+          </span>
+        </label>
+      </div>
+      <div className="debt-f-a">
+        <button className="btn" onClick={onCancel}>취소</button>
+        <button className="btn primary" onClick={onSave}>저장</button>
+      </div>
+    </div>
+  );
+}

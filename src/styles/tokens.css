@@ -25,6 +25,8 @@
   --ink-4: #a3a3a3;
   --accent: #0a0a0a;
   --accent-soft: #f4f4f5;
+  /* 모달 뒤를 덮는 막. 다크에서는 더 진해야 아래 화면과 분리된다. */
+  --scrim: rgba(10, 10, 10, .45);
 
   /* ---- lock screen ---- */
   --lock-bg: #fafafa;
@@ -53,6 +55,12 @@
   --lens-idea: #7c3aed;
   --lens-money: #059669;
   --lens-all: #0a0a0a;
+  /*
+   * 렌즈 강조색을 배경으로 쓸 때의 글자색.
+   * 라이트에서는 강조색이 진하고 다크에서는 밝아지므로, 짝이 되는 전경색을
+   * 따로 두지 않으면 다크 모드에서 흰 글자가 흰 배경에 얹힌다.
+   */
+  --on-lens: #ffffff;
 
   /* ---- semantic ---- */
   --good: #16a34a;
@@ -86,6 +94,7 @@
     --ink-4: #737373;
     --accent: #fafafa;
     --accent-soft: #1f1f1f;
+    --scrim: rgba(0, 0, 0, .72);
 
     --lock-bg: #0a0a0a;
     --lock-fg: #fafafa;
@@ -102,6 +111,7 @@
     --lens-idea: #a78bfa;
     --lens-money: #34d399;
     --lens-all: #fafafa;
+    --on-lens: #0a0a0a;
 
     --good: #4ade80;
     --warn: #fbbf24;
@@ -125,6 +135,7 @@
   --ink-4: #737373;
   --accent: #fafafa;
   --accent-soft: #1f1f1f;
+  --scrim: rgba(0, 0, 0, .72);
 
   --lock-bg: #0a0a0a;
   --lock-fg: #fafafa;
@@ -141,6 +152,7 @@
   --lens-idea: #a78bfa;
   --lens-money: #34d399;
   --lens-all: #fafafa;
+  --on-lens: #0a0a0a;
 
   --good: #4ade80;
   --warn: #fbbf24;
