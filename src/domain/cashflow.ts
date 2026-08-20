@@ -8,7 +8,7 @@
  * 답하려는 질문은 하나다 — "언제 잔고가 바닥나는가."
  */
 import { MONEY_TYPE_BY_ID } from './constants';
-import { addDaysISO, normalizeDate, spanDays } from './date';
+import { normalizeDate, spanDays } from './date';
 import { effectiveEndDate } from './entry';
 import type { Account, DateISO, Entry } from './types';
 
@@ -52,12 +52,21 @@ export function allocateOverDays(amountMinor: number, days: number): number[] {
   return out;
 }
 
-interface DayBucket { delta: number; reserved: number; entries: Entry[] }
+interface DayBucket {
+  /** 그날의 순변동. */
+  delta: number;
+  /** 그날 들어온 돈의 합. 순변동과 따로 센다. */
+  gross_in: number;
+  /** 그날 나간 돈의 합. */
+  gross_out: number;
+  reserved: number;
+  entries: Entry[];
+}
 
 function bucketFor(map: Map<DateISO, DayBucket>, date: DateISO): DayBucket {
   let b = map.get(date);
   if (!b) {
-    b = { delta: 0, reserved: 0, entries: [] };
+    b = { delta: 0, gross_in: 0, gross_out: 0, reserved: 0, entries: [] };
     map.set(date, b);
   }
   return b;
@@ -82,14 +91,34 @@ function applyEntry(map: Map<DateISO, DayBucket>, e: Entry): void {
       // '세이브'는 잔고에서 빠지지 않지만 자유롭게 쓸 수 있는 돈도 아니다.
       // '가용'은 참고용이라 어느 쪽에도 넣지 않는다.
       if (e.money?.type === 'save') b.reserved += part;
+    } else if (def.sign > 0) {
+      b.delta += part;
+      b.gross_in += part;
     } else {
-      b.delta += def.sign * part;
+      b.delta -= part;
+      b.gross_out += part;
     }
   });
 }
 
 /**
- * @param accounts  잔고. 각 계좌의 asOf 날짜부터 유효한 값으로 본다.
+ * 잔고의 기준일을 정한다.
+ *
+ * 계좌가 여러 개고 기준일이 서로 다르면 합계가 어느 시점에도 정확하지 않다.
+ * 가장 최근 기준일을 앵커로 삼는다 — 가장 최근에 확인한 값이 사실에 가깝기 때문이다.
+ * 계좌가 하나면(대부분의 경우, 그리고 이관 결과가 만드는 형태) 정확하다.
+ */
+function anchorDate(accounts: readonly Account[], fallback: DateISO): DateISO {
+  let latest = '';
+  for (const a of accounts) {
+    const d = normalizeDate(a.asOf);
+    if (d && d > latest) latest = d;
+  }
+  return latest || fallback;
+}
+
+/**
+ * @param accounts  잔고. asOf 는 그 금액이 사실이었던 날이다.
  * @param entries   가계부 항목. 반복 항목은 호출 전에 materialize() 로 펼쳐서 넘긴다.
  * @param from,to   결과로 받고 싶은 구간.
  */
@@ -102,7 +131,6 @@ export function projectCashflow(
 ): CashflowResult {
   const start = normalizeDate(from);
   const end = normalizeDate(to);
-  const money = entries.filter((e) => e.kind === 'money' && e.money?.currency === currency);
 
   const empty: CashflowResult = {
     currency,
@@ -119,55 +147,70 @@ export function projectCashflow(
 
   const relevant = accounts.filter((a) => a.currency === currency);
   const seedBalance = relevant.reduce((sum, a) => sum + a.balanceMinor, 0);
-
-  // 잔고 기준일이 구간 시작보다 앞이면, 그 사이의 항목을 먼저 반영해야
-  // 구간 시작 잔고가 사실과 맞는다.
-  const seedDate = relevant.length > 0
-    ? relevant.reduce<DateISO>((min, a) => {
-        const d = normalizeDate(a.asOf);
-        return !min || (d && d < min) ? d : min;
-      }, '')
-    : start;
-  const walkFrom = seedDate && seedDate < start ? seedDate : start;
+  const anchor = anchorDate(relevant, start);
 
   const map = new Map<DateISO, DayBucket>();
-  for (const e of money) applyEntry(map, e);
+  for (const e of entries) {
+    if (e.kind === 'money' && e.money?.currency === currency) applyEntry(map, e);
+  }
 
-  let balance = seedBalance;
-  let reserved = 0;
-  let openingMinor = seedBalance;
+  /*
+   * 잔고는 anchor 날 "시작" 시점의 사실로 본다. 그래서 anchor 를 기준으로 양쪽으로 편다.
+   *
+   *   anchor 이후 → 변동을 더한다 (anchor 당일 예정분도 포함)
+   *   anchor 이전 → 변동을 되돌린다
+   *
+   * 이렇게 하지 않으면 "8월 19일 기준 135만원"이라고 입력한 사용자에게
+   * 8월 10일에 이미 나간 전기요금을 한 번 더 빼서 보여 주게 된다.
+   *
+   * 당일 마감이 아니라 시작으로 잡는 이유: 사용자가 오늘 잔고를 적을 때 오늘 나갈
+   * 돈이 아직 안 나갔을 수 있다. 마감으로 보면 그 항목이 조용히 사라진다.
+   */
+  const walkFrom = start < anchor ? start : anchor;
+  const walkTo = end > anchor ? end : anchor;
+  const days = spanDays(walkFrom, walkTo);
+
+  const cumulative = new Map<DateISO, number>();
+  // 각 날짜 "시작" 시점의 누적 변동. 그날의 변동은 아직 반영하지 않은 값이다.
+  const cumulativeBefore = new Map<DateISO, number>();
+  let running = 0;
+  for (const day of days) {
+    cumulativeBefore.set(day, running);
+    running += map.get(day)?.delta ?? 0;
+    cumulative.set(day, running);
+  }
+
+  // anchor 날 시작 잔고가 seedBalance 가 되도록 전체를 평행이동한다.
+  const offset = seedBalance - (cumulativeBefore.get(anchor) ?? 0);
+
   const points: CashflowPoint[] = [];
   let totalIn = 0;
   let totalOut = 0;
+  let reservedRunning = 0;
+  let reservedAtStart = 0;
 
-  // seedDate 당일의 잔고는 이미 그날의 결과이므로 다음 날부터 반영한다.
-  const applyStart = seedDate && seedDate < start ? addDaysISO(seedDate, 1) : walkFrom;
+  for (const day of days) {
+    reservedRunning += map.get(day)?.reserved ?? 0;
+    if (day < start) { reservedAtStart = reservedRunning; continue; }
+    if (day > end) break;
 
-  for (const day of spanDays(applyStart, end)) {
     const b = map.get(day);
-    if (b) {
-      balance += b.delta;
-      reserved += b.reserved;
-    }
-    if (day < start) {
-      openingMinor = balance;
-      continue;
-    }
-    if (b) {
-      if (b.delta > 0) totalIn += b.delta;
-      if (b.delta < 0) totalOut += -b.delta;
-    }
+    // 하루에 입금과 지출이 같이 있어도 각각을 센다.
+    // 순변동으로 세면 "들어올 돈"이 그날 지출만큼 깎여 보인다.
+    totalIn += b?.gross_in ?? 0;
+    totalOut += b?.gross_out ?? 0;
+
     points.push({
       date: day,
       deltaMinor: b?.delta ?? 0,
-      balanceMinor: balance,
-      reservedMinor: reserved,
+      balanceMinor: (cumulative.get(day) ?? 0) + offset,
+      reservedMinor: reservedRunning - reservedAtStart,
       entries: b?.entries ?? [],
     });
   }
 
-  // applyStart 가 구간 시작보다 뒤일 수 없으므로 openingMinor 는 위 루프에서 확정된다.
-  if (applyStart >= start) openingMinor = seedBalance;
+  const first = points[0];
+  const openingMinor = first ? first.balanceMinor - first.deltaMinor : seedBalance;
 
   let low: CashflowPoint | null = null;
   let firstShortfall: CashflowPoint | null = null;
@@ -176,14 +219,16 @@ export function projectCashflow(
     if (!firstShortfall && p.balanceMinor < 0) firstShortfall = p;
   }
 
+  const last = points[points.length - 1];
+
   return {
     currency,
     openingMinor,
     points,
-    closingMinor: points.length > 0 ? (points[points.length - 1] as CashflowPoint).balanceMinor : openingMinor,
+    closingMinor: last ? last.balanceMinor : openingMinor,
     totalInMinor: totalIn,
     totalOutMinor: totalOut,
-    totalReservedMinor: reserved,
+    totalReservedMinor: reservedRunning - reservedAtStart,
     low,
     firstShortfall,
   };

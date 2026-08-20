@@ -89,7 +89,7 @@ describe('projectCashflow', () => {
   });
 
   it('잔고 기준일이 구간보다 앞이면 그 사이 항목을 먼저 반영한다', () => {
-    // 8/1 기준 100만원이고 8/5 에 30만원이 나갔다면, 9월 구간의 시작 잔고는 70만원이어야 한다.
+    // 8/1 기준 100만원이고 8/5 에 30만원이 나갔다면, 9월 구간의 시작 잔고는 70만원이다.
     const r = projectCashflow(
       [account({ asOf: '2026-08-01' })],
       [money('expense', 300_000, '2026-08-05')],
@@ -129,6 +129,69 @@ describe('projectCashflow', () => {
     const r = projectCashflow([account({ balanceMinor: 3_000_000 })], expanded, '2026-08-01', '2026-10-31');
     expect(r.totalOutMinor).toBe(2_100_000);
     expect(r.closingMinor).toBe(900_000);
+  });
+
+  it('같은 날 입금과 지출이 겹쳐도 각각을 센다', () => {
+    // 순변동으로 세면 그날 지출만큼 "들어올 돈"이 깎여 보인다.
+    const r = projectCashflow(
+      [account()],
+      [money('income', 2_500_000, '2026-08-25'), money('expense', 19_354, '2026-08-25')],
+      '2026-08-01', '2026-08-31',
+    );
+    expect(r.totalInMinor).toBe(2_500_000);
+    expect(r.totalOutMinor).toBe(19_354);
+    expect(r.points.find((p) => p.date === '2026-08-25')?.deltaMinor).toBe(2_480_646);
+  });
+
+  it('기간형 지출과 입금이 겹치는 달에도 총액이 정확하다', () => {
+    const r = projectCashflow(
+      [account({ balanceMinor: 1_350_000 })],
+      [
+        money('living', 600_000, '2026-08-01', '2026-08-31'),
+        money('expense', 300_000, '2026-08-10'),
+        money('income', 2_500_000, '2026-08-25'),
+      ],
+      '2026-08-01', '2026-08-31',
+    );
+    expect(r.totalInMinor).toBe(2_500_000);
+    expect(r.totalOutMinor).toBe(900_000);
+    expect(r.closingMinor).toBe(1_350_000 + 2_500_000 - 900_000);
+  });
+
+  it('잔고 기준일이 구간 안이면 그 이전 항목을 다시 빼지 않는다', () => {
+    // "8월 19일 기준 135만원"에는 8월 10일에 나간 전기요금이 이미 반영돼 있다.
+    // 그것을 한 번 더 빼면 사용자가 가진 돈을 실제보다 적게 보여 준다.
+    const r = projectCashflow(
+      [account({ balanceMinor: 1_350_000, asOf: '2026-08-19' })],
+      [money('expense', 300_000, '2026-08-10'), money('income', 2_500_000, '2026-08-25')],
+      '2026-08-01', '2026-08-31',
+    );
+    expect(r.points.find((p) => p.date === '2026-08-19')?.balanceMinor).toBe(1_350_000);
+    expect(r.closingMinor).toBe(3_850_000);
+    // 기준일 이전 구간은 거꾸로 되짚어 그린다.
+    expect(r.points.find((p) => p.date === '2026-08-09')?.balanceMinor).toBe(1_650_000);
+    expect(r.openingMinor).toBe(1_650_000);
+  });
+
+  it('잔고 기준일이 구간보다 뒤여도 이어서 계산한다', () => {
+    const r = projectCashflow(
+      [account({ balanceMinor: 1_000_000, asOf: '2026-09-15' })],
+      [money('expense', 200_000, '2026-08-20')],
+      '2026-08-01', '2026-08-31',
+    );
+    // 9월 15일에 100만원이면, 8월 20일 지출 전에는 120만원이었다.
+    expect(r.closingMinor).toBe(1_000_000);
+    expect(r.points.find((p) => p.date === '2026-08-19')?.balanceMinor).toBe(1_200_000);
+  });
+
+  it('계좌 기준일이 서로 다르면 가장 최근 것을 앵커로 쓴다', () => {
+    const r = projectCashflow(
+      [account({ id: 'a1', balanceMinor: 600_000, asOf: '2026-08-01' }),
+       account({ id: 'a2', balanceMinor: 400_000, asOf: '2026-08-19' })],
+      [money('expense', 100_000, '2026-08-10')],
+      '2026-08-01', '2026-08-31',
+    );
+    expect(r.points.find((p) => p.date === '2026-08-19')?.balanceMinor).toBe(1_000_000);
   });
 
   it('구간이 뒤집혀 있으면 빈 결과를 낸다', () => {
