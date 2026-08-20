@@ -1,0 +1,109 @@
+rules_version = '2';
+
+/**
+ * Firestore 보안 규칙.
+ *
+ * 이전에는 이 파일이 레포 밖(콘솔)에만 있었다. 서비스의 보안 경계 전체가 버전 관리
+ * 밖에 있었다는 뜻이고, 규칙이 무엇을 막는지 확인할 방법이 없어 "저장은 되는데 조용히
+ * 사라지는" 문제를 title 을 '::balance::' 로 쓰는 우회로 넘겼다.
+ *
+ * 여기서는 두 가지를 지킨다.
+ *   1. 남의 데이터에 손댈 수 없다. 경로의 uid 와 로그인한 uid 가 같아야 한다.
+ *   2. 거부할 때는 형태가 틀렸을 때만 거부한다. 필드를 통째로 화이트리스트해서
+ *      새 필드가 조용히 막히는 일이 없도록, 필수 필드의 타입만 확인한다.
+ */
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    function signedIn() {
+      return request.auth != null;
+    }
+
+    function isOwner(uid) {
+      return signedIn() && request.auth.uid == uid;
+    }
+
+    function data() {
+      return request.resource.data;
+    }
+
+    function isDateISO(v) {
+      return v is string && v.matches('^\\d{4}-\\d{2}-\\d{2}$');
+    }
+
+    function isTimeOrNull(v) {
+      return v == null || (v is string && v.matches('^\\d{2}:\\d{2}$'));
+    }
+
+    // 한 문서가 지나치게 커지는 것을 막는다. 이전 구조는 대출 목록 전체를
+    // 한 문서의 memo 에 JSON 으로 넣었고, 그래서 다중 기기 덮어쓰기가 났다.
+    function withinSize() {
+      return data().size() < 60;
+    }
+
+    match /users/{uid} {
+      allow read, write: if isOwner(uid);
+
+      match /entries/{entryId} {
+        allow read, delete: if isOwner(uid);
+        allow create, update: if isOwner(uid)
+          && withinSize()
+          && data().kind in ['task', 'idea', 'money']
+          && data().title is string && data().title.size() <= 500
+          && data().note is string && data().note.size() <= 20000
+          && data().color is string
+          && data().tags is list && data().tags.size() <= 50
+          && isDateISO(data().startDate)
+          && (data().endDate == null || isDateISO(data().endDate))
+          && isTimeOrNull(data().startTime)
+          && isTimeOrNull(data().endTime)
+          && data().ymSpan is list && data().ymSpan.size() <= 200
+          && data().isRecurring is bool
+          && (data().money == null || (
+               data().money.amountMinor is int
+               && data().money.currency is string
+             ));
+      }
+
+      match /accounts/{accountId} {
+        allow read, delete: if isOwner(uid);
+        allow create, update: if isOwner(uid)
+          && withinSize()
+          && data().name is string && data().name.size() <= 100
+          && data().balanceMinor is int
+          && data().currency is string
+          && isDateISO(data().asOf);
+      }
+
+      match /debts/{debtId} {
+        allow read, delete: if isOwner(uid);
+        allow create, update: if isOwner(uid)
+          && withinSize()
+          && data().name is string && data().name.size() <= 100
+          && data().balanceMinor is int
+          && data().monthlyMinor is int
+          && (data().rate == null || data().rate is number);
+      }
+
+      match /pins/{pinId} {
+        allow read, delete: if isOwner(uid);
+        allow create, update: if isOwner(uid)
+          && withinSize()
+          && data().lens in ['task', 'idea', 'money']
+          && data().text is string && data().text.size() <= 2000;
+      }
+
+      // 이관 전 컬렉션. 읽고 지울 수는 있지만 새로 쓸 수는 없다.
+      // 이관이 끝난 뒤 사용자가 직접 정리할 때까지 원본으로 남겨 둔다.
+      match /items/{itemId} {
+        allow read, delete: if isOwner(uid);
+        allow create, update: if false;
+      }
+    }
+
+    // 명시하지 않은 경로는 전부 막는다.
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}
