@@ -21,6 +21,8 @@ interface Props {
   accounts: readonly Account[];
   /** 잔고를 한 번도 입력하지 않았으면 tide 값을 0으로 단정하지 않는다. */
   hasBalance: boolean;
+  moneyCollapsed: boolean;
+  onToggleMoneyCollapsed: () => void;
   onEntryClick: (e: Entry) => void;
   onStatusChange: (e: Entry, status: TaskStatus) => void;
   onPromote: (e: Entry) => void;
@@ -32,7 +34,8 @@ function occursOnDay(e: Entry, iso: string): boolean {
 }
 
 export function TodayPanel({
-  todayISO, entries, accounts, hasBalance, onEntryClick, onStatusChange, onPromote, onQuickIdea,
+  todayISO, entries, accounts, hasBalance, moneyCollapsed, onToggleMoneyCollapsed,
+  onEntryClick, onStatusChange, onPromote, onQuickIdea,
 }: Props) {
   const [idea, setIdea] = useState('');
 
@@ -133,38 +136,51 @@ export function TodayPanel({
         </div>
 
         {/* ---- 가계부 ---- */}
-        <div className="tp-col" data-axis="money">
-          <h3 className="tp-ct">가계부</h3>
-          {tideLimit != null ? (
-            <div className={'tp-bal' + (tideLimit < 0 ? ' bad' : '')}>
-              <span className="tp-bal-l">
-                {horizon.nextIncome
-                  ? `다음 입금 전날까지`
-                  : '앞으로 30일 · 이 돈으로'}
-              </span>
-              <strong className="num">₩ {formatAmount(tideLimit)}</strong>
-            </div>
-          ) : (
-            <p className="tp-empty">잔고를 입력하면 다음 입금까지 남는 한도가 여기 뜹니다.</p>
+        <div className={'tp-col' + (moneyCollapsed ? ' collapsed' : '')} data-axis="money">
+          <button
+            type="button"
+            className="tp-ct tp-ct-toggle"
+            onClick={onToggleMoneyCollapsed}
+            aria-expanded={!moneyCollapsed}
+            aria-label={moneyCollapsed ? '가계부 펼치기' : '가계부 접기'}
+          >
+            <span>가계부</span>
+            <Icon.Chevron size={11} dir={moneyCollapsed ? 'right' : 'down'} />
+          </button>
+          {!moneyCollapsed && (
+            <>
+              {tideLimit != null ? (
+                <div className={'tp-bal' + (tideLimit < 0 ? ' bad' : '')}>
+                  <span className="tp-bal-l">
+                    {horizon.nextIncome
+                      ? `다음 입금 전날까지`
+                      : '앞으로 30일 · 이 돈으로'}
+                  </span>
+                  <strong className="num">₩ {formatAmount(tideLimit)}</strong>
+                </div>
+              ) : (
+                <p className="tp-empty">잔고를 입력하면 다음 입금까지 남는 한도가 여기 뜹니다.</p>
+              )}
+              <ul className="tp-ul">
+                {money.map((e) => {
+                  const type = e.money ? MONEY_TYPE_BY_ID[e.money.type] : null;
+                  return (
+                    <li key={e.id} className="tp-money">
+                      <button className="tp-money-t" onClick={() => onEntryClick(e)}>
+                        <span className="tp-dot" style={{ background: type?.color }} />
+                        <span>{e.title || type?.label}</span>
+                        {e.money && type && (
+                          <span className={'num ' + (type.sign > 0 ? 'plus' : type.sign < 0 ? 'minus' : '')}>
+                            {formatAmount(e.money.amountMinor)}
+                          </span>
+                        )}
+                      </button>
+                    </li>
+                  );
+                })}
+              </ul>
+            </>
           )}
-          <ul className="tp-ul">
-            {money.map((e) => {
-              const type = e.money ? MONEY_TYPE_BY_ID[e.money.type] : null;
-              return (
-                <li key={e.id} className="tp-money">
-                  <button className="tp-money-t" onClick={() => onEntryClick(e)}>
-                    <span className="tp-dot" style={{ background: type?.color }} />
-                    <span>{e.title || type?.label}</span>
-                    {e.money && type && (
-                      <span className={'num ' + (type.sign > 0 ? 'plus' : type.sign < 0 ? 'minus' : '')}>
-                        {formatAmount(e.money.amountMinor)}
-                      </span>
-                    )}
-                  </button>
-                </li>
-              );
-            })}
-          </ul>
         </div>
       </div>
 

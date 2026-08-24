@@ -128,6 +128,8 @@
   width: 26px; height: 26px; border-radius: 7px;
   background: var(--ink); color: var(--bg);
   display: flex; align-items: center; justify-content: center;
+  font-family: var(--font); font-weight: 800; font-size: 14px;
+  letter-spacing: -.02em;
 }
 .brand-name { font-size: 14px; font-weight: 700; letter-spacing: -.01em; }
 
@@ -138,10 +140,16 @@
 }
 .lens {
   flex: 1; appearance: none; border: none; background: transparent;
-  padding: 7px 10px; font-size: 13px; font-weight: 500; color: var(--ink-3);
+  padding: 7px 8px; font-size: 13px; font-weight: 500; color: var(--ink-3);
   cursor: pointer; border-radius: 5px;
   display: inline-flex; align-items: center; justify-content: center; gap: 6px;
   transition: background .12s, color .12s;
+  /* 좁은 화면에서 '전체' 같은 짧은 라벨이 두 줄로 갈리는 것을 막는다. */
+  white-space: nowrap;
+  min-width: 0;
+}
+@media (max-width: 480px) {
+  .lens { font-size: 12.5px; padding: 7px 6px; gap: 4px; }
 }
 .lens:hover { color: var(--ink); }
 .lens-dot {
@@ -344,6 +352,14 @@
   margin: 0; font-size: 11px; font-weight: 700; letter-spacing: .06em;
   color: var(--axis); padding-bottom: 5px; border-bottom: 2px solid var(--axis);
 }
+.tp-ct-toggle {
+  appearance: none; background: transparent; border: none; cursor: pointer;
+  display: flex; align-items: center; justify-content: space-between; gap: 6px;
+  width: 100%; text-align: left; font: inherit; color: inherit;
+  letter-spacing: inherit; padding: 0 0 5px 0;
+}
+.tp-ct-toggle:hover { color: var(--ink); }
+.tp-col.collapsed .tp-ct { border-bottom-color: var(--line); }
 .tp-ul { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 4px; }
 .tp-empty { margin: 2px 0; font-size: 12px; color: var(--ink-4); }
 

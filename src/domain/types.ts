@@ -160,6 +160,7 @@ export interface Prefs {
   weekStart: WeekStart;
   pinCollapsed: Partial<Record<LensId, boolean>>;
   debtsCollapsed: boolean;
+  todayMoneyCollapsed: boolean;
 }
 
 export interface Filters {

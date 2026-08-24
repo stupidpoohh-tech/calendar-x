@@ -398,7 +398,7 @@ function Workspace({ uid, user, onSignOut }: WorkspaceProps) {
     <div className="app" data-lens={lens} style={{ ['--lens' as string]: `var(${lensDef.accentVar})` }}>
       <header className="topbar">
         <div className="brand">
-          <span className="brand-mark"><Icon.Calendar size={15} /></span>
+          <span className="brand-mark" aria-hidden="true">X</span>
           <span className="brand-name">캘린더X</span>
         </div>
 
@@ -513,6 +513,8 @@ function Workspace({ uid, user, onSignOut }: WorkspaceProps) {
             entries={materialized}
             accounts={store.accounts}
             hasBalance={hasBalance}
+            moneyCollapsed={prefs.todayMoneyCollapsed}
+            onToggleMoneyCollapsed={() => set('todayMoneyCollapsed', !prefs.todayMoneyCollapsed)}
             onEntryClick={openEdit}
             onStatusChange={handleStatus}
             onPromote={handlePromote}
