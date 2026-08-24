@@ -124,9 +124,14 @@
   border-bottom: 1px solid var(--line);
 }
 .brand { display: flex; align-items: center; gap: 8px; flex-shrink: 0; }
+/*
+  흰 바탕에 검은 글씨. 토큰으로 둬야 다크에서 검은 칩에 흰 X 로 뒤집힌다 —
+  흰색을 고정하면 다크에서 화면에 흰 사각형만 하나 떠 있게 된다.
+*/
 .brand-mark {
   width: 26px; height: 26px; border-radius: 7px;
-  background: var(--ink); color: var(--bg);
+  background: var(--bg); color: var(--ink);
+  border: 1.5px solid var(--ink);
   display: flex; align-items: center; justify-content: center;
   font-family: var(--font); font-weight: 800; font-size: 14px;
   letter-spacing: -.02em;
@@ -336,7 +341,16 @@
 /* ============ 오늘 패널 ============ */
 
 .tp { background: var(--bg); border: 1px solid var(--line); border-radius: var(--radius); padding: 14px 16px; }
-.tp-h { display: flex; align-items: baseline; gap: 12px; flex-wrap: wrap; margin-bottom: 12px; }
+.tp-h {
+  display: flex; align-items: center; gap: 10px; margin-bottom: 12px;
+  width: 100%; appearance: none; border: none; background: transparent;
+  padding: 0; cursor: pointer; text-align: left; color: inherit; font: inherit;
+}
+/* 제목과 요약은 함께 줄바꿈하고, 화살표는 늘 첫 줄 오른쪽 끝에 붙어 있는다. */
+.tp-h-main { flex: 1; min-width: 0; display: flex; align-items: baseline; gap: 12px; flex-wrap: wrap; }
+.tp-h > svg { color: var(--ink-4); flex-shrink: 0; }
+.tp-h:hover > svg { color: var(--ink-2); }
+.tp.collapsed .tp-h { margin-bottom: 0; }
 .tp-t { margin: 0; font-size: 16px; font-weight: 700; letter-spacing: -.01em; }
 .tp-d { font-size: 13px; font-weight: 500; color: var(--ink-3); margin-left: 6px; }
 .tp-sum { font-size: 12px; color: var(--ink-3); margin-left: auto; font-variant-numeric: tabular-nums; }
@@ -494,6 +508,21 @@
   color: var(--ink-3); flex-shrink: 0;
 }
 .bal-edit:hover { color: var(--ink); border-color: var(--ink-4); }
+
+/*
+  카드 안에 얹는 잔고 줄. 테두리·배경을 걷어 내고 구분선만 남긴다 —
+  한도(헤드라인)와 그 근거(잔고)가 한 카드 안에서 위아래로 읽혀야 한다.
+*/
+.bal-inline {
+  padding: 10px 0 0; background: transparent;
+  border: none; border-top: 1px solid var(--line); border-radius: 0;
+  gap: 8px;
+}
+.bal-inline .bal-v { font-size: 15px; }
+.bal-inline .bal-in { font-size: 15px; min-width: 80px; }
+.bal-inline .bal-v.empty { font-size: 12px; }
+.tp-col .bal-inline { padding-top: 8px; }
+.tp-col .bal-inline .bal-v { font-size: 14px; }
 
 .debt { background: var(--bg); border: 1px solid var(--line); border-radius: var(--radius); overflow: hidden; }
 .debt-h {
@@ -1050,6 +1079,7 @@
   appearance: none; border: 1px solid var(--line); background: var(--bg);
   padding: 7px 14px; border-radius: 999px; font-size: 12.5px; font-weight: 600;
   color: var(--ink); cursor: pointer;
+  white-space: nowrap; flex-shrink: 0;
 }
 .landing-cta-sm:hover { border-color: var(--ink); }
 

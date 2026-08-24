@@ -10,6 +10,7 @@ const DEFAULTS: Prefs = {
   weekStart: 'mon',
   pinCollapsed: {},
   debtsCollapsed: false,
+  todayCollapsed: false,
   todayMoneyCollapsed: false,
 };
 

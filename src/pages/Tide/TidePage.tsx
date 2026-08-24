@@ -32,6 +32,10 @@ export function TidePage() {
 
   useEffect(() => { saveTide(state); }, [state]);
 
+  // 탭 제목까지 갈라 놓는다. index.html 의 '캘린더X' 를 그대로 두면 주소만 다르고
+  // 브라우저에는 같은 앱으로 보인다 — 여기는 계정도 서버도 없는 별개 앱이다.
+  useEffect(() => { document.title = '잔고캘린더'; }, []);
+
   // 첫 방문 시 URL 프래그먼트에 백업 링크가 있으면 복원 제안
   useEffect(() => {
     const incoming = decodeBackupHash(location.hash);

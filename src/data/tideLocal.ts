@@ -72,7 +72,7 @@ export function encodeBackupHash(state: TideState): string {
 }
 
 export function decodeBackupHash(hash: string): TideState | null {
-  const m = hash.match(/tide=([A-Za-z0-9_\-]+)/);
+  const m = hash.match(/tide=([A-Za-z0-9_-]+)/);
   if (!m) return null;
   try {
     const b64 = m[1]!.replace(/-/g, '+').replace(/_/g, '/');

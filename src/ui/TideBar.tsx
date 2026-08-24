@@ -4,6 +4,9 @@
  * "이 달 말 예상 잔고" 를 보여주던 CashflowBar 를 대체한다. tide-over 원본이
  * 못박은 원칙을 그대로 지킨다 — 예측하지 않는다. 표시하는 숫자는 "이 날까지
  * 쓸 수 있는 한도" 다.
+ *
+ * 잔고 줄이 이 카드 안에 있다. 따로 세워 두면 잔고와 한도가 같은 금액일 때
+ * 같은 숫자가 두 번 보여 어느 쪽이 무엇인지 읽히지 않았다.
  */
 import { useMemo } from 'react';
 import { MONEY_TYPE_BY_ID } from '../domain/constants';
@@ -14,15 +17,17 @@ import {
   type Summary,
 } from '../domain/tide';
 import type { Account, Entry } from '../domain/types';
+import { BalanceRow } from './BalanceRow';
 
 interface Props {
   accounts: readonly Account[];
   entries: readonly Entry[];
   hasBalance: boolean;
+  onSaveAccount: (a: Account) => void;
   onEntryClick?: (entry: Entry) => void;
 }
 
-export function TideBar({ accounts, entries, hasBalance, onEntryClick }: Props) {
+export function TideBar({ accounts, entries, hasBalance, onSaveAccount, onEntryClick }: Props) {
   const today = useMemo(() => computeToday(), []);
 
   const horizon = useMemo(() => horizonOf(entries, today), [entries, today]);
@@ -43,6 +48,7 @@ export function TideBar({ accounts, entries, hasBalance, onEntryClick }: Props) 
           잔고를 입력하면 예정 입출금과 합쳐 <b>다음 입금까지 얼마 · 하루 몫 · 남은 예정</b>이
           여기에 뜹니다.
         </p>
+        <BalanceRow accounts={accounts} entries={entries} onSave={onSaveAccount} variant="inline" />
       </section>
     );
   }
@@ -65,6 +71,9 @@ export function TideBar({ accounts, entries, hasBalance, onEntryClick }: Props) 
           이 돈으로 <b>{daysLeft}일</b> 버티기 · 하루 <b>{formatAmount(perDay)}원</b>
         </p>
       </div>
+
+      {/* 한도의 근거. 같은 카드에 있어야 두 숫자가 다른 뜻이라는 게 읽힌다. */}
+      <BalanceRow accounts={accounts} entries={entries} onSave={onSaveAccount} variant="inline" />
 
       {upcoming.length > 0 ? (
         <ul className="tide-list">

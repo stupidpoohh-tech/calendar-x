@@ -19,7 +19,7 @@ import {
 import { convertKind, newEntry, withDerived } from '../domain/entry';
 import { applyFilters, collectTags, emptyFilters, hasActiveFilter } from '../domain/filters';
 import { baseIdOf, materialize } from '../domain/recurrence';
-import type { Entry, Filters, LensId, TaskStatus, ViewId } from '../domain/types';
+import type { Account, Entry, Filters, LensId, TaskStatus, ViewId } from '../domain/types';
 import { Auth } from '../ui/Auth';
 import { BrandFooter } from '../ui/BrandFooter';
 import { DaySheet } from '../ui/DaySheet';
@@ -133,7 +133,6 @@ function Workspace({ uid, user, onSignOut }: WorkspaceProps) {
   );
 
   const hasBalance = store.accounts.length > 0;
-  const hasMoneyData = hasBalance || store.debts.length > 0 || materialized.some((e) => e.kind === 'money');
 
   // 이관 전 컬렉션이 남아 있는지, 이미 옮겼는지 한 번만 확인한다.
   const checkedLegacy = useRef(false);
@@ -172,6 +171,12 @@ function Workspace({ uid, user, onSignOut }: WorkspaceProps) {
     persist(e);
     closeModal();
   }, [persist, closeModal]);
+
+  /** 잔고 저장. 전체 렌즈(오늘 카드)와 가계부 렌즈(며칠 버티나 카드)가 같이 쓴다. */
+  const saveBalance = useCallback((a: Account) => {
+    if (isAnon || !uid) { void promptLogin(); return; }
+    void saveAccount(db, uid, a);
+  }, [db, uid, isAnon, promptLogin]);
 
   const handleDelete = useCallback(async (e: Entry) => {
     if (isAnon || !uid) { void promptLogin(); return; }
@@ -506,6 +511,11 @@ function Workspace({ uid, user, onSignOut }: WorkspaceProps) {
         <div className="banner bad"><Icon.Alert size={14} />{store.error}</div>
       )}
 
+      {/*
+        전체 렌즈의 요약 카드는 TodayPanel 하나다. 잔고·대출·고정 메모를 그 아래 줄줄이
+        세우면 모바일에서 캘린더가 화면 두 번 아래로 밀렸고, 잔고 금액이 오늘 카드와
+        잔고 카드에 두 번 나왔다. 잔고는 카드 안으로, 대출과 고정 메모는 각자의 렌즈로.
+      */}
       <div className="side">
         {lens === 'all' && (
           <TodayPanel
@@ -513,31 +523,31 @@ function Workspace({ uid, user, onSignOut }: WorkspaceProps) {
             entries={materialized}
             accounts={store.accounts}
             hasBalance={hasBalance}
+            collapsed={prefs.todayCollapsed}
+            onToggleCollapsed={() => set('todayCollapsed', !prefs.todayCollapsed)}
             moneyCollapsed={prefs.todayMoneyCollapsed}
             onToggleMoneyCollapsed={() => set('todayMoneyCollapsed', !prefs.todayMoneyCollapsed)}
             onEntryClick={openEdit}
             onStatusChange={handleStatus}
             onPromote={handlePromote}
             onQuickIdea={persist}
+            onSaveAccount={saveBalance}
           />
         )}
 
-        {/* 가계부 렌즈에서는 항상, 전체 렌즈에서는 실제로 쓰고 있을 때만 보여 준다. */}
-        {(lens === 'money' || (lens === 'all' && hasMoneyData)) && (
+        {lens === 'money' && (
           <>
-            {lens === 'money' && (
-              <TideBar accounts={store.accounts} entries={materialized} hasBalance={hasBalance} onEntryClick={openEdit} />
-            )}
-            <MoneyPanel
+            <TideBar
               accounts={store.accounts}
-              debts={store.debts}
               entries={materialized}
+              hasBalance={hasBalance}
+              onSaveAccount={saveBalance}
+              onEntryClick={openEdit}
+            />
+            <MoneyPanel
+              debts={store.debts}
               collapsed={prefs.debtsCollapsed}
               onToggleCollapsed={() => set('debtsCollapsed', !prefs.debtsCollapsed)}
-              onSaveAccount={(a) => {
-                if (isAnon || !uid) { void promptLogin(); return; }
-                void saveAccount(db, uid, a);
-              }}
               onSaveDebt={(d) => {
                 if (isAnon || !uid) { void promptLogin(); return; }
                 void saveDebt(db, uid, d);
@@ -551,7 +561,8 @@ function Workspace({ uid, user, onSignOut }: WorkspaceProps) {
           </>
         )}
 
-        {lens !== 'money' && (
+        {/* 고정 메모는 각 축의 렌즈에서 본다. 전체 렌즈는 요약 카드 하나만 둔다. */}
+        {lens !== 'all' && (
           <PinnedSection
             lens={lens}
             pins={store.pins}
