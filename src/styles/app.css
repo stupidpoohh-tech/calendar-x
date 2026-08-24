@@ -916,6 +916,22 @@
   background: var(--bg); border: 1px solid var(--line); border-radius: var(--radius);
   padding: 16px 18px; display: flex; flex-direction: column; gap: 12px;
 }
+/* 카드 전체 접기. 오늘 카드와 같은 규칙 — 접었을 때만 요약 숫자를 적는다. */
+.tide-hd {
+  display: flex; align-items: center; gap: 10px; width: 100%;
+  appearance: none; border: none; background: transparent; padding: 0;
+  cursor: pointer; text-align: left; font: inherit; color: inherit;
+}
+.tide-hd-t { font-size: 13px; font-weight: 700; letter-spacing: -.01em; flex-shrink: 0; }
+.tide-hd-s {
+  flex: 1; min-width: 0; font-size: 12.5px; color: var(--ink-3);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-align: right;
+}
+.tide-hd > svg { margin-left: auto; color: var(--ink-4); flex-shrink: 0; }
+.tide-hd-s ~ svg { margin-left: 0; }
+.tide-hd:hover > svg { color: var(--ink-2); }
+.tide.collapsed { gap: 0; }
+
 .tide-h { display: flex; flex-direction: column; gap: 4px; align-items: flex-start; }
 .tide-l { margin: 0; font-size: 12px; color: var(--ink-3); font-weight: 500; }
 .tide-l b { color: var(--ink-2); }

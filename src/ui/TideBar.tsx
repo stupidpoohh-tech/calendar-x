@@ -22,6 +22,7 @@ import {
   type Summary,
 } from '../domain/tide';
 import type { Account, Entry } from '../domain/types';
+import { Icon } from './Icon';
 import { BalanceInput, BalanceNote, useBalanceEditor } from './balanceEditor';
 
 interface Props {
@@ -30,11 +31,16 @@ interface Props {
   hasBalance: boolean;
   onSaveAccount: (a: Account) => void;
   onEntryClick?: (entry: Entry) => void;
+  collapsed: boolean;
+  onToggleCollapsed: () => void;
   /** 대출 · 고정 메모. 이 카드 안쪽 아래에 접힌 줄로 붙는다. */
   children?: ReactNode;
 }
 
-export function TideBar({ accounts, entries, hasBalance, onSaveAccount, onEntryClick, children }: Props) {
+export function TideBar({
+  accounts, entries, hasBalance, onSaveAccount, onEntryClick,
+  collapsed, onToggleCollapsed, children,
+}: Props) {
   const today = useMemo(() => computeToday(), []);
   const editor = useBalanceEditor(accounts, entries, onSaveAccount);
 
@@ -49,15 +55,35 @@ export function TideBar({ accounts, entries, hasBalance, onSaveAccount, onEntryC
     [entries, today, horizon],
   );
 
+  const head = (summary: string) => (
+    <button
+      type="button"
+      className="tide-hd"
+      onClick={onToggleCollapsed}
+      aria-expanded={!collapsed}
+      aria-label={collapsed ? '가계부 카드 펼치기' : '가계부 카드 접기'}
+    >
+      <span className="tide-hd-t">며칠 버티나</span>
+      {/* 펼쳐 있으면 큰 숫자가 바로 아래에 있다. 접었을 때만 요약을 적는다. */}
+      {collapsed && <span className="tide-hd-s num">{summary}</span>}
+      <Icon.Chevron size={14} dir={collapsed ? 'right' : 'down'} />
+    </button>
+  );
+
   if (!hasBalance) {
     return (
-      <section className="tide" aria-label="며칠 버티나">
-        <p className="tide-empty">
-          잔고를 입력하면 예정 입출금과 합쳐 <b>다음 입금까지 얼마 · 하루 몫 · 남은 예정</b>이
-          여기에 뜹니다.
-        </p>
-        {editor.editing ? <BalanceInput editor={editor} /> : <BalanceNote editor={editor} />}
-        {children && <div className="tide-more">{children}</div>}
+      <section className={'tide' + (collapsed ? ' collapsed' : '')} aria-label="며칠 버티나">
+        {head('잔고 없음')}
+        {!collapsed && (
+          <>
+            <p className="tide-empty">
+              잔고를 입력하면 예정 입출금과 합쳐 <b>다음 입금까지 얼마 · 하루 몫 · 남은 예정</b>이
+              여기에 뜹니다.
+            </p>
+            {editor.editing ? <BalanceInput editor={editor} /> : <BalanceNote editor={editor} />}
+            {children && <div className="tide-more">{children}</div>}
+          </>
+        )}
       </section>
     );
   }
@@ -66,7 +92,10 @@ export function TideBar({ accounts, entries, hasBalance, onSaveAccount, onEntryC
   const negative = limit < 0;
 
   return (
-    <section className="tide" aria-label="며칠 버티나">
+    <section className={'tide' + (collapsed ? ' collapsed' : '')} aria-label="며칠 버티나">
+      {head(`₩ ${formatAmount(limit)} · ${daysLeft}일`)}
+      {collapsed ? null : (
+        <>
       <div className="tide-h">
         <p className="tide-l">
           {horizon.nextIncome
@@ -106,6 +135,8 @@ export function TideBar({ accounts, entries, hasBalance, onSaveAccount, onEntryC
       )}
 
       {children && <div className="tide-more">{children}</div>}
+        </>
+      )}
     </section>
   );
 }

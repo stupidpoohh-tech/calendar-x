@@ -12,6 +12,7 @@ const DEFAULTS: Prefs = {
   debtsCollapsed: false,
   todayCollapsed: false,
   todayMoneyCollapsed: false,
+  moneyCardCollapsed: false,
 };
 
 function read(): Prefs {

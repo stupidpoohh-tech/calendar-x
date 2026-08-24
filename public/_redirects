@@ -1,3 +1,8 @@
-# /tide 를 눌러도 index.html 을 서빙해 SPA 라우팅으로 처리.
-# main.tsx 가 pathname 을 보고 갈래를 결정한다.
-/tide  /index.html  200
+# 슬래시 없는 /tide 를 잔고캘린더 HTML 로 넘긴다.
+#
+# /tide/index.html 은 빌드가 실제로 만드는 파일이다 (tide/index.html 엔트리).
+# 예전에는 여기서 /index.html 로 넘겼는데, 그건 캘린더X 의 HTML 이라
+# 이 룰이 잡히는 순간 /tide 에서 캘린더X 가 떴다.
+#
+# 200 은 리다이렉트가 아니라 rewrite — 주소창은 /tide 그대로다.
+/tide  /tide/index.html  200

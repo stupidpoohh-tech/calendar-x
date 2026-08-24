@@ -1,25 +1,22 @@
 import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
 import { App } from './app/App';
-import { TidePage } from './pages/Tide/TidePage';
 import { DialogHost } from './ui/Dialog';
 import './styles/base.css';
 import './styles/app.css';
 
 /**
- * /tide 는 잔고캘린더 독립 서브페이지.
- * 계정 · 서버 없이 localStorage 로만 도는 별개 앱이라 라우터 없이 pathname 만
- * 검사한다 — 두 앱은 데이터를 공유하지 않고 초기 로드만 갈린다.
+ * 캘린더X 의 진입점. 이 번들에는 캘린더X 만 들어 있다.
+ * 잔고캘린더(/tide)는 tide/index.html 과 src/pages/Tide/main.tsx 로 따로 빌드된다 —
+ * 경로를 보고 갈래를 정하지 않으므로 두 앱이 서로를 대신 띄울 수 없다.
  */
-const isTide = window.location.pathname.replace(/\/$/, '') === '/tide';
-
 const container = document.getElementById('app');
 if (!container) throw new Error('#app 엘리먼트를 찾을 수 없습니다.');
 
 createRoot(container).render(
   <StrictMode>
     <DialogHost>
-      {isTide ? <TidePage /> : <App />}
+      <App />
     </DialogHost>
   </StrictMode>,
 );

@@ -60,6 +60,7 @@ src/data/       Firestore 접근
 src/ui/         화면 컴포넌트 (App: 렌즈 화면, TideBar: 며칠 버티나 카드,
                 balanceEditor: 잔고 편집 상태 + 조각. 카드가 소유한다)
 src/pages/Tide/ /tide 독립 서브페이지 (익명 · localStorage). tide-over 이식판
+                main.tsx 가 별도 진입점. tide/index.html 이 이걸 부른다
 src/app/        셸과 상태 훅
 src/styles/     tokens.css (디자인 토큰) + app.css (전 컴포넌트 스타일)
 firestore.rules 보안 규칙
@@ -162,6 +163,11 @@ npm run emulators      # Auth + Firestore 에뮬레이터
 
 - **/tide (잔고캘린더)** — 계정 없는 익명 서브페이지. localStorage 만. 배포 위치는
   같은 도메인(`calendar-x.pages.dev/tide`)이지만 데이터는 공유하지 않는다.
+  **HTML 도 번들도 따로다** (`tide/index.html` + `src/pages/Tide/main.tsx`,
+  vite `rollupOptions.input` 에 두 엔트리). 예전에는 앱 하나가 `location.pathname` 을
+  보고 갈래를 정했는데, 배포 환경에서 정적 파일 · _redirects · 캐시 중 무엇이 먼저
+  잡히느냐에 따라 /tide 에서 캘린더X 가 떴다. 지금은 두 앱이 서로를 대신 띄울 수 없고,
+  잔고캘린더 번들에는 Firebase 가 들어가지도 않는다.
   옛 URL(`tide-over.stupidpoohh.workers.dev`)은 리다이렉트 워커로 넘어온다
   (`docs/tide-over-worker/`).
 - **clear-week** — 종이 주간 플래너. `entries` 컬렉션에 `kind === 'task'` 로 새 항목만

@@ -570,6 +570,8 @@ function Workspace({ uid, user, onSignOut }: WorkspaceProps) {
             hasBalance={hasBalance}
             onSaveAccount={saveBalance}
             onEntryClick={openEdit}
+            collapsed={prefs.moneyCardCollapsed}
+            onToggleCollapsed={() => set('moneyCardCollapsed', !prefs.moneyCardCollapsed)}
           >
             <MoneyPanel
               debts={store.debts}

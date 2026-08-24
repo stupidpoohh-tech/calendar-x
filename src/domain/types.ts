@@ -162,6 +162,7 @@ export interface Prefs {
   debtsCollapsed: boolean;
   todayCollapsed: boolean;
   todayMoneyCollapsed: boolean;
+  moneyCardCollapsed: boolean;
 }
 
 export interface Filters {
