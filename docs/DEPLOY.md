@@ -133,14 +133,46 @@ http://localhost:5173 에 로그인 화면이 뜨면 성공입니다.
 
 이관을 마친 뒤 `false` 로 되돌리고 다시 올리면 됩니다.
 
-### 올리기
+### 방법 A — Firebase 콘솔에 붙여넣기 (터미널 필요 없음)
+
+이쪽이 더 쉽고, 문법 오류를 게시 전에 잡아 줍니다.
+
+1. https://console.firebase.google.com 접속
+2. **dada-calendar-524ec** 프로젝트 선택
+3. 왼쪽 메뉴 **빌드 → Firestore Database**
+4. 상단 **규칙** 탭
+5. 편집창의 기존 내용을 **전체 선택 후 삭제**하고, 이 레포의 `firestore.rules` 파일 내용을 그대로 붙여넣습니다
+6. 오른쪽 위 **게시**
+
+문법 오류가 있으면 편집창이 빨간 줄로 표시하고 게시 버튼이 눌리지 않습니다.
+게시 후 1분 안에 적용됩니다.
+
+`firestore.rules` 파일은 GitHub 에서도 볼 수 있습니다 —
+레포 → `firestore.rules` → 오른쪽 위 **Copy raw file** 버튼.
+
+### 방법 B — 터미널에서 명령으로
+
+터미널을 쓰는 방법입니다. 콘솔 방법과 결과는 같습니다.
+
+**터미널이 무엇인가**: 명령을 글로 입력하는 창입니다.
+
+- macOS — `⌘ + Space` 를 누르고 `터미널` 또는 `Terminal` 을 입력해 실행
+- Windows — 시작 메뉴에서 `PowerShell` 검색해 실행
+
+**해야 할 일**: 레포를 받아 둔 폴더로 이동한 다음 명령을 실행합니다.
 
 ```bash
-npx firebase login          # 브라우저가 열립니다. Firebase 계정으로 로그인
+cd calendar-x          # 레포를 받아 둔 폴더로 이동
+npx firebase login     # 브라우저가 열립니다. Firebase 계정으로 로그인
 npx firebase deploy --only firestore:rules
 ```
 
-`.firebaserc` 에 프로젝트가 지정돼 있어 `--project` 를 붙이지 않아도 됩니다.
+`npx` 는 "이 프로젝트에 설치된 도구를 실행하라"는 뜻입니다.
+`npm install` 을 이미 했다면 `firebase` 도구가 프로젝트 안에 들어와 있고,
+`npx` 가 그것을 찾아서 실행합니다. 따로 설치할 것은 없습니다.
+
+`cd` 로 이동할 폴더를 모르겠다면, 파인더/탐색기에서 `calendar-x` 폴더를
+터미널 창으로 끌어다 놓으면 경로가 자동으로 입력됩니다 (`cd ` 를 먼저 친 뒤에).
 
 > ⚠️ **반드시 `firestore:rules` 라고 쓰세요.**
 > `--only firestore` 로 하면 인덱스 설정까지 함께 배포되어,

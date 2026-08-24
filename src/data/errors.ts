@@ -9,6 +9,9 @@ import { FirebaseError } from 'firebase/app';
 
 export const RULES_DEPLOY_COMMAND = 'npx firebase deploy --only firestore:rules';
 
+/** 터미널을 쓰지 않는 사람에게는 콘솔에 붙여넣는 쪽이 빠르다. */
+export const RULES_CONSOLE_PATH = 'Firebase 콘솔 → Firestore Database → 규칙 탭 → 붙여넣고 게시';
+
 export function errorCode(err: unknown): string {
   return err instanceof FirebaseError ? err.code : '';
 }

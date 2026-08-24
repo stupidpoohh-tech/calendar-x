@@ -3,7 +3,9 @@ import {
   backupFilename, buildBackup, countBackup, downloadJSON,
   mergeBackup, parseBackup, type BackupData,
 } from '../data/backup';
-import { describeFirestoreError, isPermissionDenied, RULES_DEPLOY_COMMAND } from '../data/errors';
+import {
+  describeFirestoreError, isPermissionDenied, RULES_CONSOLE_PATH, RULES_DEPLOY_COMMAND,
+} from '../data/errors';
 import { getFirebase } from '../data/firebase';
 import { convertLegacyItems, readLegacyItems, summarize } from '../data/migrate';
 import {
@@ -296,6 +298,7 @@ function Workspace({ uid, user, onSignOut }: WorkspaceProps) {
           body: (
             <>
               <p>Firestore 가 새 컬렉션에 쓰는 것을 막고 있습니다. 보안 규칙이 아직 배포되지 않은 상태로 보입니다.</p>
+              <p className="dlg-note">{RULES_CONSOLE_PATH}</p>
               <pre className="dlg-cmd">{RULES_DEPLOY_COMMAND}</pre>
               <p className="dlg-note">기존 데이터는 예전 items 컬렉션에 그대로 있습니다.</p>
             </>
@@ -342,7 +345,8 @@ function Workspace({ uid, user, onSignOut }: WorkspaceProps) {
           body: (
             <>
               <p>Firestore 가 새 컬렉션에 쓰는 것을 막고 있어 이관할 수 없습니다.</p>
-              <p>레포에서 아래 명령을 실행한 뒤 다시 시도해 주세요.</p>
+              <p>규칙을 올린 뒤 다시 시도해 주세요.</p>
+              <p className="dlg-note">{RULES_CONSOLE_PATH}</p>
               <pre className="dlg-cmd">{RULES_DEPLOY_COMMAND}</pre>
               <p className="dlg-note">기존 데이터는 예전 items 컬렉션에 그대로 있습니다.</p>
             </>
@@ -451,9 +455,17 @@ function Workspace({ uid, user, onSignOut }: WorkspaceProps) {
           <div className="setup-h"><Icon.Alert size={15} /><strong>보안 규칙이 아직 배포되지 않았습니다</strong></div>
           <p>
             Firestore 가 <code>entries</code> · <code>accounts</code> · <code>debts</code> · <code>pins</code> 컬렉션을
-            막고 있습니다. 레포에서 아래 명령을 한 번 실행하면 됩니다.
+            막고 있습니다. 레포의 <code>firestore.rules</code> 를 한 번 올리면 됩니다.
           </p>
-          <pre className="setup-cmd">{RULES_DEPLOY_COMMAND}</pre>
+          <ol className="setup-ways">
+            <li>
+              <b>콘솔에서</b> — {RULES_CONSOLE_PATH}
+            </li>
+            <li>
+              <b>터미널에서</b>
+              <pre className="setup-cmd">{RULES_DEPLOY_COMMAND}</pre>
+            </li>
+          </ol>
           <p className="setup-note">
             기존 데이터는 예전 <code>items</code> 컬렉션에 그대로 있습니다. 사라진 것이 아닙니다.
           </p>

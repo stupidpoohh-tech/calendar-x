@@ -869,3 +869,7 @@
   font-size: 12.5px; overflow-x: auto; user-select: all;
 }
 @media (max-width: 760px) { .setup { margin: 0 12px 8px; } }
+
+.setup-ways { margin: 0; padding-left: 20px; display: flex; flex-direction: column; gap: 6px; }
+.setup-ways li { font-size: 13px; color: var(--ink-2); line-height: 1.6; }
+.setup-ways .setup-cmd { margin-top: 5px; }
