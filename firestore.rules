@@ -72,7 +72,11 @@ service cloud.firestore {
           && data().name is string && data().name.size() <= 100
           && data().balanceMinor is int
           && data().currency is string
-          && isDateISO(data().asOf);
+          && isDateISO(data().asOf)
+          // checkedAt 은 정산 계산 기준점. 없으면 asOf 자정으로 폴백되므로
+          // 규칙에서는 선택 항목으로 두되 형태만 본다.
+          && (data().checkedAt == null
+              || (data().checkedAt is string && data().checkedAt.size() <= 40));
       }
 
       match /debts/{debtId} {

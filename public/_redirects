@@ -1,0 +1,3 @@
+# /tide 를 눌러도 index.html 을 서빙해 SPA 라우팅으로 처리.
+# main.tsx 가 pathname 을 보고 갈래를 결정한다.
+/tide  /index.html  200

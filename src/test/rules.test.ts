@@ -119,7 +119,7 @@ describe('entry 형태 검증', () => {
 });
 
 describe('accounts / debts / pins', () => {
-  const account = { name: '주계좌', balanceMinor: 1350000, currency: 'KRW', asOf: '2026-08-19', order: 0, createdAt: '', updatedAt: '' };
+  const account = { name: '주계좌', balanceMinor: 1350000, currency: 'KRW', asOf: '2026-08-19', checkedAt: '2026-08-19T09:00:00.000Z', order: 0, createdAt: '', updatedAt: '' };
   const debt = { name: '카카오뱅크', balanceMinor: 5000000, monthlyMinor: 300000, rate: 3.5, currentRound: 12, totalRounds: 60, order: 0, createdAt: '', updatedAt: '' };
   const pin = { lens: 'task', text: '이번 분기 목표', order: 0, createdAt: '', updatedAt: '' };
 

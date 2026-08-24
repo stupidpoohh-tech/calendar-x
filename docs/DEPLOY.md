@@ -348,3 +348,16 @@ Firebase 콘솔 → Firestore → `users/{내 uid}/items` 에서 확인할 수 �
 
 특히 **개인정보처리방침은 국내에서 서비스를 열 때 법적으로 필요합니다.**
 남에게 계정을 열어 주기 전에 준비하세요.
+
+
+---
+
+## 옛 잔고캘린더 URL 리다이렉트 (선택)
+
+이전에 `tide-over.stupidpoohh.workers.dev` 를 쓰던 사용자를 새 위치
+(`calendar-x.pages.dev/tide`)로 자연스럽게 옮기려면 리다이렉트 워커를 배포하세요.
+
+- 코드와 절차: [`docs/tide-over-worker/`](tide-over-worker/README.md)
+- 대시보드 Quick Edit 로 5분이면 됩니다
+- 이 워커는 URL 프래그먼트(`#tide=…` 백업 링크)도 그대로 넘기므로 예전에 공유했던
+  백업 링크가 새 도메인에서도 즉시 열립니다
