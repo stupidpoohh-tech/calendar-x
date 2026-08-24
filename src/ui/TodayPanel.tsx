@@ -17,7 +17,7 @@ import { addDaysISO, fmtDayShort } from '../domain/date';
 import { displayTitle, effectiveEndDate, isDone, newEntry } from '../domain/entry';
 import { formatAmount } from '../domain/money';
 import type { Entry, TaskStatus } from '../domain/types';
-import { BalanceRow } from './BalanceRow';
+import { BalanceInput, BalanceNote, useBalanceEditor } from './balanceEditor';
 import { Icon } from './Icon';
 
 interface Props {
@@ -47,6 +47,7 @@ export function TodayPanel({
   onEntryClick, onStatusChange, onPromote, onQuickIdea, onSaveAccount,
 }: Props) {
   const [idea, setIdea] = useState('');
+  const editor = useBalanceEditor(accounts, entries, onSaveAccount);
 
   const weekEndISO = addDaysISO(todayISO, 6);
 
@@ -174,23 +175,27 @@ export function TodayPanel({
               </button>
               {!moneyCollapsed && (
                 <>
-                  {tideLimit != null ? (
-                    <div className={'tp-bal' + (tideLimit < 0 ? ' bad' : '')}>
+                  {/* 금액은 하나만. 누르면 그 자리에서 잔고를 고친다. */}
+                  {editor.editing ? (
+                    <BalanceInput editor={editor} size="sm" />
+                  ) : tideLimit != null ? (
+                    <button
+                      type="button"
+                      className={'tp-bal' + (tideLimit < 0 ? ' bad' : '')}
+                      onClick={editor.start}
+                      aria-label="잔고 고치기"
+                    >
                       <span className="tp-bal-l">
                         {horizon.nextIncome
                           ? `다음 입금 전날까지`
                           : '앞으로 30일 · 이 돈으로'}
                       </span>
                       <strong className="num">₩ {formatAmount(tideLimit)}</strong>
-                    </div>
+                    </button>
                   ) : (
                     <p className="tp-empty">잔고를 적으면 다음 입금까지 남는 한도가 여기 뜹니다.</p>
                   )}
-                  {/* 한도의 근거. 아래에 잔고 카드를 따로 세우지 않는다. */}
-                  <BalanceRow
-                    accounts={accounts} entries={entries}
-                    onSave={onSaveAccount} variant="inline"
-                  />
+                  {!editor.editing && <BalanceNote editor={editor} />}
                   <ul className="tp-ul">
                     {money.map((e) => {
                       const type = e.money ? MONEY_TYPE_BY_ID[e.money.type] : null;

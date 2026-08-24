@@ -1,14 +1,19 @@
 /**
- * 가계부 렌즈의 머리 숫자와 남은 예정.
+ * 가계부 렌즈의 카드 하나.
  *
  * "이 달 말 예상 잔고" 를 보여주던 CashflowBar 를 대체한다. tide-over 원본이
  * 못박은 원칙을 그대로 지킨다 — 예측하지 않는다. 표시하는 숫자는 "이 날까지
  * 쓸 수 있는 한도" 다.
  *
- * 잔고 줄이 이 카드 안에 있다. 따로 세워 두면 잔고와 한도가 같은 금액일 때
- * 같은 숫자가 두 번 보여 어느 쪽이 무엇인지 읽히지 않았다.
+ * 이 렌즈의 카드는 이것 하나다. 대출과 고정 메모는 children 으로 이 카드 안에
+ * 접힌 줄로 들어온다 — 카드를 셋으로 나눠 세우면 모바일에서 달력이 화면 밖으로
+ * 밀린다.
+ *
+ * 금액은 카드에 하나만 뜬다. 예정된 입출금이 없는 구간에서는 한도가 곧 잔고라
+ * 잔고를 따로 적으면 같은 숫자가 두 번 보였고, 남은 날이 하루면 하루 몫까지
+ * 같아져 세 번 보였다.
  */
-import { useMemo } from 'react';
+import { useMemo, type ReactNode } from 'react';
 import { MONEY_TYPE_BY_ID } from '../domain/constants';
 import { daysBetween, fmtDayShort, todayISO as computeToday } from '../domain/date';
 import { formatAmount, formatSigned } from '../domain/money';
@@ -17,7 +22,7 @@ import {
   type Summary,
 } from '../domain/tide';
 import type { Account, Entry } from '../domain/types';
-import { BalanceRow } from './BalanceRow';
+import { BalanceInput, BalanceNote, useBalanceEditor } from './balanceEditor';
 
 interface Props {
   accounts: readonly Account[];
@@ -25,10 +30,13 @@ interface Props {
   hasBalance: boolean;
   onSaveAccount: (a: Account) => void;
   onEntryClick?: (entry: Entry) => void;
+  /** 대출 · 고정 메모. 이 카드 안쪽 아래에 접힌 줄로 붙는다. */
+  children?: ReactNode;
 }
 
-export function TideBar({ accounts, entries, hasBalance, onSaveAccount, onEntryClick }: Props) {
+export function TideBar({ accounts, entries, hasBalance, onSaveAccount, onEntryClick, children }: Props) {
   const today = useMemo(() => computeToday(), []);
+  const editor = useBalanceEditor(accounts, entries, onSaveAccount);
 
   const horizon = useMemo(() => horizonOf(entries, today), [entries, today]);
   const limit = useMemo(
@@ -48,7 +56,8 @@ export function TideBar({ accounts, entries, hasBalance, onSaveAccount, onEntryC
           잔고를 입력하면 예정 입출금과 합쳐 <b>다음 입금까지 얼마 · 하루 몫 · 남은 예정</b>이
           여기에 뜹니다.
         </p>
-        <BalanceRow accounts={accounts} entries={entries} onSave={onSaveAccount} variant="inline" />
+        {editor.editing ? <BalanceInput editor={editor} /> : <BalanceNote editor={editor} />}
+        {children && <div className="tide-more">{children}</div>}
       </section>
     );
   }
@@ -64,16 +73,27 @@ export function TideBar({ accounts, entries, hasBalance, onSaveAccount, onEntryC
             ? <>다음 입금(<b>{fmtDayShort(horizon.nextIncome)}</b>) 전날까지</>
             : '앞으로 30일'}
         </p>
-        <strong className={'tide-v num' + (negative ? ' bad' : '')}>
-          ₩ {formatAmount(limit)}
-        </strong>
+        {/* 이 숫자를 누르면 잔고를 고친다. 한도는 잔고에서 나오는 값이라
+            고칠 대상은 언제나 잔고다. */}
+        {editor.editing ? (
+          <BalanceInput editor={editor} />
+        ) : (
+          <button
+            type="button"
+            className={'tide-v num' + (negative ? ' bad' : '')}
+            onClick={editor.start}
+            aria-label="잔고 고치기"
+          >
+            ₩ {formatAmount(limit)}
+          </button>
+        )}
         <p className="tide-sub num">
-          이 돈으로 <b>{daysLeft}일</b> 버티기 · 하루 <b>{formatAmount(perDay)}원</b>
+          이 돈으로 <b>{daysLeft}일</b> 버티기
+          {/* 남은 날이 하루면 하루 몫이 위 숫자와 같다. 같은 금액을 두 번 적지 않는다. */}
+          {daysLeft > 1 && <> · 하루 <b>{formatAmount(perDay)}원</b></>}
         </p>
+        <BalanceNote editor={editor} />
       </div>
-
-      {/* 한도의 근거. 같은 카드에 있어야 두 숫자가 다른 뜻이라는 게 읽힌다. */}
-      <BalanceRow accounts={accounts} entries={entries} onSave={onSaveAccount} variant="inline" />
 
       {upcoming.length > 0 ? (
         <ul className="tide-list">
@@ -84,6 +104,8 @@ export function TideBar({ accounts, entries, hasBalance, onSaveAccount, onEntryC
       ) : (
         <p className="tide-empty">이 구간에 예정된 입금·출금이 없습니다.</p>
       )}
+
+      {children && <div className="tide-more">{children}</div>}
     </section>
   );
 }

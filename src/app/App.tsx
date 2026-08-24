@@ -399,11 +399,38 @@ function Workspace({ uid, user, onSignOut }: WorkspaceProps) {
     ? visible.filter((e) => e.startDate <= daySheet && (e.endDate ?? e.startDate) >= daySheet)
     : [];
 
+  // 렌즈에 따라 단독 카드가 되기도 하고, 며칠 버티나 카드 안에 접힌 줄로 들어가기도 한다.
+  const pinnedSection = (
+    <PinnedSection
+      lens={lens}
+      pins={store.pins}
+      collapsed={!!prefs.pinCollapsed[lens]}
+      onToggleCollapsed={() => set('pinCollapsed', { ...prefs.pinCollapsed, [lens]: !prefs.pinCollapsed[lens] })}
+      onSave={(p) => {
+        if (isAnon || !uid) { void promptLogin(); return; }
+        void savePin(db, uid, p);
+      }}
+      onDelete={(p) => {
+        if (isAnon || !uid) { void promptLogin(); return; }
+        void deletePin(db, uid, p.id);
+      }}
+    />
+  );
+
   return (
     <div className="app" data-lens={lens} style={{ ['--lens' as string]: `var(${lensDef.accentVar})` }}>
       <header className="topbar">
         <div className="brand">
-          <span className="brand-mark" aria-hidden="true">X</span>
+          {/*
+            글리프 'X' 대신 획을 직접 긋는다. 글꼴의 X 는 굵기를 font-weight 로만
+            건드릴 수 있어 로고로 쓰기에는 획이 가늘다.
+          */}
+          <span className="brand-mark" aria-hidden="true">
+            <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor"
+                 strokeWidth="4.2" strokeLinecap="round">
+              <path d="M5.5 5.5 19 19M19 5.5 5.5 19" />
+            </svg>
+          </span>
           <span className="brand-name">캘린더X</span>
         </div>
 
@@ -535,15 +562,15 @@ function Workspace({ uid, user, onSignOut }: WorkspaceProps) {
           />
         )}
 
+        {/* 가계부 렌즈도 카드 하나다. 대출과 고정 메모는 며칠 버티나 카드 안쪽에 접힌다. */}
         {lens === 'money' && (
-          <>
-            <TideBar
-              accounts={store.accounts}
-              entries={materialized}
-              hasBalance={hasBalance}
-              onSaveAccount={saveBalance}
-              onEntryClick={openEdit}
-            />
+          <TideBar
+            accounts={store.accounts}
+            entries={materialized}
+            hasBalance={hasBalance}
+            onSaveAccount={saveBalance}
+            onEntryClick={openEdit}
+          >
             <MoneyPanel
               debts={store.debts}
               collapsed={prefs.debtsCollapsed}
@@ -558,26 +585,12 @@ function Workspace({ uid, user, onSignOut }: WorkspaceProps) {
                 if (ok) void deleteDebt(db, uid, d.id);
               }}
             />
-          </>
+            {pinnedSection}
+          </TideBar>
         )}
 
         {/* 고정 메모는 각 축의 렌즈에서 본다. 전체 렌즈는 요약 카드 하나만 둔다. */}
-        {lens !== 'all' && (
-          <PinnedSection
-            lens={lens}
-            pins={store.pins}
-            collapsed={!!prefs.pinCollapsed[lens]}
-            onToggleCollapsed={() => set('pinCollapsed', { ...prefs.pinCollapsed, [lens]: !prefs.pinCollapsed[lens] })}
-            onSave={(p) => {
-              if (isAnon || !uid) { void promptLogin(); return; }
-              void savePin(db, uid, p);
-            }}
-            onDelete={(p) => {
-              if (isAnon || !uid) { void promptLogin(); return; }
-              void deletePin(db, uid, p.id);
-            }}
-          />
-        )}
+        {lens !== 'all' && lens !== 'money' && pinnedSection}
       </div>
 
       <main className="main">

@@ -125,16 +125,14 @@
 }
 .brand { display: flex; align-items: center; gap: 8px; flex-shrink: 0; }
 /*
-  흰 바탕에 검은 글씨. 토큰으로 둬야 다크에서 검은 칩에 흰 X 로 뒤집힌다 —
-  흰색을 고정하면 다크에서 화면에 흰 사각형만 하나 떠 있게 된다.
+  상자 없이 획만. 색은 토큰이라 다크에서 흰 X 로 뒤집힌다 — 흰색을 고정하면
+  라이트 모드에서 흰 바탕에 흰 X 가 되어 사라진다.
 */
 .brand-mark {
-  width: 26px; height: 26px; border-radius: 7px;
-  background: var(--bg); color: var(--ink);
-  border: 1.5px solid var(--ink);
+  width: 26px; height: 26px;
+  color: var(--ink);
   display: flex; align-items: center; justify-content: center;
-  font-family: var(--font); font-weight: 800; font-size: 14px;
-  letter-spacing: -.02em;
+  flex-shrink: 0;
 }
 .brand-name { font-size: 14px; font-weight: 700; letter-spacing: -.01em; }
 
@@ -413,11 +411,15 @@
 }
 .tp-capture:focus { border-style: solid; border-color: var(--lens-idea); }
 
+/* 이 칸도 누르면 잔고를 고친다 (며칠 버티나 카드의 큰 숫자와 같은 동작). */
 .tp-bal {
   display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap;
   padding: 8px 10px; background: var(--bg-soft);
   border-radius: var(--radius-sm); margin-bottom: 2px;
+  appearance: none; border: none; width: 100%; text-align: left;
+  color: var(--ink); font-family: inherit; cursor: pointer;
 }
+.tp-bal:hover { background: var(--accent-soft); }
 .tp-bal.bad { background: color-mix(in oklab, var(--bad) 10%, var(--bg-soft)); }
 .tp-bal-l { font-size: 11px; color: var(--ink-3); width: 100%; }
 .tp-bal strong { font-size: 16px; font-weight: 700; letter-spacing: -.01em; }
@@ -484,45 +486,34 @@
 /* ============ 잔고 · 대출 ============ */
 
 .mp { display: flex; flex-direction: column; gap: 8px; }
-.bal {
-  display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
-  padding: 11px 14px; background: var(--bg);
-  border: 1px solid var(--line); border-radius: var(--radius);
-}
-.bal-l { font-size: 12.5px; font-weight: 600; color: var(--ink-3); display: inline-flex; align-items: center; gap: 6px; flex-shrink: 0; }
-.bal-v {
-  appearance: none; border: none; background: transparent; cursor: pointer;
-  font-size: 19px; font-weight: 700; color: var(--ink); flex: 1;
-  text-align: left; letter-spacing: -.01em; padding: 0;
-}
-.bal-v.empty { font-size: 12.5px; font-weight: 400; color: var(--ink-4); }
 .bal-in {
   flex: 1; font-size: 19px; font-weight: 700; border: none;
   border-bottom: 2px solid var(--lens-money); outline: none;
-  background: transparent; color: var(--ink); padding: 2px 0; min-width: 100px;
+  background: transparent; color: var(--ink); padding: 2px 0;
+  min-width: 0; width: 100%;
 }
-.bal-asof { font-size: 11px; color: var(--ink-4); }
-.bal-edit {
-  appearance: none; border: 1px solid var(--line); background: var(--bg);
-  padding: 4px 10px; border-radius: 5px; font-size: 11px; cursor: pointer;
-  color: var(--ink-3); flex-shrink: 0;
-}
-.bal-edit:hover { color: var(--ink); border-color: var(--ink-4); }
 
 /*
-  카드 안에 얹는 잔고 줄. 테두리·배경을 걷어 내고 구분선만 남긴다 —
-  한도(헤드라인)와 그 근거(잔고)가 한 카드 안에서 위아래로 읽혀야 한다.
+  큰 숫자 아래 한 줄. 금액을 다시 적지 않는다 — 예정이 없는 구간에서는 한도가
+  곧 잔고라 같은 숫자가 두 번(하루 몫까지 치면 세 번) 뜬다.
 */
-.bal-inline {
-  padding: 10px 0 0; background: transparent;
-  border: none; border-top: 1px solid var(--line); border-radius: 0;
-  gap: 8px;
+.bal-note {
+  appearance: none; border: none; background: transparent; padding: 2px 0;
+  display: inline-flex; align-items: center; gap: 6px; cursor: pointer;
+  font-size: 11.5px; color: var(--ink-4); align-self: flex-start;
 }
-.bal-inline .bal-v { font-size: 15px; }
-.bal-inline .bal-in { font-size: 15px; min-width: 80px; }
-.bal-inline .bal-v.empty { font-size: 12px; }
-.tp-col .bal-inline { padding-top: 8px; }
-.tp-col .bal-inline .bal-v { font-size: 14px; }
+.bal-note:hover { color: var(--ink-2); }
+.bal-note-a {
+  color: var(--ink-3); border-bottom: 1px solid var(--line);
+}
+.bal-note:hover .bal-note-a { color: var(--ink); border-bottom-color: var(--ink-4); }
+
+/* 큰 숫자를 눌렀을 때 그 자리에 뜨는 입력칸. */
+/* align-self 없이 두면 tide-h 의 align-items:flex-start 때문에 카드 밖으로 삐져나간다. */
+.bal-edit-row { display: flex; align-items: baseline; gap: 10px; align-self: stretch; width: 100%; }
+.bal-edit-l { font-size: 11.5px; color: var(--ink-3); flex-shrink: 0; }
+.bal-edit-row.lg .bal-in { font-size: 26px; }
+.bal-edit-row.sm .bal-in { font-size: 16px; }
 
 .debt { background: var(--bg); border: 1px solid var(--line); border-radius: var(--radius); overflow: hidden; }
 .debt-h {
@@ -925,10 +916,16 @@
   background: var(--bg); border: 1px solid var(--line); border-radius: var(--radius);
   padding: 16px 18px; display: flex; flex-direction: column; gap: 12px;
 }
-.tide-h { display: flex; flex-direction: column; gap: 4px; }
+.tide-h { display: flex; flex-direction: column; gap: 4px; align-items: flex-start; }
 .tide-l { margin: 0; font-size: 12px; color: var(--ink-3); font-weight: 500; }
 .tide-l b { color: var(--ink-2); }
-.tide-v { font-size: 30px; font-weight: 700; letter-spacing: -.02em; }
+/* 큰 숫자가 곧 잔고 편집 버튼이다. 한도는 잔고에서 나오는 값이라 고칠 대상은 잔고다. */
+.tide-v {
+  appearance: none; border: none; background: transparent; padding: 0;
+  font-family: inherit; color: var(--ink); text-align: left; cursor: pointer;
+  font-size: 30px; font-weight: 700; letter-spacing: -.02em;
+}
+.tide-v:hover { color: var(--lens-money); }
 .tide-v.bad { color: var(--bad); }
 .tide-sub { margin: 2px 0 0; font-size: 12.5px; color: var(--ink-3); }
 .tide-sub b { color: var(--ink); font-weight: 600; }
@@ -948,6 +945,25 @@
 .tide-amt { font-size: 13px; font-weight: 600; }
 .tide-empty { margin: 0; font-size: 12.5px; color: var(--ink-3); }
 .tide-empty b { color: var(--ink-2); font-weight: 600; }
+
+/*
+  대출 · 고정 메모가 이 카드 안쪽에 붙는 자리. 각자의 카드 껍데기를 벗기고
+  구분선만 남긴다. 음수 여백으로 좌우를 카드 끝까지 넓혀 선이 안쪽에서 끊기지
+  않게 한다 — 선이 짧으면 카드 안에 카드가 또 있는 것처럼 보인다.
+*/
+.tide-more {
+  margin: 4px -18px -16px; display: flex; flex-direction: column;
+}
+.tide-more .mp { gap: 0; }
+.tide-more .debt,
+.tide-more .pin {
+  background: transparent; border: none; border-top: 1px solid var(--line);
+  border-radius: 0; overflow: visible;
+}
+.tide-more .debt-h,
+.tide-more .pin-h { padding: 12px 18px; }
+.tide-more .debt-b,
+.tide-more .pin-b { padding: 0 18px 12px; }
 
 /* 정산 다이얼로그 안 */
 .settle p { margin: 0 0 8px; font-size: 13px; line-height: 1.6; color: var(--ink-2); }
