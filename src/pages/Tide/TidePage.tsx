@@ -18,6 +18,7 @@ import { MONEY_TYPES } from '../../domain/constants';
 import { newEntry, uid } from '../../domain/entry';
 import type { Entry, MoneyType } from '../../domain/types';
 import { useDialog } from '../../ui/Dialog';
+import { BrandFooter } from '../../ui/BrandFooter';
 import { Icon } from '../../ui/Icon';
 import {
   clearTide, decodeBackupHash, emptyTideState, encodeBackupHash,
@@ -95,6 +96,7 @@ export function TidePage() {
       <footer className="tp-foot">
         <a href="/" className="tp-back"><Icon.ArrowUpRight size={12} /> 캘린더X 로</a>
       </footer>
+      <BrandFooter />
     </div>
   );
 }

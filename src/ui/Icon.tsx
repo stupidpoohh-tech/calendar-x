@@ -133,6 +133,12 @@ export const Icon = {
       <path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71" />
     </svg>
   ),
+  Home: (p: Props) => (
+    <svg {...base(p)}>
+      <path d="M3 12 12 3l9 9" />
+      <path d="M5 10v10h14V10" />
+    </svg>
+  ),
   Alert: (p: Props) => (
     <svg {...base(p)}>
       <path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z" />

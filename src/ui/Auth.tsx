@@ -13,7 +13,12 @@ import { useEffect, useRef, useState, type FormEvent } from 'react';
 import { getFirebase } from '../data/firebase';
 import { Icon } from './Icon';
 
-type Mode = 'choose' | 'signin' | 'signup' | 'reset';
+type Mode = 'signin' | 'signup' | 'reset';
+
+interface AuthProps {
+  /** 랜딩 화면으로 돌아가는 콜백. 없으면 '돌아가기' 버튼을 숨긴다. */
+  onBack?: () => void;
+}
 
 const LAST_EMAIL_KEY = 'dada.lastEmail';
 
@@ -44,8 +49,8 @@ function messageFor(err: unknown): string {
 
 const isEmail = (s: string) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(s.trim());
 
-export function Auth() {
-  const [mode, setMode] = useState<Mode>('choose');
+export function Auth({ onBack }: AuthProps = {}) {
+  const [mode, setMode] = useState<Mode>('signin');
   const [email, setEmail] = useState(() => localStorage.getItem(LAST_EMAIL_KEY) ?? '');
   const [pw, setPw] = useState('');
   const [pw2, setPw2] = useState('');
@@ -56,11 +61,8 @@ export function Auth() {
   const emailRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
-    if (mode !== 'choose') {
-      const t = setTimeout(() => emailRef.current?.focus(), 80);
-      return () => clearTimeout(t);
-    }
-    return;
+    const t = setTimeout(() => emailRef.current?.focus(), 80);
+    return () => clearTimeout(t);
   }, [mode]);
 
   const fail = (msg: string) => {
@@ -123,25 +125,6 @@ export function Auth() {
     </div>
   );
 
-  if (mode === 'choose') {
-    return (
-      <div className="lock-root">
-        <div className="lock-card">
-          {brand}
-          <h1 className="lock-title">할 일과 아이디어와 돈을<br />같은 날짜 위에서</h1>
-          <p className="lock-sub">
-            세 가지를 따로 관리하면 오늘 무엇을 해야 하고 이번 달에 얼마가 남는지를
-            한 번에 볼 수 없습니다. 캘린더X 는 그 셋을 한 타임라인에 올립니다.
-          </p>
-          <div className="lock-choose">
-            <button className="lock-submit" onClick={() => go('signin')}>로그인</button>
-            <button className="lock-submit lock-submit-alt" onClick={() => go('signup')}>새 계정 만들기</button>
-          </div>
-        </div>
-      </div>
-    );
-  }
-
   const copy = {
     signin: { title: '로그인', sub: '저장된 데이터에 접근하려면 로그인하세요.', cta: '로그인' },
     signup: { title: '계정 만들기', sub: '이메일과 비밀번호를 한 번만 정하면 다음부터 자동으로 로그인됩니다.', cta: '계정 만들고 시작하기' },
@@ -199,7 +182,15 @@ export function Auth() {
         </button>
 
         <div className="lock-foot">
-          <button type="button" className="lock-link" onClick={() => go('choose')}>← 돌아가기</button>
+          {onBack && (
+            <button type="button" className="lock-link" onClick={onBack}>← 홈</button>
+          )}
+          {mode === 'signin' && (
+            <button type="button" className="lock-link" onClick={() => go('signup')}>새 계정 만들기</button>
+          )}
+          {mode === 'signup' && (
+            <button type="button" className="lock-link" onClick={() => go('signin')}>기존 계정으로 로그인</button>
+          )}
           {mode === 'signin' && (
             <button type="button" className="lock-link" onClick={() => go('reset')}>비밀번호를 잊으셨나요?</button>
           )}

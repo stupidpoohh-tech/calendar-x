@@ -46,13 +46,19 @@ Firebase 웹 config 는 원래 공개값입니다.
 
 **실제 보안 경계는 `firestore.rules` 입니다.** 그래서 3단계가 중요합니다.
 
+> **GitHub Secret Scanning 알림이 온다면.** 이 저장소 문서에는 실제 값 대신
+> `AIzaSy…` 로 시작하는 자리표시자만 둔다. 값은 Firebase 콘솔에서 언제든 확인할 수
+> 있고, 브라우저 번들에는 어차피 들어가는 값이라 문서에서만 뺀다고 안전이 늘거나
+> 줄지 않는다. GitHub 알림은 해당 코드 조각을 **Revoke** 대신 **Close as → Used
+> in tests** 또는 **Won't fix** 로 닫으면 된다 — Firebase 웹 config 는 공개값이므로.
+
 ### 값
 
 기존 프로젝트(`dada-calendar-524ec`)의 값입니다. 그대로 쓰면 됩니다.
 
 | 변수 이름 | 값 |
 |---|---|
-| `VITE_FIREBASE_API_KEY` | `AIzaSyDwcPMMGmYFjFqcb-3yJcbYeMhJgLGXz84` |
+| `VITE_FIREBASE_API_KEY` | (콘솔에서 복사) — `AIzaSy…` 로 시작하는 문자열 |
 | `VITE_FIREBASE_AUTH_DOMAIN` | `dada-calendar-524ec.firebaseapp.com` |
 | `VITE_FIREBASE_PROJECT_ID` | `dada-calendar-524ec` |
 | `VITE_FIREBASE_STORAGE_BUCKET` | `dada-calendar-524ec.firebasestorage.app` |
@@ -83,7 +89,7 @@ cp .env.example .env
 `.env` 파일을 열어 위 표의 값 6개를 채웁니다. 이렇게 됩니다.
 
 ```
-VITE_FIREBASE_API_KEY=AIzaSyDwcPMMGmYFjFqcb-3yJcbYeMhJgLGXz84
+VITE_FIREBASE_API_KEY=AIzaSy…               # 콘솔에서 실제 값 복사
 VITE_FIREBASE_AUTH_DOMAIN=dada-calendar-524ec.firebaseapp.com
 VITE_FIREBASE_PROJECT_ID=dada-calendar-524ec
 VITE_FIREBASE_STORAGE_BUCKET=dada-calendar-524ec.firebasestorage.app

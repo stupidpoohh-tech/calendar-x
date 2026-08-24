@@ -20,7 +20,8 @@ import { convertKind, newEntry, withDerived } from '../domain/entry';
 import { applyFilters, collectTags, emptyFilters, hasActiveFilter } from '../domain/filters';
 import { baseIdOf, materialize } from '../domain/recurrence';
 import type { Entry, Filters, LensId, TaskStatus, ViewId } from '../domain/types';
-import { Auth } from '../ui/Auth';
+import { BrandFooter } from '../ui/BrandFooter';
+import { Landing } from '../ui/Landing';
 import { DaySheet } from '../ui/DaySheet';
 import { TideBar } from '../ui/TideBar';
 import { EntryModal } from '../ui/EntryModal';
@@ -53,7 +54,7 @@ export function App() {
     );
   }
 
-  if (state.status === 'signed-out') return <Auth />;
+  if (state.status === 'signed-out') return <Landing />;
 
   return <Workspace uid={state.user.uid} user={state.user} onSignOut={logout} />;
 }
@@ -573,6 +574,8 @@ function Workspace({ uid, user, onSignOut }: WorkspaceProps) {
         onDelete={(e) => void handleDelete(e)}
         onClose={closeModal}
       />
+
+      <BrandFooter />
 
       {showSettings && (
         <SettingsSheet

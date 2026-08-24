@@ -1011,3 +1011,83 @@
 .tp-foot { padding: 12px 20px; text-align: center; color: var(--ink-3); font-size: 11.5px; }
 .tp-back { display: inline-flex; align-items: center; gap: 4px; color: var(--ink-3); text-decoration: none; }
 .tp-back:hover { color: var(--ink); }
+
+/* ============ 랜딩 + 브랜드 푸터 ============ */
+
+.landing {
+  min-height: 100dvh; display: flex; flex-direction: column;
+  max-width: 780px; margin: 0 auto;
+  padding: 0 24px env(safe-area-inset-bottom);
+}
+.landing-top {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 18px 0;
+}
+.landing-brand { display: flex; align-items: center; gap: 8px; }
+.landing-mark {
+  width: 26px; height: 26px; border-radius: 7px;
+  background: var(--ink); color: var(--bg);
+  display: flex; align-items: center; justify-content: center;
+}
+.landing-name { font-size: 14px; font-weight: 700; letter-spacing: -.01em; }
+.landing-cta-sm {
+  appearance: none; border: 1px solid var(--line); background: var(--bg);
+  padding: 7px 14px; border-radius: 999px; font-size: 12.5px; font-weight: 600;
+  color: var(--ink); cursor: pointer;
+}
+.landing-cta-sm:hover { border-color: var(--ink); }
+
+.landing-hero { padding: 40px 0 32px; text-align: left; }
+.landing-h {
+  margin: 0 0 16px; font-size: clamp(28px, 6vw, 46px);
+  font-weight: 800; letter-spacing: -.025em; line-height: 1.18;
+  text-wrap: balance;
+}
+.landing-sub {
+  margin: 0 0 24px; font-size: 15px; line-height: 1.7; color: var(--ink-2);
+  max-width: 52ch;
+}
+.landing-actions { display: flex; align-items: center; gap: 16px; flex-wrap: wrap; }
+.landing-cta {
+  appearance: none; border: none; background: var(--ink); color: var(--bg);
+  padding: 12px 20px; border-radius: 10px; font-size: 14px; font-weight: 700;
+  cursor: pointer; display: inline-flex; align-items: center; gap: 6px;
+}
+.landing-cta:hover { opacity: .88; }
+.landing-alt { font-size: 13px; color: var(--ink-3); text-underline-offset: 3px; }
+.landing-alt:hover { color: var(--ink); }
+
+.landing-lenses {
+  display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px;
+  margin: 24px 0 20px;
+}
+@media (max-width: 640px) { .landing-lenses { grid-template-columns: 1fr; } }
+.landing-lens {
+  display: grid; grid-template-columns: 12px 1fr; gap: 10px;
+  padding: 16px 18px; background: var(--bg); border: 1px solid var(--line);
+  border-radius: var(--radius);
+}
+.landing-lens-dot { width: 8px; height: 8px; border-radius: 50%; margin-top: 8px; background: var(--lens); }
+.landing-lens[data-lens="task"] { --lens: var(--lens-task); }
+.landing-lens[data-lens="idea"] { --lens: var(--lens-idea); }
+.landing-lens[data-lens="money"] { --lens: var(--lens-money); }
+.landing-lens h3 { margin: 0 0 4px; font-size: 14px; font-weight: 700; }
+.landing-lens p { margin: 0; font-size: 12.5px; color: var(--ink-3); line-height: 1.6; }
+.landing-lens p b { color: var(--ink); font-weight: 600; }
+
+.landing-note {
+  margin: 12px 0 0; font-size: 12px; color: var(--ink-4); text-align: center;
+}
+
+.brand-footer {
+  display: flex; align-items: center; justify-content: center; gap: 8px;
+  padding: 20px 12px calc(20px + env(safe-area-inset-bottom));
+  font-size: 11.5px; color: var(--ink-4); letter-spacing: .02em;
+}
+.brand-footer-home {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 22px; height: 22px; border-radius: 6px;
+  border: 1px solid var(--line); color: var(--ink-3);
+  text-decoration: none; transition: border-color .12s, color .12s;
+}
+.brand-footer-home:hover { border-color: var(--ink); color: var(--ink); }
