@@ -5,7 +5,8 @@ import type { Account } from '../domain/types';
 
 const account: Account = {
   id: 'a1', name: '주계좌', balanceMinor: 1_000_000, currency: 'KRW',
-  asOf: '2026-08-01', order: 0, createdAt: '', updatedAt: '',
+  asOf: '2026-08-01', checkedAt: '2026-08-01T00:00:00.000Z',
+  order: 0, createdAt: '', updatedAt: '',
 };
 
 describe('buildBackup / parseBackup 왕복', () => {

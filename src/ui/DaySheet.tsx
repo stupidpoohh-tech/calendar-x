@@ -1,8 +1,8 @@
 import { colorHex, MONEY_TYPE_BY_ID, STATUS_BY_ID } from '../domain/constants';
 import { fmtDayFull } from '../domain/date';
 import { displayTitle, isDone } from '../domain/entry';
-import { formatAmount, formatSigned } from '../domain/money';
-import type { CashflowPoint } from '../domain/cashflow';
+import { formatSigned } from '../domain/money';
+import { entriesOn, netOf } from '../domain/tide';
 import type { Entry } from '../domain/types';
 import { Icon } from './Icon';
 
@@ -10,14 +10,15 @@ interface Props {
   dateISO: string;
   todayISO: string;
   entries: readonly Entry[];
-  /** 그날의 예상 잔고. 가계부 데이터가 있을 때만 넘어온다. */
-  cashflow: CashflowPoint | null;
+  /** 이 날의 가계부 원본 발생분 (반복·기간 전개된 것 포함). tide 순액을 표시한다. */
+  moneyEntries: readonly Entry[];
   onClose: () => void;
   onEntryClick: (e: Entry) => void;
   onAdd: () => void;
 }
 
-export function DaySheet({ dateISO, todayISO, entries, cashflow, onClose, onEntryClick, onAdd }: Props) {
+export function DaySheet({ dateISO, todayISO, entries, moneyEntries, onClose, onEntryClick, onAdd }: Props) {
+  const dayNet = netOf(entriesOn(moneyEntries, dateISO));
   return (
     <div className="mod-back" onClick={onClose}>
       <div className="sheet" role="dialog" aria-modal="true" aria-label={`${dateISO} 상세`} onClick={(e) => e.stopPropagation()}>
@@ -29,15 +30,12 @@ export function DaySheet({ dateISO, todayISO, entries, cashflow, onClose, onEntr
           <button className="ico-btn" onClick={onClose} aria-label="닫기"><Icon.X size={18} /></button>
         </header>
 
-        {cashflow && (
-          <div className={'sheet-cf' + (cashflow.balanceMinor < 0 ? ' bad' : '')}>
-            <span>예상 잔고</span>
-            <strong className="num">₩ {formatAmount(cashflow.balanceMinor)}</strong>
-            {cashflow.deltaMinor !== 0 && (
-              <span className={'num ' + (cashflow.deltaMinor > 0 ? 'plus' : 'minus')}>
-                {formatSigned(cashflow.deltaMinor)}
-              </span>
-            )}
+        {dayNet !== 0 && (
+          <div className={'sheet-cf' + (dayNet < 0 ? ' bad' : '')}>
+            <span>이 날 순변동</span>
+            <strong className={'num ' + (dayNet > 0 ? 'plus' : 'minus')}>
+              {formatSigned(dayNet)}
+            </strong>
           </div>
         )}
 

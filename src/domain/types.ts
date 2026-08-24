@@ -101,14 +101,22 @@ export interface Entry {
   updatedAt: string;
 }
 
-/** 잔고. 이전 '::balance::' 우회를 대체한다. 계좌 단위로 여러 개를 둘 수 있다. */
+/**
+ * 잔고. 이전 '::balance::' 우회를 대체한다. 계좌 단위로 여러 개를 둘 수 있다.
+ *
+ * tide 계산은 잔고를 "언제 확인했나"의 시각까지 필요하다 (정산 diff 를 그
+ * 시점부터 오늘까지 지나간 예정과 비교하기 때문). 그래서 날짜(asOf)와
+ * 시각(checkedAt)을 함께 둔다 — asOf 는 화면 표시용, checkedAt 은 계산용.
+ */
 export interface Account {
   id: string;
   name: string;
   balanceMinor: number;
   currency: string;
-  /** 이 잔고가 사실이었던 날짜. 현금흐름 예측의 시작점이 된다. */
+  /** 이 잔고가 사실이었던 날짜. 화면 표시와 월 조회에 쓴다. */
   asOf: DateISO;
+  /** 잔고를 옮겨 적은 시각 (ISO datetime). 정산 diff 기준점. */
+  checkedAt: string;
   order: number;
   createdAt: string;
   updatedAt: string;

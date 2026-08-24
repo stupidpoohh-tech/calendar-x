@@ -137,9 +137,13 @@ export function convertLegacyItems(items: readonly Raw[]): MigrationResult {
     // ---- 잔고 ----
     if (title === BALANCE_TITLE) {
       const amount = Math.trunc(numOf(raw.memo));
+      const accountAsOf =
+        normalizeDate(str(raw.updatedAt)) || normalizeDate(str(raw.dateISO)) || todayISO();
+      // 예전 구조에는 시각 정보가 updatedAt 뿐이다. 그것을 그대로 checkedAt 으로.
+      const accountChecked = str(raw.updatedAt) || `${accountAsOf}T00:00:00.000Z`;
       accounts.push({
         id, name: '주계좌', balanceMinor: amount, currency: DEFAULT_CURRENCY,
-        asOf: normalizeDate(str(raw.updatedAt)) || normalizeDate(str(raw.dateISO)) || todayISO(),
+        asOf: accountAsOf, checkedAt: accountChecked,
         order: 0,
         createdAt: str(raw.createdAt, now), updatedAt: str(raw.updatedAt, now),
       });

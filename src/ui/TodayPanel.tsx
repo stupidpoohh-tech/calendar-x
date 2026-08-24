@@ -6,19 +6,20 @@
  * 같이 볼 수 없었다. 이 패널이 그 세 축을 한 줄에 올린다.
  */
 import { useMemo, useState } from 'react';
-import type { CashflowResult } from '../domain/cashflow';
 import { MONEY_TYPE_BY_ID } from '../domain/constants';
+import { headlineLimit, horizonOf } from '../domain/tide';
+import type { Account } from '../domain/types';
 import { addDaysISO, fmtDayShort } from '../domain/date';
 import { displayTitle, effectiveEndDate, isDone, newEntry } from '../domain/entry';
-import { formatAmount, formatSigned } from '../domain/money';
+import { formatAmount } from '../domain/money';
 import type { Entry, TaskStatus } from '../domain/types';
 import { Icon } from './Icon';
 
 interface Props {
   todayISO: string;
   entries: readonly Entry[];
-  cashflow: CashflowResult;
-  /** 잔고를 한 번도 입력하지 않았으면 예상 잔고를 0원으로 단정하지 않는다. */
+  accounts: readonly Account[];
+  /** 잔고를 한 번도 입력하지 않았으면 tide 값을 0으로 단정하지 않는다. */
   hasBalance: boolean;
   onEntryClick: (e: Entry) => void;
   onStatusChange: (e: Entry, status: TaskStatus) => void;
@@ -31,7 +32,7 @@ function occursOnDay(e: Entry, iso: string): boolean {
 }
 
 export function TodayPanel({
-  todayISO, entries, cashflow, hasBalance, onEntryClick, onStatusChange, onPromote, onQuickIdea,
+  todayISO, entries, accounts, hasBalance, onEntryClick, onStatusChange, onPromote, onQuickIdea,
 }: Props) {
   const [idea, setIdea] = useState('');
 
@@ -50,7 +51,12 @@ export function TodayPanel({
     };
   }, [entries, todayISO, weekEndISO]);
 
-  const todayPoint = hasBalance ? (cashflow.points.find((p) => p.date === todayISO) ?? null) : null;
+  // '오늘 마감 예상' 대신 tide-over 규칙 — 다음 입금까지 남는 한도.
+  const horizon = useMemo(() => horizonOf(entries, todayISO), [entries, todayISO]);
+  const tideLimit = useMemo(
+    () => hasBalance ? headlineLimit(accounts, entries, todayISO) : null,
+    [hasBalance, accounts, entries, todayISO],
+  );
 
   const submitIdea = () => {
     const text = idea.trim();
@@ -129,18 +135,17 @@ export function TodayPanel({
         {/* ---- 가계부 ---- */}
         <div className="tp-col" data-axis="money">
           <h3 className="tp-ct">가계부</h3>
-          {todayPoint ? (
-            <div className={'tp-bal' + (todayPoint.balanceMinor < 0 ? ' bad' : '')}>
-              <span className="tp-bal-l">오늘 마감 예상</span>
-              <strong className="num">₩ {formatAmount(todayPoint.balanceMinor)}</strong>
-              {todayPoint.deltaMinor !== 0 && (
-                <span className={'num ' + (todayPoint.deltaMinor > 0 ? 'plus' : 'minus')}>
-                  {formatSigned(todayPoint.deltaMinor)}
-                </span>
-              )}
+          {tideLimit != null ? (
+            <div className={'tp-bal' + (tideLimit < 0 ? ' bad' : '')}>
+              <span className="tp-bal-l">
+                {horizon.nextIncome
+                  ? `다음 입금 전날까지`
+                  : '앞으로 30일 · 이 돈으로'}
+              </span>
+              <strong className="num">₩ {formatAmount(tideLimit)}</strong>
             </div>
           ) : (
-            <p className="tp-empty">잔고를 입력하면 오늘 마감 잔고가 여기 뜹니다.</p>
+            <p className="tp-empty">잔고를 입력하면 다음 입금까지 남는 한도가 여기 뜹니다.</p>
           )}
           <ul className="tp-ul">
             {money.map((e) => {

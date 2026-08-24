@@ -119,7 +119,7 @@ export function Auth() {
   const brand = (
     <div className="lock-brand">
       <div className="lock-logo"><Icon.Calendar size={18} /></div>
-      <div className="lock-app">Dada Calendar</div>
+      <div className="lock-app">캘린더X</div>
     </div>
   );
 
@@ -131,7 +131,7 @@ export function Auth() {
           <h1 className="lock-title">할 일과 아이디어와 돈을<br />같은 날짜 위에서</h1>
           <p className="lock-sub">
             세 가지를 따로 관리하면 오늘 무엇을 해야 하고 이번 달에 얼마가 남는지를
-            한 번에 볼 수 없습니다. Dada Calendar 는 그 셋을 한 타임라인에 올립니다.
+            한 번에 볼 수 없습니다. 캘린더X 는 그 셋을 한 타임라인에 올립니다.
           </p>
           <div className="lock-choose">
             <button className="lock-submit" onClick={() => go('signin')}>로그인</button>

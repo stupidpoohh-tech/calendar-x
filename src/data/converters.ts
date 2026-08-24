@@ -122,12 +122,20 @@ export function entryToDoc(e: Entry): Raw {
 }
 
 export function accountFromDoc(id: string, raw: Raw): Account {
+  const asOf = normalizeDate(str(raw.asOf)) || todayISO();
+  const rawChecked = str(raw.checkedAt);
+  // 예전 데이터는 checkedAt 이 없다. asOf 자정으로 채운다 —
+  // 정산은 "그 날 이후" 를 세므로 자정으로 두면 그 날 예정분이 포함된다.
+  const checkedAt = /^\d{4}-\d{2}-\d{2}T/.test(rawChecked)
+    ? rawChecked
+    : `${asOf}T00:00:00.000Z`;
   return {
     id,
     name: str(raw.name, '주계좌'),
     balanceMinor: Math.trunc(num(raw.balanceMinor)),
     currency: str(raw.currency, DEFAULT_CURRENCY),
-    asOf: normalizeDate(str(raw.asOf)) || todayISO(),
+    asOf,
+    checkedAt,
     order: num(raw.order, 0),
     createdAt: str(raw.createdAt),
     updatedAt: str(raw.updatedAt),
@@ -137,7 +145,8 @@ export function accountFromDoc(id: string, raw: Raw): Account {
 export function accountToDoc(a: Account): Raw {
   return {
     name: a.name, balanceMinor: a.balanceMinor, currency: a.currency,
-    asOf: a.asOf, order: a.order, createdAt: a.createdAt, updatedAt: a.updatedAt,
+    asOf: a.asOf, checkedAt: a.checkedAt, order: a.order,
+    createdAt: a.createdAt, updatedAt: a.updatedAt,
   };
 }
 

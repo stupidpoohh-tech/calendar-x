@@ -12,7 +12,6 @@ import {
   deleteAllEntries, deleteDebt, deleteEntry, deletePin, fetchAll, markMigrated,
   readMigrationMark, saveAccount, saveDebt, saveEntry, savePin, saveTaskOrder, writeMany,
 } from '../data/repo';
-import { projectCashflow } from '../domain/cashflow';
 import { LENSES, LENS_BY_ID } from '../domain/constants';
 import {
   endOfMonth, fmtMonthTitle, startOfMonth, toISO, todayISO as computeToday,
@@ -22,8 +21,8 @@ import { applyFilters, collectTags, emptyFilters, hasActiveFilter } from '../dom
 import { baseIdOf, materialize } from '../domain/recurrence';
 import type { Entry, Filters, LensId, TaskStatus, ViewId } from '../domain/types';
 import { Auth } from '../ui/Auth';
-import { CashflowBar } from '../ui/CashflowBar';
 import { DaySheet } from '../ui/DaySheet';
+import { TideBar } from '../ui/TideBar';
 import { EntryModal } from '../ui/EntryModal';
 import { FilterPanel } from '../ui/FilterPanel';
 import { Icon } from '../ui/Icon';
@@ -42,7 +41,7 @@ import { useStore } from './useStore';
 export function App() {
   const { state, logout } = useAuth();
 
-  if (state.status === 'loading') return <div className="splash">Dada Calendar</div>;
+  if (state.status === 'loading') return <div className="splash">캘린더X</div>;
 
   if (state.status === 'error') {
     return (
@@ -104,13 +103,6 @@ function Workspace({ uid, user, onSignOut }: WorkspaceProps) {
   const linkableTasks = useMemo(
     () => store.entries.filter((e) => e.kind === 'task' && !e.isRecurring).slice(0, 100),
     [store.entries],
-  );
-
-  // 현금흐름은 필터와 무관하게 전체 가계부 항목으로 계산한다.
-  // 필터로 항목을 가렸다고 잔고가 늘어나면 안 된다.
-  const cashflow = useMemo(
-    () => projectCashflow(store.accounts, materialized, rangeFrom, rangeTo),
-    [store.accounts, materialized, rangeFrom, rangeTo],
   );
 
   const hasBalance = store.accounts.length > 0;
@@ -373,7 +365,7 @@ function Workspace({ uid, user, onSignOut }: WorkspaceProps) {
       <header className="topbar">
         <div className="brand">
           <span className="brand-mark"><Icon.Calendar size={15} /></span>
-          <span className="brand-name">Dada Calendar</span>
+          <span className="brand-name">캘린더X</span>
         </div>
 
         <nav className="lenses" role="tablist" aria-label="렌즈">
@@ -481,7 +473,7 @@ function Workspace({ uid, user, onSignOut }: WorkspaceProps) {
           <TodayPanel
             todayISO={today}
             entries={materialized}
-            cashflow={cashflow}
+            accounts={store.accounts}
             hasBalance={hasBalance}
             onEntryClick={openEdit}
             onStatusChange={handleStatus}
@@ -494,11 +486,12 @@ function Workspace({ uid, user, onSignOut }: WorkspaceProps) {
         {(lens === 'money' || (lens === 'all' && hasMoneyData)) && (
           <>
             {lens === 'money' && (
-              <CashflowBar result={cashflow} monthLabel={monthLabel} hasBalance={hasBalance} onPointClick={setDaySheet} />
+              <TideBar accounts={store.accounts} entries={materialized} hasBalance={hasBalance} onEntryClick={openEdit} />
             )}
             <MoneyPanel
               accounts={store.accounts}
               debts={store.debts}
+              entries={materialized}
               collapsed={prefs.debtsCollapsed}
               onToggleCollapsed={() => set('debtsCollapsed', !prefs.debtsCollapsed)}
               onSaveAccount={(a) => void saveAccount(db, uid, a)}
@@ -563,7 +556,7 @@ function Workspace({ uid, user, onSignOut }: WorkspaceProps) {
           dateISO={daySheet}
           todayISO={today}
           entries={daySheetEntries}
-          cashflow={cashflow.points.find((p) => p.date === daySheet) ?? null}
+          moneyEntries={materialized}
           onClose={() => setDaySheet(null)}
           onEntryClick={(e) => { setDaySheet(null); openEdit(e); }}
           onAdd={() => { const iso = daySheet; setDaySheet(null); openCreate({ startDate: iso }); }}
