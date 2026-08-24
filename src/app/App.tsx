@@ -20,8 +20,8 @@ import { convertKind, newEntry, withDerived } from '../domain/entry';
 import { applyFilters, collectTags, emptyFilters, hasActiveFilter } from '../domain/filters';
 import { baseIdOf, materialize } from '../domain/recurrence';
 import type { Entry, Filters, LensId, TaskStatus, ViewId } from '../domain/types';
+import { Auth } from '../ui/Auth';
 import { BrandFooter } from '../ui/BrandFooter';
-import { Landing } from '../ui/Landing';
 import { DaySheet } from '../ui/DaySheet';
 import { TideBar } from '../ui/TideBar';
 import { EntryModal } from '../ui/EntryModal';
@@ -37,6 +37,7 @@ import { TodayPanel } from '../ui/TodayPanel';
 import { useDialog } from '../ui/Dialog';
 import { useAuth } from './useAuth';
 import { usePrefs } from './usePrefs';
+import { useDemoStore } from './useDemoStore';
 import { useStore } from './useStore';
 
 export function App() {
@@ -54,14 +55,21 @@ export function App() {
     );
   }
 
-  if (state.status === 'signed-out') return <Landing />;
-
-  return <Workspace uid={state.user.uid} user={state.user} onSignOut={logout} />;
+  // 로그인 여부와 무관하게 홈 화면을 보여 준다. 로그아웃 상태는 데모 데이터로
+  // 채워지고, 저장·편집 시도가 나오는 순간 로그인 팝업이 뜬다.
+  const signedIn = state.status === 'signed-in';
+  return (
+    <Workspace
+      uid={signedIn ? state.user.uid : null}
+      user={signedIn ? state.user : null}
+      onSignOut={logout}
+    />
+  );
 }
 
 interface WorkspaceProps {
-  uid: string;
-  user: import('firebase/auth').User;
+  uid: string | null;
+  user: import('firebase/auth').User | null;
   onSignOut: () => void | Promise<void>;
 }
 
@@ -81,8 +89,26 @@ function Workspace({ uid, user, onSignOut }: WorkspaceProps) {
 
   const today = useMemo(() => computeToday(), []);
   const cursorISO = toISO(cursor);
-  const store = useStore(uid, cursorISO);
+  const isAnon = uid === null;
+  // 훅은 조건부 호출이 안 된다. 둘 다 부르고 로그인 상태에 따라 결과를 고른다.
+  const liveStore = useStore(uid, cursorISO);
+  const demoStore = useDemoStore();
+  const store = isAnon ? demoStore : liveStore;
   const { db } = getFirebase();
+
+  // 저장·편집 시도 시 로그인 유도 팝업. 사용자가 실제 앱을 만져 보다가
+  // 남기려는 순간에만 계정이 필요하다는 것을 자연스럽게 전달한다.
+  const [showAuth, setShowAuth] = useState(false);
+  const promptLogin = useCallback(async () => {
+    const ok = await dialog.confirm({
+      title: '계정을 만들어 저장하세요',
+      body: '지금 보이는 것은 미리보기 데이터입니다. 계정을 만들면 이 화면 그대로 시작해 이어서 쓸 수 있습니다.',
+      confirmLabel: '로그인 · 가입',
+      cancelLabel: '계속 둘러보기',
+    });
+    if (ok) setShowAuth(true);
+    return ok;
+  }, [dialog]);
 
   const lens = prefs.lens;
   const view = prefs.view;
@@ -112,19 +138,20 @@ function Workspace({ uid, user, onSignOut }: WorkspaceProps) {
   // 이관 전 컬렉션이 남아 있는지, 이미 옮겼는지 한 번만 확인한다.
   const checkedLegacy = useRef(false);
   useEffect(() => {
-    if (checkedLegacy.current) return;
+    if (checkedLegacy.current || isAnon || !uid) return;
     checkedLegacy.current = true;
     Promise.all([readLegacyItems(db, uid), readMigrationMark(db, uid)])
       .then(([items, migratedAt]) => setLegacy({ count: items.length, migratedAt }))
       .catch(() => setLegacy(null));
-  }, [db, uid]);
+  }, [db, uid, isAnon]);
 
   // ---------- 액션 ----------
 
   const openCreate = useCallback((patch: Partial<Entry> = {}) => {
+    if (isAnon) { void promptLogin(); return; }
     const kind = LENS_BY_ID[lens]?.kind ?? 'task';
     setModal({ open: true, mode: 'create', entry: newEntry(kind, { startDate: cursorISOForCreate(today, cursor), ...patch }) });
-  }, [lens, today, cursor]);
+  }, [lens, today, cursor, isAnon, promptLogin]);
 
   const openEdit = useCallback((e: Entry) => {
     // 반복 전개분을 눌러도 편집은 항상 원본을 향한다.
@@ -135,10 +162,11 @@ function Workspace({ uid, user, onSignOut }: WorkspaceProps) {
   const closeModal = useCallback(() => setModal((m) => ({ ...m, open: false })), []);
 
   const persist = useCallback((e: Entry) => {
+    if (isAnon || !uid) { void promptLogin(); return; }
     void saveEntry(db, uid, e).catch((err: unknown) => {
       dialog.toast(`저장하지 못했습니다. ${describeFirestoreError(err)}`, 'bad');
     });
-  }, [db, uid, dialog]);
+  }, [db, uid, isAnon, promptLogin, dialog]);
 
   const handleSave = useCallback((e: Entry) => {
     persist(e);
@@ -146,6 +174,7 @@ function Workspace({ uid, user, onSignOut }: WorkspaceProps) {
   }, [persist, closeModal]);
 
   const handleDelete = useCallback(async (e: Entry) => {
+    if (isAnon || !uid) { void promptLogin(); return; }
     const ok = await dialog.confirm({
       title: '이 항목을 삭제할까요?',
       body: e.isRecurring
@@ -162,7 +191,7 @@ function Workspace({ uid, user, onSignOut }: WorkspaceProps) {
     } catch (err) {
       dialog.toast(`삭제하지 못했습니다. ${describeFirestoreError(err)}`, 'bad');
     }
-  }, [db, uid, dialog, closeModal]);
+  }, [db, uid, isAnon, promptLogin, dialog, closeModal]);
 
   const handleStatus = useCallback((e: Entry, status: TaskStatus) => {
     const base = store.entries.find((x) => x.id === baseIdOf(e.id)) ?? e;
@@ -182,6 +211,7 @@ function Workspace({ uid, user, onSignOut }: WorkspaceProps) {
    * 이전에는 로컬 상태만 바꿔서 다음 스냅샷이 오면 원위치했다.
    */
   const handleReorder = useCallback((dragId: string, overId: string, position: 'before' | 'after') => {
+    if (isAnon || !uid) { void promptLogin(); return; }
     const tasks = materialized
       .filter((e) => e.kind === 'task')
       .sort((a, b) => (a.task?.order ?? 0) - (b.task?.order ?? 0));
@@ -199,11 +229,12 @@ function Workspace({ uid, user, onSignOut }: WorkspaceProps) {
 
     void saveTaskOrder(db, uid, next.map((e, i) => ({ id: baseIdOf(e.id), order: i })))
       .catch((err: unknown) => dialog.toast(`순서를 저장하지 못했습니다. ${describeFirestoreError(err)}`, 'bad'));
-  }, [materialized, db, uid, dialog]);
+  }, [materialized, db, uid, isAnon, promptLogin, dialog]);
 
   // ---------- 백업 / 복원 / 이관 ----------
 
   const handleExport = useCallback(async () => {
+    if (isAnon || !uid) { void promptLogin(); return; }
     try {
       const all = await fetchAll(db, uid);
       downloadJSON(buildBackup(all), backupFilename());
@@ -211,9 +242,10 @@ function Workspace({ uid, user, onSignOut }: WorkspaceProps) {
     } catch (err) {
       dialog.toast(`백업하지 못했습니다. ${describeFirestoreError(err)}`, 'bad');
     }
-  }, [db, uid, dialog]);
+  }, [db, uid, isAnon, promptLogin, dialog]);
 
   const handleImport = useCallback(async () => {
+    if (isAnon || !uid) { void promptLogin(); return; }
     const file = await pickFile('application/json');
     if (!file) return;
 
@@ -256,9 +288,10 @@ function Workspace({ uid, user, onSignOut }: WorkspaceProps) {
     } catch (err) {
       dialog.toast(`가져오지 못했습니다. ${describeFirestoreError(err)}`, 'bad');
     }
-  }, [db, uid, dialog]);
+  }, [db, uid, isAnon, promptLogin, dialog]);
 
   const handleMigrate = useCallback(async () => {
+    if (isAnon || !uid) { void promptLogin(); return; }
     try {
       const items = await readLegacyItems(db, uid);
       if (items.length === 0) { setLegacy({ count: 0, migratedAt: legacy?.migratedAt ?? null }); return; }
@@ -351,7 +384,7 @@ function Workspace({ uid, user, onSignOut }: WorkspaceProps) {
       }
       dialog.toast(`옮기지 못했습니다: ${describeFirestoreError(err)}`, 'bad');
     }
-  }, [db, uid, dialog, legacy]);
+  }, [db, uid, isAnon, promptLogin, dialog, legacy]);
 
   // ---------- 렌더 ----------
 
@@ -384,9 +417,13 @@ function Workspace({ uid, user, onSignOut }: WorkspaceProps) {
           ))}
         </nav>
 
-        <button className="ico-btn" onClick={() => setShowSettings(true)} aria-label="설정">
-          <Icon.Settings size={16} />
-        </button>
+        {isAnon ? (
+          <button className="landing-cta-sm" onClick={() => setShowAuth(true)}>로그인 · 가입</button>
+        ) : (
+          <button className="ico-btn" onClick={() => setShowSettings(true)} aria-label="설정">
+            <Icon.Settings size={16} />
+          </button>
+        )}
       </header>
 
       <div className="toolbar">
@@ -495,9 +532,16 @@ function Workspace({ uid, user, onSignOut }: WorkspaceProps) {
               entries={materialized}
               collapsed={prefs.debtsCollapsed}
               onToggleCollapsed={() => set('debtsCollapsed', !prefs.debtsCollapsed)}
-              onSaveAccount={(a) => void saveAccount(db, uid, a)}
-              onSaveDebt={(d) => void saveDebt(db, uid, d)}
+              onSaveAccount={(a) => {
+                if (isAnon || !uid) { void promptLogin(); return; }
+                void saveAccount(db, uid, a);
+              }}
+              onSaveDebt={(d) => {
+                if (isAnon || !uid) { void promptLogin(); return; }
+                void saveDebt(db, uid, d);
+              }}
               onDeleteDebt={async (d) => {
+                if (isAnon || !uid) { void promptLogin(); return; }
                 const ok = await dialog.confirm({ title: `'${d.name}'을(를) 삭제할까요?`, danger: true, confirmLabel: '삭제' });
                 if (ok) void deleteDebt(db, uid, d.id);
               }}
@@ -511,8 +555,14 @@ function Workspace({ uid, user, onSignOut }: WorkspaceProps) {
             pins={store.pins}
             collapsed={!!prefs.pinCollapsed[lens]}
             onToggleCollapsed={() => set('pinCollapsed', { ...prefs.pinCollapsed, [lens]: !prefs.pinCollapsed[lens] })}
-            onSave={(p) => void savePin(db, uid, p)}
-            onDelete={(p) => void deletePin(db, uid, p.id)}
+            onSave={(p) => {
+              if (isAnon || !uid) { void promptLogin(); return; }
+              void savePin(db, uid, p);
+            }}
+            onDelete={(p) => {
+              if (isAnon || !uid) { void promptLogin(); return; }
+              void deletePin(db, uid, p.id);
+            }}
           />
         )}
       </div>
@@ -575,9 +625,17 @@ function Workspace({ uid, user, onSignOut }: WorkspaceProps) {
         onClose={closeModal}
       />
 
+      {showAuth && (
+        <div className="mod-back" onClick={() => setShowAuth(false)}>
+          <div className="mod auth-mod" role="dialog" aria-modal="true" onClick={(e) => e.stopPropagation()}>
+            <Auth onBack={() => setShowAuth(false)} />
+          </div>
+        </div>
+      )}
+
       <BrandFooter />
 
-      {showSettings && (
+      {showSettings && user && (
         <SettingsSheet
           user={user}
           theme={prefs.theme}

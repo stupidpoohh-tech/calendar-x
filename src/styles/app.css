@@ -1091,3 +1091,15 @@
   text-decoration: none; transition: border-color .12s, color .12s;
 }
 .brand-footer-home:hover { border-color: var(--ink); color: var(--ink); }
+
+/* 로그인 유도 모달 안의 Auth 컴포넌트는 자체 배경(lock-root)이 있어 최소만 감싼다. */
+.auth-mod {
+  max-width: 420px;
+  padding: 0;
+  overflow: hidden;
+}
+.auth-mod .lock-root {
+  position: static; inset: auto;
+  min-height: 0; padding: 26px 28px 22px;
+  background: transparent; color: var(--ink);
+}
