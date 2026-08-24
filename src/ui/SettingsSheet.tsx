@@ -9,6 +9,8 @@ interface Props {
   weekStart: WeekStart;
   entryCount: number;
   legacyCount: number | null;
+  /** 이관을 이미 끝냈으면 그 시각. 안내를 다시 띄우지 않기 위한 표식이다. */
+  migratedAt: string | null;
   onTheme: (t: ThemePref) => void;
   onWeekStart: (w: WeekStart) => void;
   onExport: () => void | Promise<void>;
@@ -19,9 +21,10 @@ interface Props {
 }
 
 export function SettingsSheet({
-  user, theme, weekStart, entryCount, legacyCount,
+  user, theme, weekStart, entryCount, legacyCount, migratedAt,
   onTheme, onWeekStart, onExport, onImport, onMigrate, onSignOut, onClose,
 }: Props) {
+  const [showRedo, setShowRedo] = useState(false);
   const [busy, setBusy] = useState<string | null>(null);
 
   const run = async (key: string, fn: () => void | Promise<void>) => {
@@ -48,7 +51,7 @@ export function SettingsSheet({
             </div>
           </div>
 
-          {legacyCount != null && legacyCount > 0 && (
+          {legacyCount != null && legacyCount > 0 && !migratedAt && (
             <div className="set-migrate">
               <div className="set-migrate-h">
                 <Icon.Alert size={14} />
@@ -62,6 +65,22 @@ export function SettingsSheet({
               <button className="btn primary" disabled={busy != null} onClick={() => run('migrate', onMigrate)}>
                 {busy === 'migrate' ? '옮기는 중…' : '새 구조로 옮기기'}
               </button>
+            </div>
+          )}
+
+          {migratedAt && (
+            <div className="set-migrated">
+              <span>
+                <Icon.Check size={13} /> 이관 완료 · {migratedAt.slice(0, 10)}
+                {legacyCount != null && legacyCount > 0 && ` · 원본 ${legacyCount.toLocaleString('ko-KR')}건은 그대로 있습니다`}
+              </span>
+              {showRedo ? (
+                <button className="btn" disabled={busy != null} onClick={() => run('migrate', onMigrate)}>
+                  {busy === 'migrate' ? '옮기는 중…' : '한 번 더 옮기기'}
+                </button>
+              ) : (
+                <button className="set-redo" onClick={() => setShowRedo(true)}>다시 옮기기</button>
+              )}
             </div>
           )}
 

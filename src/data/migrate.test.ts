@@ -171,7 +171,9 @@ describe('convertLegacyItems — ::loans:: 우회 해제', () => {
 
   it('한 문서의 JSON 배열을 대출 1건 = 1문서로 쪼갠다 — 덮어쓰기 원인 제거', () => {
     expect(r.debts).toHaveLength(2);
-    expect(r.debts.map((d) => d.id)).toHaveLength(new Set(r.debts.map((d) => d.id)).size);
+    expect(new Set(r.debts.map((d) => d.id)).size).toBe(2);
+    // 원본 문서 id 에서 파생시켜 재실행해도 같은 문서를 가리킨다.
+    expect(r.debts.map((d) => d.id)).toEqual(['f1-0', 'f1-1']);
   });
   it('금액과 회차를 정수로 옮긴다', () => {
     expect(r.debts[0]).toMatchObject({
@@ -207,9 +209,20 @@ describe('convertLegacyItems — 전체', () => {
     expect(r2.skipped[0]?.reason).toContain('memo');
   });
 
-  it('id 가 없으면 새로 만든다', () => {
+  it('id 가 없으면 순번으로 고정한다', () => {
     const r2 = convertLegacyItems([{ tab: 'todo', title: 'id 없음' }]);
-    expect(r2.entries[0]?.id).toBeTruthy();
+    expect(r2.entries[0]?.id).toBe('legacy-0');
+  });
+
+  it('두 번 돌려도 같은 결과를 낸다 — 이관은 몇 번을 눌러도 안전해야 한다', () => {
+    // 원본 items 를 지우지 않으므로 사용자가 이관을 두 번 누를 수 있다.
+    // id 가 랜덤이면 대출이 두 건으로 늘어난다.
+    const a = convertLegacyItems(all);
+    const b = convertLegacyItems(all);
+    expect(b.entries.map((e) => e.id)).toEqual(a.entries.map((e) => e.id));
+    expect(b.debts.map((d) => d.id)).toEqual(a.debts.map((d) => d.id));
+    expect(b.accounts.map((x) => x.id)).toEqual(a.accounts.map((x) => x.id));
+    expect(b.pins.map((x) => x.id)).toEqual(a.pins.map((x) => x.id));
   });
 
   it('요약 문장을 낸다', () => {

@@ -6,8 +6,8 @@ import {
 import { getFirebase } from '../data/firebase';
 import { convertLegacyItems, readLegacyItems, summarize } from '../data/migrate';
 import {
-  deleteAllEntries, deleteDebt, deleteEntry, deletePin, fetchAll,
-  saveAccount, saveDebt, saveEntry, savePin, saveTaskOrder, writeMany,
+  deleteAllEntries, deleteDebt, deleteEntry, deletePin, fetchAll, markMigrated,
+  readMigrationMark, saveAccount, saveDebt, saveEntry, savePin, saveTaskOrder, writeMany,
 } from '../data/repo';
 import { projectCashflow } from '../domain/cashflow';
 import { LENSES, LENS_BY_ID } from '../domain/constants';
@@ -74,7 +74,7 @@ function Workspace({ uid, user, onSignOut }: WorkspaceProps) {
   const [modal, setModal] = useState<{ open: boolean; mode: 'create' | 'edit'; entry: Entry | null }>(
     { open: false, mode: 'create', entry: null },
   );
-  const [legacyCount, setLegacyCount] = useState<number | null>(null);
+  const [legacy, setLegacy] = useState<{ count: number; migratedAt: string | null } | null>(null);
 
   const today = useMemo(() => computeToday(), []);
   const cursorISO = toISO(cursor);
@@ -113,14 +113,14 @@ function Workspace({ uid, user, onSignOut }: WorkspaceProps) {
   const hasBalance = store.accounts.length > 0;
   const hasMoneyData = hasBalance || store.debts.length > 0 || materialized.some((e) => e.kind === 'money');
 
-  // 이관 전 컬렉션이 남아 있는지 한 번만 확인한다.
+  // 이관 전 컬렉션이 남아 있는지, 이미 옮겼는지 한 번만 확인한다.
   const checkedLegacy = useRef(false);
   useEffect(() => {
     if (checkedLegacy.current) return;
     checkedLegacy.current = true;
-    readLegacyItems(db, uid)
-      .then((items) => setLegacyCount(items.length))
-      .catch(() => setLegacyCount(null));
+    Promise.all([readLegacyItems(db, uid), readMigrationMark(db, uid)])
+      .then(([items, migratedAt]) => setLegacy({ count: items.length, migratedAt }))
+      .catch(() => setLegacy(null));
   }, [db, uid]);
 
   // ---------- 액션 ----------
@@ -265,7 +265,7 @@ function Workspace({ uid, user, onSignOut }: WorkspaceProps) {
   const handleMigrate = useCallback(async () => {
     try {
       const items = await readLegacyItems(db, uid);
-      if (items.length === 0) { setLegacyCount(0); return; }
+      if (items.length === 0) { setLegacy({ count: 0, migratedAt: legacy?.migratedAt ?? null }); return; }
 
       const result = convertLegacyItems(items);
       const ok = await dialog.confirm({
@@ -286,13 +286,17 @@ function Workspace({ uid, user, onSignOut }: WorkspaceProps) {
       if (!ok) return;
 
       await writeMany(db, uid, result);
-      setLegacyCount(items.length);
+      // 표식을 남겨야 안내가 사라진다. 원본 items 는 지우지 않으므로
+      // 표식이 없으면 안내가 계속 떠서 한 번 더 누르게 된다.
+      const at = new Date().toISOString();
+      await markMigrated(db, uid, at);
+      setLegacy({ count: items.length, migratedAt: at });
       dialog.toast(`${summarize(result)} — 옮겼습니다.`);
       setShowSettings(false);
     } catch (err) {
       dialog.toast(`옮기지 못했습니다: ${err instanceof Error ? err.message : String(err)}`, 'bad');
     }
-  }, [db, uid, dialog]);
+  }, [db, uid, dialog, legacy]);
 
   // ---------- 렌더 ----------
 
@@ -495,7 +499,8 @@ function Workspace({ uid, user, onSignOut }: WorkspaceProps) {
           theme={prefs.theme}
           weekStart={prefs.weekStart}
           entryCount={store.entries.length}
-          legacyCount={legacyCount}
+          legacyCount={legacy?.count ?? null}
+          migratedAt={legacy?.migratedAt ?? null}
           onTheme={(t) => set('theme', t)}
           onWeekStart={(w) => set('weekStart', w)}
           onExport={handleExport}

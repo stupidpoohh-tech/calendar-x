@@ -10,7 +10,7 @@
  * 곧바로 반영된다. (F-08)
  */
 import {
-  deleteDoc, getDocs, onSnapshot, query, setDoc, where, writeBatch,
+  deleteDoc, getDoc, getDocs, onSnapshot, query, setDoc, where, writeBatch,
   type Firestore, type QuerySnapshot,
 } from 'firebase/firestore';
 import { ymOf } from '../domain/date';
@@ -19,7 +19,7 @@ import {
   accountFromDoc, accountToDoc, debtFromDoc, debtToDoc,
   entryFromDoc, entryToDoc, pinFromDoc, pinToDoc,
 } from './converters';
-import { COL, col, docIn } from './paths';
+import { COL, col, docIn, userDoc } from './paths';
 
 export type Unsubscribe = () => void;
 
@@ -211,4 +211,24 @@ export function monthWindow(cursorISO: string): YearMonth[] {
     return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
   };
   return [at(-1), at(0), at(1)];
+}
+
+/**
+ * 이관을 이미 끝냈는지 기록한다.
+ *
+ * 이관해도 원본 items 는 남기므로, 표식이 없으면 설정에 안내가 계속 뜬다.
+ * 사용자가 한 번 더 누르면 대출이 두 건으로 늘어나는 식의 사고가 난다.
+ */
+export async function readMigrationMark(db: Firestore, uid: string): Promise<string | null> {
+  try {
+    const snap = await getDoc(userDoc(db, uid));
+    const value = snap.data()?.migratedAt;
+    return typeof value === 'string' ? value : null;
+  } catch {
+    return null;
+  }
+}
+
+export function markMigrated(db: Firestore, uid: string, at = new Date().toISOString()): Promise<void> {
+  return setDoc(userDoc(db, uid), { migratedAt: at }, { merge: true });
 }

@@ -16,7 +16,6 @@ import { getDocs } from 'firebase/firestore';
 import type { Firestore } from 'firebase/firestore';
 import { DEFAULT_CURRENCY, MONEY_TYPES, MONEY_TYPE_BY_ID } from '../domain/constants';
 import { normalizeDate, todayISO, ymRange } from '../domain/date';
-import { uid as newId } from '../domain/entry';
 import type {
   Account, ColorId, Debt, Entry, EntryKind, MoneyType, Pin, Recurrence, TaskStatus,
 } from '../domain/types';
@@ -105,8 +104,10 @@ export function convertLegacyItems(items: readonly Raw[]): MigrationResult {
 
   let pinOrderFallback = 0;
 
-  for (const raw of items) {
-    const id = str(raw.id) || newId();
+  items.forEach((raw, index) => {
+    // id 가 없으면 순번으로 고정한다. 랜덤 id 를 쓰면 이관을 두 번 돌렸을 때
+    // 같은 항목이 두 건으로 늘어난다.
+    const id = str(raw.id) || `legacy-${index}`;
     const title = str(raw.title);
     const tab = str(raw.tab, 'todo');
     const kind = TAB_TO_KIND[tab];
@@ -120,7 +121,7 @@ export function convertLegacyItems(items: readonly Raw[]): MigrationResult {
         order: 0,
         createdAt: str(raw.createdAt, now), updatedAt: str(raw.updatedAt, now),
       });
-      continue;
+      return;
     }
 
     // ---- 대출: 배열 전체가 한 문서의 memo 에 들어 있었다 ----
@@ -131,17 +132,19 @@ export function convertLegacyItems(items: readonly Raw[]): MigrationResult {
       } catch {
         // 깨진 JSON 을 조용히 버리면 대출 내역이 통째로 사라진 줄도 모른다.
         skipped.push({ id, reason: '대출 목록 JSON 을 읽을 수 없어 건너뛰었습니다.' });
-        continue;
+        return;
       }
       if (!Array.isArray(list)) {
         skipped.push({ id, reason: '대출 목록이 배열이 아닙니다.' });
-        continue;
+        return;
       }
       list.forEach((entry, i) => {
         const l = (entry ?? {}) as Raw;
         const rate = numOf(l.rate, NaN);
         debts.push({
-          id: newId(),
+          // 원본 문서 id + 순번으로 고정한다. 랜덤 id 를 쓰면 이관을 두 번 돌렸을 때
+          // 같은 대출이 두 건으로 늘어난다.
+          id: `${id}-${i}`,
           name: str(l.name, `대출 ${i + 1}`),
           balanceMinor: Math.trunc(numOf(l.balance)),
           monthlyMinor: Math.trunc(numOf(l.monthly)),
@@ -152,12 +155,12 @@ export function convertLegacyItems(items: readonly Raw[]): MigrationResult {
           createdAt: str(raw.createdAt, now), updatedAt: str(raw.updatedAt, now),
         });
       });
-      continue;
+      return;
     }
 
     if (!kind) {
       skipped.push({ id, reason: `알 수 없는 탭: ${tab}` });
-      continue;
+      return;
     }
 
     // ---- 고정 메모 ----
@@ -169,7 +172,7 @@ export function convertLegacyItems(items: readonly Raw[]): MigrationResult {
         order: numOf(raw.pinOrder, pinOrderFallback++),
         createdAt: str(raw.createdAt, now), updatedAt: str(raw.updatedAt, now),
       });
-      continue;
+      return;
     }
 
     // ---- 일반 항목 ----
@@ -227,7 +230,7 @@ export function convertLegacyItems(items: readonly Raw[]): MigrationResult {
       createdAt: str(raw.createdAt, now),
       updatedAt: str(raw.updatedAt, now),
     });
-  }
+  });
 
   // 잔고가 여러 개면 가장 최근 것만 남긴다. 이전 구조는 하나만 쓰는 전제였다.
   accounts.sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));

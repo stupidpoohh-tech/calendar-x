@@ -57,6 +57,9 @@ npm run dev
 
 ## 배포
 
+처음 배포한다면 **[docs/DEPLOY.md](docs/DEPLOY.md)** 에 단계별 절차가 있습니다.
+아래는 요약입니다.
+
 Cloudflare Pages 기준.
 
 - 빌드 명령: `npm run build`
