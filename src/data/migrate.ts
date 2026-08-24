@@ -25,6 +25,25 @@ import { COL, col } from './paths';
 export const BALANCE_TITLE = '::balance::';
 export const LOANS_TITLE = '::loans::';
 
+/**
+ * firestore.rules 가 강제하는 상한.
+ *
+ * Firestore 배치 쓰기는 원자적이라, 한도를 넘는 항목이 하나만 있어도 400건짜리 배치
+ * 전체가 'Missing or insufficient permissions' 로 실패한다. 어느 항목 때문인지도
+ * 알려주지 않는다. 그래서 옮기기 전에 여기서 맞춰 두고, 잘라낸 것은 보고한다.
+ */
+export const LIMITS = {
+  title: 500,
+  note: 20_000,
+  tags: 50,
+  pinText: 2_000,
+  name: 100,
+} as const;
+
+function clamp(value: string, max: number): string {
+  return value.length <= max ? value : value.slice(0, max);
+}
+
 export interface MigrationResult {
   entries: Entry[];
   accounts: Account[];
@@ -32,6 +51,8 @@ export interface MigrationResult {
   pins: Pin[];
   /** 읽었지만 어디에도 넣지 못한 항목. 조용히 버리지 않고 보고한다. */
   skipped: { id: string; reason: string }[];
+  /** 저장 한도에 맞춰 잘라낸 항목. 값이 바뀌었으므로 함께 알린다. */
+  trimmed: { id: string; reason: string }[];
   legacyCount: number;
 }
 
@@ -100,6 +121,7 @@ export function convertLegacyItems(items: readonly Raw[]): MigrationResult {
   const debts: Debt[] = [];
   const pins: Pin[] = [];
   const skipped: { id: string; reason: string }[] = [];
+  const trimmed: { id: string; reason: string }[] = [];
   const now = new Date().toISOString();
 
   let pinOrderFallback = 0;
@@ -145,7 +167,7 @@ export function convertLegacyItems(items: readonly Raw[]): MigrationResult {
           // 원본 문서 id + 순번으로 고정한다. 랜덤 id 를 쓰면 이관을 두 번 돌렸을 때
           // 같은 대출이 두 건으로 늘어난다.
           id: `${id}-${i}`,
-          name: str(l.name, `대출 ${i + 1}`),
+          name: clamp(str(l.name, `대출 ${i + 1}`), LIMITS.name),
           balanceMinor: Math.trunc(numOf(l.balance)),
           monthlyMinor: Math.trunc(numOf(l.monthly)),
           rate: Number.isFinite(rate) && rate > 0 ? rate : null,
@@ -165,10 +187,13 @@ export function convertLegacyItems(items: readonly Raw[]): MigrationResult {
 
     // ---- 고정 메모 ----
     if (boolOf(raw.pinned)) {
+      if (title.length > LIMITS.pinText) {
+        trimmed.push({ id, reason: `고정 메모가 ${LIMITS.pinText}자를 넘어 잘랐습니다.` });
+      }
       pins.push({
         id,
         lens: kind,
-        text: title,
+        text: clamp(title, LIMITS.pinText),
         order: numOf(raw.pinOrder, pinOrderFallback++),
         createdAt: str(raw.createdAt, now), updatedAt: str(raw.updatedAt, now),
       });
@@ -192,8 +217,16 @@ export function convertLegacyItems(items: readonly Raw[]): MigrationResult {
 
     const recurrence = kind === 'task' ? legacyRecurrence(raw.repeat) : null;
 
-    const entryTitle = kind === 'money' ? extractMoneyLabel(title, moneyType) : title;
-    const note = str(raw.memo);
+    const rawTitle = kind === 'money' ? extractMoneyLabel(title, moneyType) : title;
+    const rawNote = str(raw.memo);
+    const rawTags = Array.isArray(raw.tags) ? raw.tags.filter((t): t is string => typeof t === 'string') : [];
+
+    if (rawTitle.length > LIMITS.title) trimmed.push({ id, reason: `제목이 ${LIMITS.title}자를 넘어 잘랐습니다.` });
+    if (rawNote.length > LIMITS.note) trimmed.push({ id, reason: `메모가 ${LIMITS.note}자를 넘어 잘랐습니다.` });
+    if (rawTags.length > LIMITS.tags) trimmed.push({ id, reason: `태그가 ${LIMITS.tags}개를 넘어 잘랐습니다.` });
+
+    const entryTitle = clamp(rawTitle, LIMITS.title);
+    const note = clamp(rawNote, LIMITS.note);
 
     entries.push({
       id,
@@ -202,7 +235,7 @@ export function convertLegacyItems(items: readonly Raw[]): MigrationResult {
       // 가계부는 memo 가 라벨로 쓰였고 그 값이 title 에 합쳐져 있었다. 중복 저장을 피한다.
       note: kind === 'money' && note === entryTitle ? '' : note,
       color: asColor(raw.color, kind === 'money' ? MONEY_TYPE_BY_ID[moneyType].defaultColor : kind === 'idea' ? 'violet' : 'blue'),
-      tags: Array.isArray(raw.tags) ? raw.tags.filter((t): t is string => typeof t === 'string') : [],
+      tags: rawTags.slice(0, LIMITS.tags),
       location: str(raw.location),
       startDate,
       startTime: boolOf(raw.startHasTime) ? start.time : (kind === 'task' ? start.time : null),
@@ -239,7 +272,7 @@ export function convertLegacyItems(items: readonly Raw[]): MigrationResult {
     skipped.push({ id: dropped.id, reason: '잔고 문서가 여러 개라 가장 최근 것만 남겼습니다.' });
   }
 
-  return { entries, accounts: keptAccounts, debts, pins, skipped, legacyCount: items.length };
+  return { entries, accounts: keptAccounts, debts, pins, skipped, trimmed, legacyCount: items.length };
 }
 
 /** 이관 전 컬렉션을 읽는다. 원본은 건드리지 않는다. */
@@ -257,6 +290,7 @@ export function summarize(r: MigrationResult): string {
     `대출 ${r.debts.length}건`,
     `고정 메모 ${r.pins.length}건`,
   ];
+  if (r.trimmed.length > 0) parts.push(`길이 조정 ${r.trimmed.length}건`);
   if (r.skipped.length > 0) parts.push(`건너뜀 ${r.skipped.length}건`);
   return parts.join(' · ');
 }

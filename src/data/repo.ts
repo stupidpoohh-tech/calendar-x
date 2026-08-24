@@ -14,6 +14,7 @@ import {
   type Firestore, type QuerySnapshot,
 } from 'firebase/firestore';
 import { ymOf } from '../domain/date';
+import { describeFirestoreError } from './errors';
 import type { Account, Debt, Entry, Pin, YearMonth } from '../domain/types';
 import {
   accountFromDoc, accountToDoc, debtFromDoc, debtToDoc,
@@ -166,12 +167,26 @@ export async function fetchAll(db: Firestore, uid: string): Promise<{
   };
 }
 
-/** 다건 저장. 가져오기·이관에서 쓴다. */
+export interface WriteManyResult {
+  written: number;
+  /** 저장하지 못한 문서. 어느 것이 왜 막혔는지 알려 준다. */
+  failed: { collection: string; id: string; reason: string }[];
+  /** 한 건도 저장되지 않음. 규칙이 컬렉션을 통째로 막고 있을 때의 모습이다. */
+  allFailed: boolean;
+}
+
+/**
+ * 다건 저장. 가져오기·이관에서 쓴다.
+ *
+ * 배치 쓰기는 원자적이라 한 문서가 규칙에 걸리면 배치 전체가 실패하고,
+ * 어느 문서 때문인지 알려주지 않는다. 그래서 배치가 깨지면 문서 단위로 다시 시도해
+ * 실패한 것만 추려 낸다. 실패 경로에서만 도는 비용이라 평소에는 배치 그대로다.
+ */
 export async function writeMany(
   db: Firestore, uid: string,
   payload: { entries?: Entry[]; accounts?: Account[]; debts?: Debt[]; pins?: Pin[] },
   onProgress?: (done: number, total: number) => void,
-): Promise<void> {
+): Promise<WriteManyResult> {
   type Job = { name: string; id: string; data: Record<string, unknown> };
   const jobs: Job[] = [
     ...(payload.entries ?? []).map((x) => ({ name: COL.entries, id: x.id, data: entryToDoc(x) })),
@@ -180,15 +195,33 @@ export async function writeMany(
     ...(payload.pins ?? []).map((x) => ({ name: COL.pins, id: x.id, data: pinToDoc(x) })),
   ];
 
+  const result: WriteManyResult = { written: 0, failed: [], allFailed: false };
   const CHUNK = 400;
+
   for (let i = 0; i < jobs.length; i += CHUNK) {
-    const batch = writeBatch(db);
-    for (const j of jobs.slice(i, i + CHUNK)) {
-      batch.set(docIn(db, uid, j.name, j.id), j.data);
+    const slice = jobs.slice(i, i + CHUNK);
+    try {
+      const batch = writeBatch(db);
+      for (const j of slice) batch.set(docIn(db, uid, j.name, j.id), j.data);
+      await batch.commit();
+      result.written += slice.length;
+    } catch {
+      // 배치는 원자적이라 한 문서가 막히면 전체가 같은 오류로 실패하고,
+      // 어느 문서 때문인지 알려주지 않는다. 문서 단위로 다시 시도해 범인을 추린다.
+      for (const j of slice) {
+        try {
+          await setDoc(docIn(db, uid, j.name, j.id), j.data);
+          result.written += 1;
+        } catch (err) {
+          result.failed.push({ collection: j.name, id: j.id, reason: describeFirestoreError(err) });
+        }
+      }
     }
-    await batch.commit();
     onProgress?.(Math.min(i + CHUNK, jobs.length), jobs.length);
   }
+
+  result.allFailed = jobs.length > 0 && result.written === 0;
+  return result;
 }
 
 export async function deleteAllEntries(db: Firestore, uid: string): Promise<number> {

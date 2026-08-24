@@ -3,6 +3,7 @@ import {
   backupFilename, buildBackup, countBackup, downloadJSON,
   mergeBackup, parseBackup, type BackupData,
 } from '../data/backup';
+import { describeFirestoreError, isPermissionDenied, RULES_DEPLOY_COMMAND } from '../data/errors';
 import { getFirebase } from '../data/firebase';
 import { convertLegacyItems, readLegacyItems, summarize } from '../data/migrate';
 import {
@@ -140,7 +141,7 @@ function Workspace({ uid, user, onSignOut }: WorkspaceProps) {
 
   const persist = useCallback((e: Entry) => {
     void saveEntry(db, uid, e).catch((err: unknown) => {
-      dialog.toast(`저장하지 못했습니다: ${err instanceof Error ? err.message : String(err)}`, 'bad');
+      dialog.toast(`저장하지 못했습니다. ${describeFirestoreError(err)}`, 'bad');
     });
   }, [db, uid, dialog]);
 
@@ -164,7 +165,7 @@ function Workspace({ uid, user, onSignOut }: WorkspaceProps) {
       await deleteEntry(db, uid, baseIdOf(e.id));
       dialog.toast('삭제했습니다.');
     } catch (err) {
-      dialog.toast(`삭제하지 못했습니다: ${err instanceof Error ? err.message : String(err)}`, 'bad');
+      dialog.toast(`삭제하지 못했습니다. ${describeFirestoreError(err)}`, 'bad');
     }
   }, [db, uid, dialog, closeModal]);
 
@@ -202,7 +203,7 @@ function Workspace({ uid, user, onSignOut }: WorkspaceProps) {
     next.splice(Math.max(0, insertAt), 0, moved);
 
     void saveTaskOrder(db, uid, next.map((e, i) => ({ id: baseIdOf(e.id), order: i })))
-      .catch((err: unknown) => dialog.toast(`순서를 저장하지 못했습니다: ${String(err)}`, 'bad'));
+      .catch((err: unknown) => dialog.toast(`순서를 저장하지 못했습니다. ${describeFirestoreError(err)}`, 'bad'));
   }, [materialized, db, uid, dialog]);
 
   // ---------- 백업 / 복원 / 이관 ----------
@@ -213,7 +214,7 @@ function Workspace({ uid, user, onSignOut }: WorkspaceProps) {
       downloadJSON(buildBackup(all), backupFilename());
       dialog.toast(`${countBackup(all).toLocaleString('ko-KR')}건을 내려받았습니다.`);
     } catch (err) {
-      dialog.toast(`백업하지 못했습니다: ${err instanceof Error ? err.message : String(err)}`, 'bad');
+      dialog.toast(`백업하지 못했습니다. ${describeFirestoreError(err)}`, 'bad');
     }
   }, [db, uid, dialog]);
 
@@ -258,7 +259,7 @@ function Workspace({ uid, user, onSignOut }: WorkspaceProps) {
       }
       dialog.toast('가져왔습니다.');
     } catch (err) {
-      dialog.toast(`가져오지 못했습니다: ${err instanceof Error ? err.message : String(err)}`, 'bad');
+      dialog.toast(`가져오지 못했습니다. ${describeFirestoreError(err)}`, 'bad');
     }
   }, [db, uid, dialog]);
 
@@ -268,14 +269,16 @@ function Workspace({ uid, user, onSignOut }: WorkspaceProps) {
       if (items.length === 0) { setLegacy({ count: 0, migratedAt: legacy?.migratedAt ?? null }); return; }
 
       const result = convertLegacyItems(items);
+      const notes = [...result.skipped, ...result.trimmed];
       const ok = await dialog.confirm({
         title: '이관 전 데이터를 새 구조로 옮길까요?',
         body: (
           <>
             <p>{summarize(result)}</p>
-            {result.skipped.length > 0 && (
+            {notes.length > 0 && (
               <ul className="dlg-skips">
-                {result.skipped.slice(0, 5).map((s) => <li key={s.id}>{s.reason}</li>)}
+                {notes.slice(0, 5).map((n, i) => <li key={`${n.id}-${i}`}>{n.reason}</li>)}
+                {notes.length > 5 && <li>그 외 {notes.length - 5}건</li>}
               </ul>
             )}
             <p className="dlg-note">예전 <code>items</code> 컬렉션은 지우지 않습니다. 문제가 있으면 되돌릴 수 있습니다.</p>
@@ -285,16 +288,71 @@ function Workspace({ uid, user, onSignOut }: WorkspaceProps) {
       });
       if (!ok) return;
 
-      await writeMany(db, uid, result);
+      const written = await writeMany(db, uid, result);
+
+      if (written.allFailed) {
+        await dialog.confirm({
+          title: '한 건도 옮기지 못했습니다',
+          body: (
+            <>
+              <p>Firestore 가 새 컬렉션에 쓰는 것을 막고 있습니다. 보안 규칙이 아직 배포되지 않은 상태로 보입니다.</p>
+              <pre className="dlg-cmd">{RULES_DEPLOY_COMMAND}</pre>
+              <p className="dlg-note">기존 데이터는 예전 items 컬렉션에 그대로 있습니다.</p>
+            </>
+          ),
+          confirmLabel: '알겠습니다',
+          cancelLabel: '닫기',
+        });
+        return;
+      }
+
       // 표식을 남겨야 안내가 사라진다. 원본 items 는 지우지 않으므로
       // 표식이 없으면 안내가 계속 떠서 한 번 더 누르게 된다.
       const at = new Date().toISOString();
       await markMigrated(db, uid, at);
       setLegacy({ count: items.length, migratedAt: at });
-      dialog.toast(`${summarize(result)} — 옮겼습니다.`);
       setShowSettings(false);
+
+      if (written.failed.length > 0) {
+        // 일부만 옮겨진 상태를 성공으로 보고하면 사라진 항목을 눈치채지 못한다.
+        await dialog.confirm({
+          title: `${written.written.toLocaleString('ko-KR')}건을 옮겼고, ${written.failed.length.toLocaleString('ko-KR')}건이 남았습니다`,
+          body: (
+            <>
+              <p>아래 항목은 저장하지 못했습니다. 원본은 <code>items</code> 에 그대로 있습니다.</p>
+              <ul className="dlg-skips">
+                {written.failed.slice(0, 6).map((f) => (
+                  <li key={`${f.collection}/${f.id}`}><code>{f.collection}/{f.id}</code> — {f.reason}</li>
+                ))}
+                {written.failed.length > 6 && <li>그 외 {written.failed.length - 6}건</li>}
+              </ul>
+            </>
+          ),
+          confirmLabel: '알겠습니다',
+          cancelLabel: '닫기',
+        });
+        return;
+      }
+
+      dialog.toast(`${summarize(result)} — 옮겼습니다.`);
     } catch (err) {
-      dialog.toast(`옮기지 못했습니다: ${err instanceof Error ? err.message : String(err)}`, 'bad');
+      if (isPermissionDenied(err)) {
+        await dialog.confirm({
+          title: '보안 규칙이 아직 배포되지 않았습니다',
+          body: (
+            <>
+              <p>Firestore 가 새 컬렉션에 쓰는 것을 막고 있어 이관할 수 없습니다.</p>
+              <p>레포에서 아래 명령을 실행한 뒤 다시 시도해 주세요.</p>
+              <pre className="dlg-cmd">{RULES_DEPLOY_COMMAND}</pre>
+              <p className="dlg-note">기존 데이터는 예전 items 컬렉션에 그대로 있습니다.</p>
+            </>
+          ),
+          confirmLabel: '알겠습니다',
+          cancelLabel: '닫기',
+        });
+        return;
+      }
+      dialog.toast(`옮기지 못했습니다: ${describeFirestoreError(err)}`, 'bad');
     }
   }, [db, uid, dialog, legacy]);
 
@@ -382,6 +440,24 @@ function Workspace({ uid, user, onSignOut }: WorkspaceProps) {
           lens={lens}
           shownCount={visible.length}
         />
+      )}
+
+      {/*
+        규칙 미배포는 배포 직후 가장 흔한 실패다. "Missing or insufficient permissions." 를
+        그대로 보여 주면 원인을 알 수 없으므로, 무엇을 해야 하는지까지 적는다.
+      */}
+      {store.rulesBlocked && (
+        <div className="setup" role="alert">
+          <div className="setup-h"><Icon.Alert size={15} /><strong>보안 규칙이 아직 배포되지 않았습니다</strong></div>
+          <p>
+            Firestore 가 <code>entries</code> · <code>accounts</code> · <code>debts</code> · <code>pins</code> 컬렉션을
+            막고 있습니다. 레포에서 아래 명령을 한 번 실행하면 됩니다.
+          </p>
+          <pre className="setup-cmd">{RULES_DEPLOY_COMMAND}</pre>
+          <p className="setup-note">
+            기존 데이터는 예전 <code>items</code> 컬렉션에 그대로 있습니다. 사라진 것이 아닙니다.
+          </p>
+        </div>
       )}
 
       {store.error && (

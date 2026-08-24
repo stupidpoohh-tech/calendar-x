@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { describeFirestoreError, isPermissionDenied } from '../data/errors';
 import { getFirebase } from '../data/firebase';
 import {
   monthWindow, subscribeAccounts, subscribeDebts, subscribeEntriesForMonths,
@@ -13,10 +14,16 @@ export interface StoreState {
   pins: Pin[];
   loading: boolean;
   error: string | null;
+  /**
+   * 보안 규칙이 새 컬렉션을 막고 있는 상태.
+   * 규칙 배포 전에는 모든 조회가 이 상태가 되므로 따로 구분해 안내한다.
+   */
+  rulesBlocked: boolean;
 }
 
 const EMPTY: StoreState = {
-  entries: [], accounts: [], debts: [], pins: [], loading: false, error: null,
+  entries: [], accounts: [], debts: [], pins: [],
+  loading: false, error: null, rulesBlocked: false,
 };
 
 /**
@@ -35,10 +42,13 @@ export function useStore(uid: string | null, cursorISO: string): StoreState {
   const [debts, setDebts] = useState<Debt[]>([]);
   const [pins, setPins] = useState<Pin[]>([]);
   const [error, setError] = useState<string | null>(null);
+  const [rulesBlocked, setRulesBlocked] = useState(false);
   const [ready, setReady] = useState(false);
 
-  const errorRef = useRef(setError);
-  errorRef.current = setError;
+  const sinkRef = useRef<{ setError: typeof setError; setBlocked: typeof setRulesBlocked }>({
+    setError, setBlocked: setRulesBlocked,
+  });
+  sinkRef.current = { setError, setBlocked: setRulesBlocked };
 
   useEffect(() => {
     if (!uid) {
@@ -49,10 +59,13 @@ export function useStore(uid: string | null, cursorISO: string): StoreState {
 
     const { db } = getFirebase();
     const onError = (scope: string, err: unknown) => {
-      const msg = err instanceof Error ? err.message : String(err);
       // 조용히 삼키면 "저장은 되는데 안 보이는" 상태의 원인을 찾을 수 없다.
       console.error(`[${scope}]`, err);
-      errorRef.current(`데이터를 불러오지 못했습니다 (${scope}): ${msg}`);
+      if (isPermissionDenied(err)) {
+        sinkRef.current.setBlocked(true);
+        return;
+      }
+      sinkRef.current.setError(`${scope} 를 불러오지 못했습니다. ${describeFirestoreError(err)}`);
     };
 
     const unsubs = [
@@ -62,7 +75,12 @@ export function useStore(uid: string | null, cursorISO: string): StoreState {
       subscribeDebts(db, uid, setDebts, onError),
       subscribePins(db, uid, setPins, onError),
     ];
-    return () => unsubs.forEach((u) => u());
+    return () => {
+      unsubs.forEach((u) => u());
+      // 달을 옮길 때마다 지난 오류가 남아 있으면 안 된다.
+      setRulesBlocked(false);
+      setError(null);
+    };
   }, [uid, monthKey]);
 
   const entries = useMemo(() => {
@@ -76,5 +94,5 @@ export function useStore(uid: string | null, cursorISO: string): StoreState {
 
   if (!uid) return EMPTY;
 
-  return { entries, accounts, debts, pins, loading: !ready, error };
+  return { entries, accounts, debts, pins, loading: !ready, error, rulesBlocked };
 }

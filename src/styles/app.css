@@ -848,3 +848,24 @@
   text-underline-offset: 3px; padding: 2px 4px;
 }
 .set-redo:hover { color: var(--ink); }
+
+/* 설정이 덜 된 상태를 알리는 배너. 무엇을 해야 하는지까지 적는다. */
+.setup {
+  margin: 0 18px 8px; padding: 14px 16px;
+  border-radius: var(--radius);
+  background: color-mix(in oklab, var(--warn) 9%, var(--bg));
+  border: 1px solid color-mix(in oklab, var(--warn) 32%, var(--line));
+  display: flex; flex-direction: column; gap: 8px;
+}
+.setup-h { display: flex; align-items: center; gap: 8px; color: var(--warn); font-size: 14px; }
+.setup p { margin: 0; font-size: 13px; color: var(--ink-2); line-height: 1.6; }
+.setup code { font-size: 12px; background: var(--accent-soft); padding: 1px 5px; border-radius: 3px; }
+.setup-note { color: var(--ink-3) !important; font-size: 12px !important; }
+.setup-cmd, .dlg-cmd {
+  margin: 2px 0; padding: 10px 12px;
+  background: var(--ink); color: var(--bg);
+  border-radius: var(--radius-sm);
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 12.5px; overflow-x: auto; user-select: all;
+}
+@media (max-width: 760px) { .setup { margin: 0 12px 8px; } }

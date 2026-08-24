@@ -230,6 +230,38 @@ describe('convertLegacyItems — 전체', () => {
   });
 });
 
+describe('저장 한도', () => {
+  it('제목이 한도를 넘으면 자르고 보고한다 — 배치 전체가 실패하는 것을 막는다', () => {
+    const r = convertLegacyItems([{ id: 'long', tab: 'todo', title: 'ㄱ'.repeat(600), startISO: '2026-08-01' }]);
+    expect(r.entries[0]?.title).toHaveLength(500);
+    expect(r.trimmed[0]?.reason).toContain('제목');
+  });
+
+  it('메모가 한도를 넘으면 자른다', () => {
+    const r = convertLegacyItems([{ id: 'n', tab: 'todo', title: '메모 김', memo: 'ㄴ'.repeat(20_500), startISO: '2026-08-01' }]);
+    expect(r.entries[0]?.note).toHaveLength(20_000);
+    expect(r.trimmed.some((t) => t.reason.includes('메모'))).toBe(true);
+  });
+
+  it('태그가 한도를 넘으면 자른다', () => {
+    const tags = Array.from({ length: 60 }, (_, i) => `t${i}`);
+    const r = convertLegacyItems([{ id: 't', tab: 'todo', title: '태그 많음', tags, startISO: '2026-08-01' }]);
+    expect(r.entries[0]?.tags).toHaveLength(50);
+    expect(r.trimmed.some((t) => t.reason.includes('태그'))).toBe(true);
+  });
+
+  it('고정 메모도 한도에 맞춘다', () => {
+    const r = convertLegacyItems([{ id: 'p', tab: 'todo', title: 'ㄷ'.repeat(2_500), pinned: true }]);
+    expect(r.pins[0]?.text).toHaveLength(2_000);
+  });
+
+  it('한도 안이면 건드리지 않는다', () => {
+    const r = convertLegacyItems([legacy.todo]);
+    expect(r.trimmed).toHaveLength(0);
+    expect(r.entries[0]?.title).toBe('치과 예약');
+  });
+});
+
 describe('extractMoneyLabel', () => {
   it('자동 생성 접두를 걷어낸다', () => {
     expect(extractMoneyLabel('나갈 돈 45,000원 · 전기요금', 'expense')).toBe('전기요금');
