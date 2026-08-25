@@ -59,8 +59,8 @@ src/data/       Firestore 접근
   migrate.ts      이관 전 items -> 신규 스키마
 src/ui/         화면 컴포넌트 (App: 렌즈 화면, TideBar: 며칠 버티나 카드,
                 balanceEditor: 잔고 편집 상태 + 조각. 카드가 소유한다)
-src/pages/Tide/ /tide 독립 서브페이지 (익명 · localStorage). tide-over 이식판
-                main.tsx 가 별도 진입점. tide/index.html 이 이걸 부른다
+src/pages/Tide/ /tide 잔고캘린더. tide-over 저장소의 앱을 화면째로 옮겨 왔다.
+                lib/ · components/ · styles.css 전부 원본. 캘린더X 코드를 쓰지 않는다
 src/app/        셸과 상태 훅
 src/styles/     tokens.css (디자인 토큰) + app.css (전 컴포넌트 스타일)
 firestore.rules 보안 규칙
@@ -161,15 +161,27 @@ npm run emulators      # Auth + Firestore 에뮬레이터
 
 ## 형제 앱
 
-- **/tide (잔고캘린더)** — 계정 없는 익명 서브페이지. localStorage 만. 배포 위치는
-  같은 도메인(`calendar-x.pages.dev/tide`)이지만 데이터는 공유하지 않는다.
-  **HTML 도 번들도 따로다** (`tide/index.html` + `src/pages/Tide/main.tsx`,
+- **/tide (잔고캘린더)** — tide-over 저장소의 앱 **그 자체**다. 계산만 옮기고 화면은
+  캘린더X 토큰으로 새로 그렸던 이식판이 있었는데, 그래서 '달력' 탭에 달력이 없었다 —
+  월 그리드도, 날짜별 한도도, 기간 예산 띠도 원본에만 있었다. 지금은
+  `src/pages/Tide/` 아래에 `lib/` · `components/` · `store.ts` · `styles.css` 를
+  원본 그대로 두고, 캘린더X 코드는 한 줄도 import 하지 않는다.
+
+  **HTML 도 번들도 CSS 도 따로다** (`tide/index.html` + `src/pages/Tide/main.tsx`,
   vite `rollupOptions.input` 에 두 엔트리). 예전에는 앱 하나가 `location.pathname` 을
   보고 갈래를 정했는데, 배포 환경에서 정적 파일 · _redirects · 캐시 중 무엇이 먼저
   잡히느냐에 따라 /tide 에서 캘린더X 가 떴다. 지금은 두 앱이 서로를 대신 띄울 수 없고,
-  잔고캘린더 번들에는 Firebase 가 들어가지도 않는다.
-  옛 URL(`tide-over.stupidpoohh.workers.dev`)은 리다이렉트 워커로 넘어온다
-  (`docs/tide-over-worker/`).
+  잔고캘린더 번들에는 Firebase 도 Pretendard 도 들어가지 않는다.
+
+  저장 키는 원본 그대로 `tideover.state` / `tideover.schema`, 백업 링크는 `#b=` 다.
+  짧게 배포됐던 이식판의 `calendarx.tide.v1` 은 첫 로드 때 한 번 옮긴다
+  (`lib/migrateLegacy.ts`). 옛 URL(`tide-over.stupidpoohh.workers.dev`)의 데이터는
+  오리진이 달라 넘어오지 않는다 — 설정의 백업 링크로 옮겨야 한다. 옛 URL 자체는
+  리다이렉트 워커가 여기로 넘겨 준다 (`docs/tide-over-worker/`).
+
+  **`domain/tide.ts` 와 `pages/Tide/lib/calc.ts` 는 같은 규칙의 두 벌이다.** 전자는
+  캘린더X 의 `Entry` 를, 후자는 원본의 `Entry` 를 본다. 한쪽 규칙을 고치면 다른 쪽도
+  봐야 한다. 합치지 않은 이유는 데이터 모델이 다르고 두 앱이 따로 돌기 때문이다.
 - **clear-week** — 종이 주간 플래너. `entries` 컬렉션에 `kind === 'task'` 로 새 항목만
   오간다. clear-week 의 `CAL.entryDoc()` 이 이쪽 firestore.rules 요구사항을 이미 채운다.
 

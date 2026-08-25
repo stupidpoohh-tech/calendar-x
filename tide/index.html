@@ -3,30 +3,18 @@
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
-<meta name="theme-color" content="#ffffff" media="(prefers-color-scheme: light)" />
-<meta name="theme-color" content="#0a0a0a" media="(prefers-color-scheme: dark)" />
-<meta name="description" content="다음 입금까지 이 돈으로 며칠 버티는지. 계정 없이 이 브라우저에만 저장합니다." />
+<meta name="color-scheme" content="light dark" />
+<meta name="theme-color" content="#0f1720" />
+<meta name="description" content="통장 잔고 하나와 고정 지출로, 다음 입금까지 쓸 수 있는 한도를 보는 웹앱. 계정 없이 이 브라우저에만 저장합니다." />
 <title>잔고캘린더</title>
-
-<link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin />
-<link rel="stylesheet" as="style" crossorigin
-      href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/variable/pretendardvariable-dynamic-subset.min.css" />
-
-<script>
-  // 첫 페인트 전에 테마를 확정해 화면 깜빡임을 없앤다.
-  (function () {
-    try {
-      var raw = localStorage.getItem('dada.pref.v2');
-      var theme = raw ? (JSON.parse(raw).theme || 'system') : 'system';
-      if (theme === 'light' || theme === 'dark') {
-        document.documentElement.dataset.theme = theme;
-      }
-    } catch (e) { /* 저장소 접근 실패 시 시스템 테마를 따른다 */ }
-  })();
-</script>
+<!--
+  웹폰트를 부르지 않는다. 원본이 시스템 글꼴로 끝낸 이유 그대로 —
+  CSP 를 잠글 수 있고 첫 화면이 깜빡이지 않는다. 캘린더X 의 Pretendard 는
+  이 페이지에 오지 않는다.
+-->
 </head>
 <body>
-  <div id="app"><div class="splash">잔고캘린더</div></div>
+  <div id="app"></div>
   <script type="module" src="/src/pages/Tide/main.tsx"></script>
 </body>
 </html>

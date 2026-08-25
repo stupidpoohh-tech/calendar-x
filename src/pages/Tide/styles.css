@@ -1,0 +1,1450 @@
+:root {
+  --bg: #f5f6f8;
+  --surface: #ffffff;
+  --surface-2: #f0f2f5;
+  --text: #16202b;
+  --muted: #62707f;
+  --line: #dfe4ea;
+  --accent: #1f6feb;
+  --accent-soft: #e8f0fe;
+  --band: #e9eefb;
+  --danger: #c8342b;
+  --danger-soft: #fdeceb;
+  --warn-soft: #fff5e0;
+  --warn-line: #e6c05a;
+  --ok: #17794b;
+  --radius: 14px;
+  --shadow: 0 1px 2px rgb(16 24 40 / 6%), 0 6px 20px rgb(16 24 40 / 5%);
+  color-scheme: light dark;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #0f1720;
+    --surface: #172230;
+    --surface-2: #1e2b3a;
+    --text: #e8eef5;
+    --muted: #9aabbd;
+    --line: #2a3849;
+    --accent: #6ba4ff;
+    --accent-soft: #1b3050;
+    --band: #1c2a3f;
+    --danger: #ff8177;
+    --danger-soft: #3a1f1e;
+    --warn-soft: #352c14;
+    --warn-line: #8a6d2a;
+    --ok: #6dd3a1;
+    --shadow: 0 1px 2px rgb(0 0 0 / 30%), 0 6px 20px rgb(0 0 0 / 25%);
+  }
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  padding: 0;
+}
+
+body {
+  background: var(--bg);
+  color: var(--text);
+  font-family: -apple-system, BlinkMacSystemFont, 'Pretendard', 'Apple SD Gothic Neo',
+    'Noto Sans KR', 'Malgun Gothic', system-ui, sans-serif;
+  font-size: 16px;
+  line-height: 1.55;
+  -webkit-text-size-adjust: 100%;
+}
+
+.boot {
+  min-height: 100vh;
+}
+
+.app {
+  max-width: 640px;
+  margin: 0 auto;
+  padding: 0 16px calc(48px + env(safe-area-inset-bottom));
+}
+
+.app__header {
+  position: sticky;
+  top: 0;
+  z-index: 5;
+  padding: 16px 0 10px;
+  background: linear-gradient(var(--bg) 72%, transparent);
+}
+
+.app__header h1 {
+  margin: 0 0 10px;
+  font-size: 17px;
+  letter-spacing: -0.01em;
+}
+
+/* --- tabs --- */
+
+.tabs {
+  display: flex;
+  gap: 4px;
+  padding: 3px;
+  background: var(--surface-2);
+  border-radius: 999px;
+}
+
+.tab {
+  flex: 1;
+  padding: 8px 0;
+  border: 0;
+  border-radius: 999px;
+  background: transparent;
+  color: var(--muted);
+  font: inherit;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.tab.is-active {
+  background: var(--surface);
+  color: var(--text);
+  box-shadow: var(--shadow);
+}
+
+/* --- layout --- */
+
+.screen {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.card {
+  padding: 18px;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+}
+
+.card--quiet {
+  background: transparent;
+  box-shadow: none;
+  color: var(--muted);
+  font-size: 14px;
+}
+
+.card--alert {
+  background: var(--warn-soft);
+  border-color: var(--warn-line);
+}
+
+.card--danger {
+  border-color: color-mix(in srgb, var(--danger) 40%, var(--line));
+}
+
+.card__title {
+  margin: 0 0 8px;
+  font-size: 15px;
+  letter-spacing: -0.01em;
+}
+
+.card > p {
+  margin: 0 0 12px;
+}
+
+.card > p:last-child {
+  margin-bottom: 0;
+}
+
+.muted {
+  color: var(--muted);
+  font-size: 14px;
+}
+
+.rule {
+  margin: 18px 0;
+  border: 0;
+  border-top: 1px solid var(--line);
+}
+
+.row {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.row--end {
+  justify-content: flex-end;
+}
+
+.banner {
+  margin: 0 0 12px;
+  padding: 10px 14px;
+  border-radius: 10px;
+  font-size: 14px;
+}
+
+.banner--warn {
+  background: var(--warn-soft);
+  border: 1px solid var(--warn-line);
+}
+
+/* --- headline --- */
+
+.headline__top {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.add-btn {
+  flex: none;
+  width: 34px;
+  height: 34px;
+  margin-top: -4px;
+  border: 0;
+  border-radius: 10px;
+  background: var(--accent);
+  color: #fff;
+  font: inherit;
+  font-size: 20px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.headline__label {
+  margin: 0;
+  color: var(--muted);
+  font-size: 14px;
+}
+
+.headline__amount {
+  display: block;
+  margin: 2px 0 0;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: inherit;
+  font-family: inherit;
+  text-align: left;
+  cursor: pointer;
+  text-decoration: underline;
+  text-decoration-style: dotted;
+  text-decoration-thickness: 2px;
+  text-underline-offset: 6px;
+  text-decoration-color: var(--line);
+  font-size: clamp(34px, 11vw, 46px);
+  font-weight: 750;
+  letter-spacing: -0.03em;
+  font-variant-numeric: tabular-nums;
+}
+
+.headline__amount.is-negative {
+  color: var(--danger);
+}
+
+.headline__sub {
+  margin: 0 0 14px;
+  color: var(--muted);
+  font-size: 14px;
+}
+
+.headline__breakdown {
+  display: grid;
+  gap: 6px;
+  margin: 0;
+  padding: 12px 14px;
+  background: var(--surface-2);
+  border-radius: 10px;
+  font-size: 14px;
+}
+
+.headline__breakdown > div {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.headline__breakdown dt {
+  color: var(--muted);
+}
+
+.headline__breakdown dd {
+  margin: 0;
+  font-variant-numeric: tabular-nums;
+}
+
+
+
+.editable {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  font-variant-numeric: tabular-nums;
+  text-decoration: underline;
+  text-decoration-style: dotted;
+  text-underline-offset: 3px;
+  text-decoration-color: var(--line);
+  cursor: pointer;
+}
+
+.linkish {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--accent);
+  font: inherit;
+  text-decoration: underline;
+  cursor: pointer;
+}
+
+/* --- calendar --- */
+
+.month-nav__today {
+  flex: none;
+  padding: 5px 10px;
+  font-size: 13px;
+}
+
+.weekday-row {
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+}
+
+.grid {
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+  column-gap: 0;
+  row-gap: 5px;
+  /* 가로로 미는 동작은 달 넘기기로 쓰므로 브라우저에 넘기지 않는다. */
+  touch-action: pan-y;
+}
+
+.day {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 2px;
+  min-height: 56px;
+  padding: 4px 3px;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+
+
+.day__num {
+  align-self: flex-start;
+  padding: 1px 4px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+/* 오늘은 구간 색과 싸우지 않게 날짜 숫자만 강조한다. */
+.day--today .day__num {
+  background: var(--accent);
+  color: #fff;
+}
+
+.day__item {
+  display: flex;
+  flex-direction: column;
+  line-height: 1.15;
+  overflow: hidden;
+}
+
+.day__item-name {
+  overflow: hidden;
+  color: var(--muted);
+  font-size: 9px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.day__item-amt {
+  color: var(--danger);
+  font-size: 10px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+
+.day__item.is-income .day__item-amt {
+  color: var(--ok);
+}
+
+.day__limit {
+  margin-top: auto;
+  padding-top: 2px;
+  color: var(--muted);
+  font-size: 10px;
+  font-variant-numeric: tabular-nums;
+}
+
+.day__limit.is-negative {
+  color: var(--danger);
+  font-weight: 700;
+}
+
+.day--past {
+  opacity: 0.45;
+}
+
+/* 오늘부터 다음 입금 전날까지를 끊기지 않는 띠로 보여준다. */
+.day--band {
+  background: var(--band);
+}
+
+.day--band-start {
+  border-top-left-radius: 10px;
+  border-bottom-left-radius: 10px;
+}
+
+.day--band-end {
+  border-top-right-radius: 10px;
+  border-bottom-right-radius: 10px;
+}
+
+.day.is-selected {
+  box-shadow: inset 0 0 0 2px var(--text);
+  border-radius: 10px;
+}
+
+
+
+
+.month-nav {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 10px;
+}
+
+.month-nav h2 {
+  flex: 1;
+  margin: 0;
+  text-align: center;
+  font-size: 15px;
+}
+
+
+
+
+
+.weekday-row {
+  margin-bottom: 4px;
+  color: var(--muted);
+  font-size: 12px;
+  text-align: center;
+}
+
+.weekday-row span:first-child {
+  color: var(--danger);
+}
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+.tag {
+  margin-left: 5px;
+  padding: 1px 5px;
+  border-radius: 4px;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  color: var(--muted);
+  font-size: 11px;
+  font-style: normal;
+}
+
+.mini-list__right {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.icon-btn--small {
+  width: 22px;
+  height: 22px;
+  font-size: 13px;
+}
+
+/* 안내 문구는 범례와 같은 줄에 끼우지 않고 항상 아래 줄에 둔다 — 잘리지 않게. */
+
+
+/* --- lists --- */
+
+.list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  font-size: 14px;
+}
+
+.list li {
+  display: grid;
+  grid-template-columns: minmax(46px, auto) 1fr auto;
+  gap: 4px 8px;
+  padding: 9px 0;
+  border-bottom: 1px solid var(--line);
+  font-variant-numeric: tabular-nums;
+}
+
+.list li:last-child {
+  border-bottom: 0;
+}
+
+.list__date {
+  color: var(--muted);
+  white-space: nowrap;
+  padding-right: 2px;
+}
+
+.list__amount {
+  color: var(--danger);
+}
+
+.list__after {
+  grid-column: 2 / -1;
+  color: var(--muted);
+  font-size: 13px;
+  text-align: right;
+}
+
+.mini-list {
+  margin: 6px 0;
+  padding: 0;
+  list-style: none;
+  font-size: 13px;
+}
+
+.mini-list li {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 3px 0;
+  font-variant-numeric: tabular-nums;
+}
+
+.mini-list--indent {
+  padding-left: 12px;
+  color: var(--muted);
+}
+
+/* --- forms --- */
+
+.field {
+  display: block;
+  margin: 0 0 14px;
+}
+
+.field__label {
+  display: block;
+  margin-bottom: 5px;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.field--inline {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.field--inline .field__label {
+  margin: 0;
+}
+
+.field__suffix {
+  color: var(--muted);
+  font-size: 14px;
+}
+
+input[type='text'],
+input[type='number'],
+textarea {
+  width: 100%;
+  padding: 11px 12px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--surface);
+  color: var(--text);
+  font: inherit;
+  font-variant-numeric: tabular-nums;
+}
+
+input[type='number'] {
+  width: 5.5em;
+}
+
+textarea {
+  resize: vertical;
+  font-size: 12px;
+  line-height: 1.5;
+  word-break: break-all;
+}
+
+input:focus-visible,
+textarea:focus-visible,
+button:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+.money-input {
+  position: relative;
+}
+
+.money-input input {
+  padding-right: 34px;
+  font-size: 18px;
+  font-weight: 600;
+  text-align: right;
+}
+
+.money-input__unit {
+  position: absolute;
+  top: 50%;
+  right: 12px;
+  transform: translateY(-50%);
+  color: var(--muted);
+  font-size: 14px;
+}
+
+.primary-btn,
+.danger-btn,
+.ghost-btn {
+  padding: 11px 18px;
+  border-radius: 10px;
+  border: 1px solid transparent;
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.primary-btn {
+  width: 100%;
+  background: var(--accent);
+  color: #fff;
+}
+
+.primary-btn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+/* 버튼 바로 뒤에 오는 설명·필드가 붙어 보이지 않게. */
+.primary-btn + p,
+.primary-btn + .field,
+.ghost-btn + p {
+  margin-top: 12px;
+}
+
+.danger-btn {
+  background: var(--danger);
+  color: #fff;
+}
+
+.ghost-btn {
+  background: transparent;
+  border-color: var(--line);
+  color: var(--text);
+}
+
+.icon-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 34px;
+  height: 34px;
+  flex: none;
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  background: var(--surface);
+  color: var(--text);
+  font-size: 17px;
+  line-height: 1;
+  text-decoration: none;
+  cursor: pointer;
+}
+
+.icon-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.icon-btn--danger {
+  color: var(--danger);
+}
+
+/* --- 입금/출금 --- */
+
+.is-income {
+  color: var(--ok);
+}
+
+.is-expense {
+  color: var(--danger);
+}
+
+
+
+
+
+
+
+
+
+
+
+/* --- 항목 폼 --- */
+
+
+
+
+
+.entry-row__day {
+  flex: none;
+}
+
+select,
+input[type='date'] {
+  padding: 9px 10px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--surface);
+  color: var(--text);
+  font: inherit;
+  font-size: 14px;
+}
+
+input[type='date'] {
+  flex: 1;
+  min-width: 0;
+}
+
+.checkbox {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  color: var(--muted);
+  font-size: 14px;
+  cursor: pointer;
+}
+
+.checkbox input {
+  width: 17px;
+  height: 17px;
+  accent-color: var(--accent);
+}
+
+/* --- settings: 항목 목록 --- */
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+.status-list {
+  margin: 0 0 12px;
+  font-size: 14px;
+}
+
+.status-list > div {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 4px 0;
+}
+
+.status-list dt {
+  color: var(--muted);
+}
+
+.status-list dd {
+  margin: 0;
+  text-align: right;
+}
+
+.restore-field {
+  display: flex;
+  align-items: flex-end;
+  gap: 8px;
+}
+
+.restore-field .field {
+  flex: 1;
+  margin-bottom: 0;
+}
+
+.restore-field .primary-btn {
+  width: auto;
+  flex: none;
+}
+
+/* --- settle --- */
+
+.ledger {
+  margin: 4px 0 14px;
+  padding: 12px 14px;
+  background: var(--surface-2);
+  border-radius: 10px;
+  font-size: 14px;
+}
+
+.ledger__row {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 3px 0;
+  font-variant-numeric: tabular-nums;
+}
+
+.ledger__row > span:first-child {
+  color: var(--muted);
+}
+
+.ledger__row--total {
+  margin-top: 6px;
+  padding-top: 8px;
+  border-top: 1px solid var(--line);
+  font-weight: 650;
+}
+
+.ledger__row em {
+  font-style: normal;
+  font-size: 12px;
+}
+
+.diff {
+  margin: 0 0 14px;
+  padding: 12px 14px;
+  border-radius: 10px;
+  background: var(--surface-2);
+  font-size: 15px;
+  text-align: center;
+}
+
+.diff b {
+  font-size: 18px;
+  font-variant-numeric: tabular-nums;
+}
+
+.diff.is-negative {
+  background: var(--danger-soft);
+  color: var(--danger);
+}
+
+.diff.is-positive {
+  color: var(--ok);
+}
+
+.ok-note {
+  margin: 10px 0 0;
+  color: var(--ok);
+  font-size: 14px;
+  text-align: center;
+}
+
+/* --- modal --- */
+
+.modal-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 20;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 16px;
+  background: rgb(6 12 20 / 55%);
+}
+
+.modal {
+  width: 100%;
+  max-width: 460px;
+  max-height: 90vh;
+  overflow-y: auto;
+  padding: 20px;
+  background: var(--surface);
+  border-radius: var(--radius);
+  box-shadow: 0 20px 50px rgb(0 0 0 / 35%);
+}
+
+.modal__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 12px;
+}
+
+.modal__title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0 0 6px;
+  font-size: 17px;
+  letter-spacing: -0.01em;
+}
+
+.modal__head .modal__title {
+  margin: 0;
+}
+
+.modal__badge {
+  padding: 3px 9px;
+  border-radius: 999px;
+  background: var(--accent-soft);
+  color: var(--accent);
+  font-size: 12px;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.modal__note {
+  margin: 0 0 12px;
+  padding: 10px 12px;
+  background: var(--surface-2);
+  border-radius: 10px;
+  font-size: 14px;
+  font-variant-numeric: tabular-nums;
+}
+
+.modal__actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 18px;
+}
+
+/* --- 대화상자 폼 (라벨 열 + 입력) --- */
+
+.dialog-form {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.dialog-row {
+  display: grid;
+  grid-template-columns: 52px minmax(0, 1fr);
+  align-items: center;
+  gap: 10px;
+}
+
+.dialog-row__label {
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.dialog-row .money-input input {
+  font-size: 16px;
+}
+
+.chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 7px 12px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: var(--surface);
+  color: var(--muted);
+  font: inherit;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.chip.is-active {
+  background: var(--text);
+  border-color: var(--text);
+  color: var(--surface);
+}
+
+.chip__dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: currentColor;
+}
+
+.chip--income .chip__dot {
+  background: var(--ok);
+}
+
+.chip--expense .chip__dot {
+  background: var(--danger);
+}
+
+.dialog-items {
+  margin: 0 0 14px;
+  padding: 10px 12px;
+  list-style: none;
+  background: var(--surface-2);
+  border-radius: 10px;
+  font-size: 14px;
+}
+
+.dialog-items li {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 3px 0;
+  font-variant-numeric: tabular-nums;
+}
+
+.dialog-items__right {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.every-edit {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.every-edit input {
+  width: 3.6em;
+  padding: 9px 4px;
+  text-align: center;
+}
+
+.solid-btn {
+  padding: 11px 20px;
+  border: 1px solid var(--text);
+  border-radius: 10px;
+  background: var(--text);
+  color: var(--surface);
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.solid-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.compare {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+  margin: 14px 0 18px;
+}
+
+.compare__col {
+  padding: 10px 12px;
+  background: var(--surface-2);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  font-size: 13px;
+}
+
+.compare__col.is-highlight {
+  border-color: var(--accent);
+}
+
+.compare__col h3 {
+  margin: 0 0 6px;
+  font-size: 12px;
+  color: var(--muted);
+  font-weight: 600;
+}
+
+.compare__col dl {
+  margin: 0;
+}
+
+.compare__col dl > div {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 2px 0;
+}
+
+.compare__col dt {
+  color: var(--muted);
+  white-space: nowrap;
+}
+
+.compare__col dd {
+  margin: 0;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+.app-footer {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  margin-top: 28px;
+  padding: 10px 0 4px;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.app-footer .icon-btn {
+  width: 30px;
+  height: 30px;
+}
+
+/* --- toast --- */
+
+.toast {
+  position: fixed;
+  left: 50%;
+  bottom: calc(20px + env(safe-area-inset-bottom));
+  transform: translateX(-50%);
+  z-index: 30;
+  max-width: min(560px, calc(100vw - 32px));
+  padding: 12px 16px;
+  border-radius: 10px;
+  background: #1d2836;
+  color: #f2f6fb;
+  font-size: 14px;
+  box-shadow: 0 10px 30px rgb(0 0 0 / 35%);
+  cursor: pointer;
+}
+
+@media (max-width: 380px) {
+
+}
+
+
+/* 앞뒤 달 날짜 — 빈칸 대신 흐리게 이어 보여준다. */
+.day--outside {
+  opacity: 0.35;
+}
+
+.day--outside.day--past {
+  opacity: 0.22;
+}
+
+.list__row {
+  display: grid;
+  grid-template-columns: minmax(46px, auto) 1fr auto;
+  grid-template-areas: 'date name amount' '. after after';
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 4px 0;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.list__row .list__date {
+  grid-area: date;
+}
+
+.list__row .list__name {
+  grid-area: name;
+}
+
+.list__row .list__amount {
+  grid-area: amount;
+}
+
+.list__row .list__after {
+  grid-area: after;
+}
+
+/* --- 기간 예산 막대 --- */
+
+.day__bars {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin-top: 2px;
+}
+
+.allow {
+  position: relative;
+  height: 14px;
+  margin: 0 -3px; /* 셀 패딩을 상쇄해 옆 칸과 이어 붙인다 */
+  background: var(--allow-bg);
+}
+
+.allow--start {
+  margin-left: 0;
+  border-top-left-radius: 7px;
+  border-bottom-left-radius: 7px;
+}
+
+.allow--end {
+  margin-right: 0;
+  border-top-right-radius: 7px;
+  border-bottom-right-radius: 7px;
+}
+
+.allow__label {
+  position: absolute;
+  top: 50%;
+  left: 4px;
+  z-index: 2;
+  transform: translateY(-50%);
+  color: var(--allow-fg);
+  font-size: 9px;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+/* 기간별로 골라 쓰는 색. 막대와 색칩이 같은 토큰을 본다. */
+.allow--rose,
+.swatch--rose {
+  --allow-bg: color-mix(in srgb, #e0555f 20%, transparent);
+  --allow-fg: #c8342b;
+}
+
+.allow--amber,
+.swatch--amber {
+  --allow-bg: color-mix(in srgb, #e59a2b 26%, transparent);
+  --allow-fg: #a8650a;
+}
+
+.allow--violet,
+.swatch--violet {
+  --allow-bg: color-mix(in srgb, #8b6ce0 22%, transparent);
+  --allow-fg: #6b46c1;
+}
+
+.allow--teal,
+.swatch--teal {
+  --allow-bg: color-mix(in srgb, #2aa17f 22%, transparent);
+  --allow-fg: #17794b;
+}
+
+.allow--slate,
+.swatch--slate {
+  --allow-bg: color-mix(in srgb, #6b7a8c 22%, transparent);
+  --allow-fg: #4a5765;
+}
+
+@media (prefers-color-scheme: dark) {
+  .allow--rose { --allow-fg: #ff9b93; }
+  .allow--amber { --allow-fg: #e8b563; }
+  .allow--violet { --allow-fg: #b79bff; }
+  .allow--teal { --allow-fg: #6dd3a1; }
+  .allow--slate { --allow-fg: #a9b8c8; }
+}
+
+.swatch {
+  width: 30px;
+  height: 30px;
+  padding: 0;
+  border: 2px solid transparent;
+  border-radius: 999px;
+  background: var(--allow-bg);
+  box-shadow: inset 0 0 0 2px var(--allow-bg);
+  cursor: pointer;
+}
+
+.swatch.is-active {
+  border-color: var(--allow-fg);
+}
+
+.ghost-btn--danger {
+  border-color: color-mix(in srgb, var(--danger) 45%, var(--line));
+  color: var(--danger);
+}
+
+.modal__delete {
+  margin-right: auto;
+}
+
+.dialog-items__name {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.dialog-items__name:disabled {
+  cursor: default;
+}
+
+/* 금액은 눌러서 그 자리에서 고친다 — 눌러도 되는 자리로 보이게 밑줄을 둔다. */
+.dialog-items__amount {
+  padding: 1px 2px;
+  border: 0;
+  border-bottom: 1px dashed var(--muted);
+  border-radius: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  font-variant-numeric: tabular-nums;
+  cursor: pointer;
+}
+
+.dialog-items__amount:disabled {
+  border-bottom-color: transparent;
+  cursor: default;
+}
+
+/* 목록 줄 안에서 두 번째 확인을 받을 때 쓰는 작은 버튼. */
+.tiny-btn {
+  padding: 4px 10px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: var(--surface);
+  color: var(--text);
+  font: inherit;
+  font-size: 13px;
+  font-weight: 600;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.tiny-btn--danger {
+  border-color: var(--danger);
+  background: var(--danger);
+  color: #fff;
+}
+
+.amount-tweak {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.amount-tweak .money-input {
+  width: 8.5em;
+}
+
+.amount-tweak .money-input input {
+  width: 100%;
+  padding: 4px 26px 4px 8px;
+  border: 1px solid var(--accent);
+  border-radius: 8px;
+  background: var(--surface);
+  color: inherit;
+  font-size: 14px;
+  font-weight: 600;
+  text-align: right;
+}
+
+.amount-tweak .money-input__unit {
+  right: 8px;
+  font-size: 12px;
+}
+
+/* --- 형제 서비스 안내 --- */
+
+.promo {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 14px;
+  border-radius: 10px;
+  background: var(--surface-2);
+  color: inherit;
+  text-decoration: none;
+}
+
+.promo__icon {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 34px;
+  height: 34px;
+  color: var(--accent);
+}
+
+.promo__main {
+  display: flex;
+  min-width: 0;
+  flex: 1;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.promo__main b {
+  font-size: 15px;
+  letter-spacing: -0.01em;
+}
+
+.promo__main .muted {
+  font-size: 13px;
+  line-height: 1.4;
+}
+
+.promo__go {
+  flex: none;
+  color: var(--muted);
+  font-size: 18px;
+  line-height: 1;
+}
