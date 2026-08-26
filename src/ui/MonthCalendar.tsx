@@ -2,13 +2,22 @@ import { useMemo, useRef } from 'react';
 import { colorHex, MONEY_TYPE_BY_ID } from '../domain/constants';
 import { isWeekend, monthGrid, normalizeDate, toISO, weekdayLabels } from '../domain/date';
 import { displayTitle, effectiveEndDate, isDone } from '../domain/entry';
-import type { Entry, LensId, WeekStart } from '../domain/types';
+import { compactAmount } from '../domain/money';
+import { limitOn } from '../domain/tide';
+import type { Account, Entry, LensId, WeekStart } from '../domain/types';
 import { Icon } from './Icon';
 
 interface Props {
   cursor: Date;
   onCursorChange: (next: Date) => void;
   entries: readonly Entry[];
+  /**
+   * 한도 계산용. `entries` 는 필터가 걸린 목록이라 쓸 수 없다 —
+   * 필터로 항목을 가렸다고 한도가 늘어나면 안 된다.
+   */
+  tideEntries: readonly Entry[];
+  accounts: readonly Account[];
+  hasBalance: boolean;
   lens: LensId;
   weekStart: WeekStart;
   todayISO: string;
@@ -76,7 +85,7 @@ function barMetrics(laneCount: number) {
 }
 
 export function MonthCalendar({
-  cursor, onCursorChange, entries, lens, weekStart, todayISO,
+  cursor, onCursorChange, entries, tideEntries, accounts, hasBalance, lens, weekStart, todayISO,
   onEntryClick, onDayOpen, onDayCreate,
 }: Props) {
   const grid = useMemo(() => monthGrid(cursor, weekStart), [cursor, weekStart]);
@@ -86,6 +95,23 @@ export function MonthCalendar({
   );
   const labels = weekdayLabels(weekStart);
   const curMonth = cursor.getMonth();
+
+  /*
+    날짜별 한도. 잔고캘린더가 셀마다 적어 주던 숫자다 — "이 날까지 쓸 수 있는 돈".
+    오늘 이전은 적지 않는다. 지나간 발생분은 이미 잔고에 반영돼 있어 한도를
+    건드리지 못하므로, 과거 셀에는 잔고가 그대로 반복될 뿐이다.
+  */
+  const showLimits = lens === 'money' && hasBalance;
+  const limits = useMemo(() => {
+    if (!showLimits) return null;
+    const map = new Map<string, number>();
+    for (const d of grid) {
+      const iso = toISO(d);
+      if (iso < todayISO) continue;
+      map.set(iso, limitOn(accounts, tideEntries, iso, todayISO));
+    }
+    return map;
+  }, [showLimits, grid, accounts, tideEntries, todayISO]);
 
   const touch = useRef({ x: 0, y: 0 });
   const onTouchStart = (e: React.TouchEvent) => {
@@ -115,7 +141,10 @@ export function MonthCalendar({
         const { placed, laneCount } = placeWeek(entries, weekISO);
         const { height, gap, showText } = barMetrics(laneCount);
         const topOffset = 32;
-        const minHeight = topOffset + laneCount * gap + 8;
+        // 한도 숫자는 바 아래 한 줄을 차지한다. 한도가 뜨는 주에만 그만큼을 더한다 —
+        // 오늘 이전 주까지 키워 두면 지나간 자리에 빈 줄만 남는다.
+        const weekHasLimit = limits !== null && weekISO.some((iso) => limits.has(iso));
+        const minHeight = topOffset + laneCount * gap + 8 + (weekHasLimit ? 15 : 0);
 
         return (
           <div className="cal-week" key={weekISO[0] ?? wi} style={{ minHeight }}>
@@ -138,6 +167,14 @@ export function MonthCalendar({
                       {d.getDate()}
                     </button>
                     {inMonth && d.getDate() === 1 && <span className="cal-mtag">{d.getMonth() + 1}월</span>}
+                    {limits?.has(iso) && (
+                      <span
+                        className={'cal-limit num' + ((limits.get(iso) ?? 0) < 0 ? ' bad' : '')}
+                        aria-label={`${iso} 한도`}
+                      >
+                        {compactAmount(limits.get(iso) ?? 0)}
+                      </span>
+                    )}
                   </div>
                 );
               })}

@@ -50,3 +50,24 @@ export function formatSigned(minor: number, currency = DEFAULT_CURRENCY): string
   const sign = minor > 0 ? '+' : minor < 0 ? '−' : '';
   return sign + formatAmount(Math.abs(minor), currency);
 }
+
+/**
+ * 달력 셀처럼 좁은 자리에 쓰는 축약 표기 — `4.7만` · `5천` · `−35만`.
+ * 잔고캘린더가 날짜별 한도를 이렇게 적는다.
+ *
+ * 만·천 단위는 원화 셈법이라 소수 자리를 쓰는 통화에는 옮길 수 없다.
+ * 그런 통화에서는 축약하지 않고 평소 표기로 물러난다.
+ */
+export function compactAmount(minor: number, currency = DEFAULT_CURRENCY): string {
+  if (minorDigits(currency) !== 0) return formatSigned(minor, currency);
+  const abs = Math.abs(minor);
+  const sign = minor < 0 ? '−' : '';
+  if (abs >= 10_000_000) return `${sign}${Math.round(abs / 10_000).toLocaleString('ko-KR')}만`;
+  if (abs >= 10_000) return `${sign}${trimTenth(abs / 10_000)}만`;
+  if (abs >= 1_000) return `${sign}${trimTenth(abs / 1_000)}천`;
+  return `${sign}${abs}`;
+}
+
+function trimTenth(n: number): string {
+  return n.toFixed(1).replace(/\.0$/, '');
+}

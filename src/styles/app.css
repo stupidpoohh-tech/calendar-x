@@ -252,7 +252,7 @@
 .cal-week { position: relative; border-bottom: 1px solid var(--line); }
 .cal-week:last-child { border-bottom: none; }
 .cal-cells { display: grid; grid-template-columns: repeat(7, 1fr); height: 100%; position: absolute; inset: 0; }
-.cal-cell { border-right: 1px solid var(--line-soft, var(--line)); cursor: pointer; transition: background .1s; }
+.cal-cell { position: relative; border-right: 1px solid var(--line-soft, var(--line)); cursor: pointer; transition: background .1s; }
 .cal-cell:last-child { border-right: none; }
 .cal-cell:hover { background: var(--bg-soft); }
 .cal-cell.out { background: color-mix(in oklab, var(--bg-soft) 60%, var(--bg)); }
@@ -267,6 +267,22 @@
 .cal-num:hover { background: var(--accent-soft); color: var(--ink); }
 .cal-num.is-today { background: var(--lens, var(--ink)); color: var(--on-lens); font-weight: 700; }
 .cal-mtag { font-size: 10px; color: var(--ink-4); margin-left: 2px; }
+
+/*
+  날짜별 한도 — "이 날까지 쓸 수 있는 돈". 잔고캘린더가 셀마다 적어 주던 숫자다.
+  항목 바는 top:32 부터 아래로 쌓이므로 숫자는 셀 맨 아래에 깐다. 셀 높이에
+  이 한 줄만큼(15px)을 더해 두어 바가 몇 줄이 되든 겹치지 않는다.
+  날짜 옆에 붙이면 좁은 화면에서 셀 폭이 55px 남짓이라 '4…' 로 잘린다.
+*/
+.cal-limit {
+  position: absolute; left: 5px; right: 4px; bottom: 3px;
+  font-size: 10.5px; line-height: 1; color: var(--ink-3);
+  pointer-events: none;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.cal-limit.bad { color: var(--bad); font-weight: 600; }
+.cal-cell.out .cal-limit { opacity: .45; }
+@media (max-width: 560px) { .cal-limit { font-size: 9.5px; left: 3px; right: 2px; } }
 
 .cal-bars { position: absolute; left: 0; right: 0; bottom: 0; pointer-events: none; }
 .cal-bar {

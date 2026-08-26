@@ -601,6 +601,9 @@ function Workspace({ uid, user, onSignOut }: WorkspaceProps) {
             cursor={cursor}
             onCursorChange={setCursor}
             entries={visible}
+            tideEntries={materialized}
+            accounts={store.accounts}
+            hasBalance={hasBalance}
             lens={lens}
             weekStart={prefs.weekStart}
             todayISO={today}
