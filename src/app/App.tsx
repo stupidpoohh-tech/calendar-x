@@ -19,6 +19,7 @@ import {
 import { convertKind, newEntry, withDerived } from '../domain/entry';
 import { applyFilters, collectTags, emptyFilters, hasActiveFilter } from '../domain/filters';
 import { baseIdOf, materialize } from '../domain/recurrence';
+import { isRecoveryEntry } from '../domain/recovery';
 import type { Account, Entry, Filters, LensId, TaskStatus, ViewId } from '../domain/types';
 import { Auth } from '../ui/Auth';
 import { BrandFooter } from '../ui/BrandFooter';
@@ -32,12 +33,15 @@ import { MonthCalendar } from '../ui/MonthCalendar';
 import { MonthPicker } from '../ui/MonthPicker';
 import { MoneyPanel } from '../ui/MoneyPanel';
 import { PinnedSection } from '../ui/PinnedSection';
+import { RecoveryDebtBar } from '../ui/RecoveryDebtBar';
+import { RecoverySheet } from '../ui/RecoverySheet';
 import { SettingsSheet } from '../ui/SettingsSheet';
 import { TodayPanel } from '../ui/TodayPanel';
 import { useDialog } from '../ui/Dialog';
 import { useAuth } from './useAuth';
 import { usePrefs } from './usePrefs';
 import { useDemoStore } from './useDemoStore';
+import { useRecovery } from './useRecovery';
 import { useStore } from './useStore';
 
 export function App() {
@@ -86,6 +90,8 @@ function Workspace({ uid, user, onSignOut }: WorkspaceProps) {
     { open: false, mode: 'create', entry: null },
   );
   const [legacy, setLegacy] = useState<{ count: number; migratedAt: string | null } | null>(null);
+  /** 회복 상세를 띄운 항목의 id. 항목 자체가 아니라 id 를 들고 있어야 스냅샷을 따라간다. */
+  const [recoveryId, setRecoveryId] = useState<string | null>(null);
 
   const today = useMemo(() => computeToday(), []);
   const cursorISO = toISO(cursor);
@@ -95,6 +101,17 @@ function Workspace({ uid, user, onSignOut }: WorkspaceProps) {
   const demoStore = useDemoStore();
   const store = isAnon ? demoStore : liveStore;
   const { db } = getFirebase();
+
+  /*
+    회복. 예정일이 코앞에 오면 항목 한 건이 생기고, 그 밖의 시간에는 아무것도 없다.
+    렌즈를 하나 더 만들지 않는다 — 회복 항목은 kind 가 'task' 라 기존 캘린더·리스트·
+    오늘 카드에 그대로 얹힌다.
+  */
+  const recovery = useRecovery({
+    uid,
+    todayISO: today,
+    onError: (message) => dialog.toast(message, 'bad'),
+  });
 
   // 저장·편집 시도 시 로그인 유도 팝업. 사용자가 실제 앱을 만져 보다가
   // 남기려는 순간에만 계정이 필요하다는 것을 자연스럽게 전달한다.
@@ -155,6 +172,8 @@ function Workspace({ uid, user, onSignOut }: WorkspaceProps) {
   const openEdit = useCallback((e: Entry) => {
     // 반복 전개분을 눌러도 편집은 항상 원본을 향한다.
     const base = store.entries.find((x) => x.id === baseIdOf(e.id)) ?? e;
+    // 회복은 저장·삭제가 아니라 완료·옮기기·건너뛰기가 기본 행동이라 전용 상세로 보낸다.
+    if (isRecoveryEntry(base)) { setRecoveryId(base.id); return; }
     setModal({ open: true, mode: 'edit', entry: base });
   }, [store.entries]);
 
@@ -180,6 +199,22 @@ function Workspace({ uid, user, onSignOut }: WorkspaceProps) {
 
   const handleDelete = useCallback(async (e: Entry) => {
     if (isAnon || !uid) { void promptLogin(); return; }
+    // 회복을 지우면 빚이 증발한다. 삭제 대신 건너뛰기로 보낸다 — 지나간 회복은 세어야 한다.
+    if (isRecoveryEntry(e)) {
+      const skip = await dialog.confirm({
+        title: '이 회복을 건너뛸까요?',
+        body: '밀린 회복 1회로 셉니다. 다른 날로 옮기면 밀린 것으로 세지 않습니다.',
+        confirmLabel: '건너뛰기',
+        cancelLabel: '그만두기',
+        danger: true,
+      });
+      if (!skip) return;
+      closeModal();
+      setRecoveryId(null);
+      recovery.skip(e);
+      dialog.toast('건너뛰었습니다. 밀린 회복이 하나 늘었습니다.');
+      return;
+    }
     const ok = await dialog.confirm({
       title: '이 항목을 삭제할까요?',
       body: e.isRecurring
@@ -196,13 +231,22 @@ function Workspace({ uid, user, onSignOut }: WorkspaceProps) {
     } catch (err) {
       dialog.toast(`삭제하지 못했습니다. ${describeFirestoreError(err)}`, 'bad');
     }
-  }, [db, uid, isAnon, promptLogin, dialog, closeModal]);
+  }, [db, uid, isAnon, promptLogin, dialog, closeModal, recovery]);
 
   const handleStatus = useCallback((e: Entry, status: TaskStatus) => {
     const base = store.entries.find((x) => x.id === baseIdOf(e.id)) ?? e;
     if (!base.task) return;
+    /*
+      오늘 카드의 체크박스는 회복을 완료하는 가장 짧은 길이다. 여기서 상태만 바꾸면
+      항목은 완료로 보이는데 다음 예정일과 빚은 그대로 남아, 규칙이 조용히 멈춘다.
+    */
+    if (isRecoveryEntry(base) && status === 'done') {
+      recovery.complete(base, today);
+      dialog.toast('회복을 완료했습니다.');
+      return;
+    }
     persist(withDerived({ ...base, task: { ...base.task, status } }));
-  }, [store.entries, persist]);
+  }, [store.entries, persist, recovery, today, dialog]);
 
   /** 아이디어를 할 일로 승격. 축 간 이동이 필드 하나 변경으로 끝난다. */
   const handlePromote = useCallback((e: Entry) => {
@@ -242,12 +286,14 @@ function Workspace({ uid, user, onSignOut }: WorkspaceProps) {
     if (isAnon || !uid) { void promptLogin(); return; }
     try {
       const all = await fetchAll(db, uid);
-      downloadJSON(buildBackup(all), backupFilename());
+      // 회복 규칙은 users/{uid} 문서에 있어 fetchAll 이 보지 않는다.
+      // 구독으로 이미 들고 있으니 그대로 실어 보낸다.
+      downloadJSON(buildBackup({ ...all, recovery: recovery.rule }), backupFilename());
       dialog.toast(`${countBackup(all).toLocaleString('ko-KR')}건을 내려받았습니다.`);
     } catch (err) {
       dialog.toast(`백업하지 못했습니다. ${describeFirestoreError(err)}`, 'bad');
     }
-  }, [db, uid, isAnon, promptLogin, dialog]);
+  }, [db, uid, isAnon, promptLogin, dialog, recovery]);
 
   const handleImport = useCallback(async () => {
     if (isAnon || !uid) { void promptLogin(); return; }
@@ -279,9 +325,17 @@ function Workspace({ uid, user, onSignOut }: WorkspaceProps) {
         if (!confirmed) return;
         await deleteAllEntries(db, uid);
         await writeMany(db, uid, incoming);
+        if (incoming.recovery) {
+          // 파일이 규칙을 들고 있으면 그대로 되돌린다. activeEntryId 가 가리키는 회차도
+          // 방금 함께 복원됐으므로 참조가 맞아떨어진다.
+          recovery.saveRule(incoming.recovery);
+        } else {
+          // 잡혀 있던 회복 항목도 함께 지워졌다. 참조를 끊어야 다음 회차가 다시 생긴다.
+          recovery.clearActive();
+        }
       } else {
         const current = await fetchAll(db, uid);
-        const merged = mergeBackup(current, incoming);
+        const merged = mergeBackup({ ...current, recovery: recovery.rule }, incoming);
         await writeMany(db, uid, {
           entries: merged.entries.filter((e) => !current.entries.some((c) => c.id === e.id)),
           accounts: merged.accounts.filter((a) => !current.accounts.some((c) => c.id === a.id)),
@@ -293,7 +347,7 @@ function Workspace({ uid, user, onSignOut }: WorkspaceProps) {
     } catch (err) {
       dialog.toast(`가져오지 못했습니다. ${describeFirestoreError(err)}`, 'bad');
     }
-  }, [db, uid, isAnon, promptLogin, dialog]);
+  }, [db, uid, isAnon, promptLogin, dialog, recovery]);
 
   const handleMigrate = useCallback(async () => {
     if (isAnon || !uid) { void promptLogin(); return; }
@@ -394,6 +448,10 @@ function Workspace({ uid, user, onSignOut }: WorkspaceProps) {
   // ---------- 렌더 ----------
 
   const lensDef = LENS_BY_ID[lens] ?? LENSES[0]!;
+  // 스냅샷이 바뀌면 상세도 같이 갱신돼야 한다. 항목이 사라지면 상세도 닫힌다.
+  const recoveryEntry = recoveryId
+    ? store.entries.find((e) => e.id === recoveryId && isRecoveryEntry(e)) ?? null
+    : null;
   const monthLabel = fmtMonthTitle(cursor);
   const daySheetEntries = daySheet
     ? visible.filter((e) => e.startDate <= daySheet && (e.endDate ?? e.startDate) >= daySheet)
@@ -544,6 +602,22 @@ function Workspace({ uid, user, onSignOut }: WorkspaceProps) {
         잔고 카드에 두 번 나왔다. 잔고는 카드 안으로, 대출과 고정 메모는 각자의 렌즈로.
       */}
       <div className="side">
+        {/*
+          빚이 0이면 아무것도 렌더링하지 않는다. 정상 상태에서 회복은 화면에 없어야 한다.
+          렌즈와 무관하게 같은 자리에 두는 이유는, 밀렸다는 사실이 가계부를 보는 동안에도
+          사라지면 안 되기 때문이다.
+        */}
+        {!isAnon && (
+          <RecoveryDebtBar
+            rule={recovery.rule}
+            todayISO={today}
+            onSchedule={(dateISO, time) => {
+              recovery.scheduleDebt(dateISO, time);
+              dialog.toast('회복을 다시 잡았습니다.');
+            }}
+          />
+        )}
+
         {lens === 'all' && (
           <TodayPanel
             todayISO={today}
@@ -645,6 +719,27 @@ function Workspace({ uid, user, onSignOut }: WorkspaceProps) {
         />
       )}
 
+      {recoveryEntry && (
+        <RecoverySheet
+          entry={recoveryEntry}
+          rule={recovery.rule}
+          todayISO={today}
+          onSaveEntry={recovery.saveEntryOnly}
+          onComplete={(e) => {
+            recovery.complete(e, today);
+            setRecoveryId(null);
+            dialog.toast('회복을 완료했습니다.');
+          }}
+          onMove={(e, toDate, toTime) => {
+            recovery.move(e, toDate, toTime);
+            setRecoveryId(null);
+            dialog.toast('회복을 옮겼습니다. 밀린 것으로 세지 않습니다.');
+          }}
+          onSkip={(e) => void handleDelete(e)}
+          onClose={() => setRecoveryId(null)}
+        />
+      )}
+
       <EntryModal
         open={modal.open}
         mode={modal.mode}
@@ -674,6 +769,8 @@ function Workspace({ uid, user, onSignOut }: WorkspaceProps) {
           entryCount={store.entries.length}
           legacyCount={legacy?.count ?? null}
           migratedAt={legacy?.migratedAt ?? null}
+          recoveryRule={recovery.rule}
+          onRecoveryRule={recovery.saveRule}
           onTheme={(t) => set('theme', t)}
           onWeekStart={(w) => set('weekStart', w)}
           onExport={handleExport}

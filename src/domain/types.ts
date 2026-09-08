@@ -96,6 +96,14 @@ export interface Entry {
 
   task: TaskFields | null;
   money: MoneyFields | null;
+  /**
+   * 회복 표식. 이 값이 있으면 Recovery Event 다.
+   *
+   * Recovery 는 네 번째 축이 아니라 `task` 위에 얹힌 표식이다. kind 를 늘리면 렌즈·필터·
+   * 보안 규칙이 전부 따라 늘어나는데, 실제로 캘린더에 존재하는 Recovery 는 언제나 한 건
+   * 뿐이라 그만한 구조를 세울 이유가 없다.
+   */
+  recovery: RecoveryFields | null;
 
   createdAt: string;
   updatedAt: string;
@@ -145,6 +153,85 @@ export interface Pin {
   order: number;
   createdAt: string;
   updatedAt: string;
+}
+
+/**
+ * 회복(Recovery).
+ *
+ * "휴식을 기록하는 기능이 아니라, 휴식을 빚지 않게 관리하는 기능." 그래서 여기에는
+ * 피로도도 점수도 없다. 있는 것은 간격 하나와 놓친 횟수 하나뿐이다.
+ *
+ * 반복 일정(`Recurrence`)을 쓰지 않는 이유: 반복은 규칙에서 몇 달치를 펼쳐 보여 주지만,
+ * 회복의 다음 날짜는 "마지막으로 실제로 쉰 날 + 간격" 이라 미리 펼칠 수가 없다.
+ * 그래서 예정일은 규칙에 값으로 들고 있다가, 코앞에 왔을 때 한 건만 만든다.
+ */
+
+/** 회복 단위. 하루 중 어느 구간을 끌 것인가. */
+export type RecoveryWindowId = 'evening' | 'afternoon' | 'day';
+
+/** Rule 이 소유하는 OFF 옵션 정의. 사용자가 이름을 바꾸거나 지울 수 있다. */
+export interface RecoveryOption {
+  id: string;
+  label: string;
+  order: number;
+}
+
+/**
+ * 개별 회차에 박제된 OFF 항목.
+ *
+ * label 을 함께 들고 있는 것이 핵심이다. 설정에서 옵션 이름을 바꾸거나 지워도
+ * 지난 회차가 "무엇을 끄고 쉬었는지" 를 잃지 않는다. (id 만 두면 지운 순간 뜻이 사라진다)
+ */
+export interface RecoveryOptionSnapshot {
+  id: string;
+  label: string;
+}
+
+/** Entry 에 붙는 회복 표식. */
+export interface RecoveryFields {
+  /** 이 회차에 끌 항목. 생성 시점 Rule 기본값의 사본이고, 회차별로 고칠 수 있다. */
+  options: RecoveryOptionSnapshot[];
+  /** 밀린 회복을 갚는 회차인가. 완료하면 debtCount 가 하나 줄어든다. */
+  repayment: boolean;
+  /** 옮긴 횟수. 옮기기는 빚이 아니므로 세기만 하고 아무것도 하지 않는다. */
+  movedCount: number;
+}
+
+/**
+ * 회복 규칙. 사용자당 하나이고 `users/{uid}` 문서의 `recovery` 필드에 산다.
+ *
+ * Entry 와 분리한 이유는 이것이 일정이 아니라 상태이기 때문이다. 캘린더에 올라가는
+ * 것은 `activeEntryId` 가 가리키는 한 건뿐이다.
+ */
+export interface RecoveryRule {
+  enabled: boolean;
+  /** 완료일로부터 며칠 뒤에 다음 회복을 둘 것인가. */
+  intervalDays: number;
+  window: RecoveryWindowId;
+  /** 예정일 며칠 전에 실제 Event 를 만들 것인가. 0 이면 당일. */
+  generationHorizonDays: number;
+  /** 마지막으로 회복을 완료한 날. 다음 간격의 기준점이다. */
+  lastCompletedAt: DateISO | null;
+  /**
+   * 다음 예정일. null 이면 예정이 없다 —
+   * 아직 켜지 않았거나, 빚이 남아 "다시 잡기" 를 기다리는 중이다.
+   */
+  nextDueAt: DateISO | null;
+  /**
+   * 지금 캘린더에 올라가 있는 Recovery Event 의 id.
+   *
+   * 이 값이 중복 생성을 막는다. 캘린더 항목 구독은 보고 있는 달 주변만 받으므로
+   * "이미 만들었나" 를 항목 목록으로 판정하면, 사용자가 먼 달을 열어 둔 사이에
+   * 같은 회차가 한 번 더 만들어진다.
+   */
+  activeEntryId: string | null;
+  /** 놓친 회복 횟수. 시간도 점수도 아니다. */
+  debtCount: number;
+  /** 새 회차에 기본값으로 들어가는 메모. */
+  defaultMemo: string;
+  /** 새 회차에 기본으로 켜 둘 옵션. */
+  defaultOptionIds: string[];
+  options: RecoveryOption[];
 }
 
 export type ThemePref = 'system' | 'light' | 'dark';

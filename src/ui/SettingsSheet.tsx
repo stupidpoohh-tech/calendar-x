@@ -1,7 +1,8 @@
 import { useState } from 'react';
 import type { User } from 'firebase/auth';
-import type { ThemePref, WeekStart } from '../domain/types';
+import type { RecoveryRule, ThemePref, WeekStart } from '../domain/types';
 import { Icon } from './Icon';
+import { RecoverySettings } from './RecoverySettings';
 
 interface Props {
   user: User;
@@ -11,6 +12,8 @@ interface Props {
   legacyCount: number | null;
   /** 이관을 이미 끝냈으면 그 시각. 안내를 다시 띄우지 않기 위한 표식이다. */
   migratedAt: string | null;
+  recoveryRule: RecoveryRule;
+  onRecoveryRule: (next: RecoveryRule) => void;
   onTheme: (t: ThemePref) => void;
   onWeekStart: (w: WeekStart) => void;
   onExport: () => void | Promise<void>;
@@ -22,6 +25,7 @@ interface Props {
 
 export function SettingsSheet({
   user, theme, weekStart, entryCount, legacyCount, migratedAt,
+  recoveryRule, onRecoveryRule,
   onTheme, onWeekStart, onExport, onImport, onMigrate, onSignOut, onClose,
 }: Props) {
   const [showRedo, setShowRedo] = useState(false);
@@ -107,6 +111,8 @@ export function SettingsSheet({
               </div>
             </div>
           </div>
+
+          <RecoverySettings rule={recoveryRule} onChange={onRecoveryRule} />
 
           <div className="set-grp">
             <h3 className="set-gt">데이터</h3>

@@ -15,10 +15,11 @@ import {
 } from 'firebase/firestore';
 import { ymOf } from '../domain/date';
 import { describeFirestoreError } from './errors';
-import type { Account, Debt, Entry, Pin, YearMonth } from '../domain/types';
+import type { Account, Debt, Entry, Pin, RecoveryRule, YearMonth } from '../domain/types';
 import {
   accountFromDoc, accountToDoc, debtFromDoc, debtToDoc,
   entryFromDoc, entryToDoc, pinFromDoc, pinToDoc,
+  recoveryRuleFromDoc, recoveryRuleToDoc,
 } from './converters';
 import { COL, col, docIn, userDoc } from './paths';
 
@@ -95,6 +96,65 @@ export function subscribePins(
     (snap) => cb(mapSnap(snap, pinFromDoc).sort((a, b) => a.order - b.order)),
     (err) => onError('pins', err),
   );
+}
+
+/**
+ * 회복 규칙.
+ *
+ * 컬렉션이 아니라 `users/{uid}` 문서의 필드 하나다. 사용자당 하나뿐인 상태라
+ * 문서를 따로 셀 이유가 없고, 이 경로는 보안 규칙이 이미 소유자에게 열어 두었다.
+ * 문서가 작아 통째로 구독해도 부담이 없다 — 대신 예정일·빚이 다른 기기에서 바뀌어도
+ * 즉시 따라온다.
+ */
+export function subscribeRecoveryRule(
+  db: Firestore, uid: string, cb: (r: RecoveryRule) => void, onError: ErrorSink,
+): Unsubscribe {
+  return onSnapshot(
+    userDoc(db, uid),
+    (snap) => cb(recoveryRuleFromDoc(snap.data()?.recovery)),
+    (err) => onError('recovery', err),
+  );
+}
+
+/** migratedAt 같은 이웃 필드를 지우지 않도록 merge 로 쓴다. */
+export function saveRecoveryRule(db: Firestore, uid: string, rule: RecoveryRule): Promise<void> {
+  return setDoc(userDoc(db, uid), { recovery: recoveryRuleToDoc(rule) }, { merge: true });
+}
+
+/**
+ * 규칙의 일부 필드만 고친다.
+ *
+ * merge 는 맵 안쪽까지 필드 단위로 합치므로, 여기서 준 키만 바뀌고 나머지는 그대로 남는다.
+ * 규칙 전체를 쓰는 경로(설정 화면)와 자동으로 도는 경로(예정일 채우기)가 동시에
+ * 규칙 전체를 쓰면 나중 것이 앞선 것을 통째로 덮는다 — 설정에서 방금 적은 기본 메모가
+ * 예정일 계산에 지워지는 식이다. 자동 경로는 자기가 계산한 필드만 건드린다.
+ */
+export function patchRecoveryRule(
+  db: Firestore, uid: string, patch: Partial<RecoveryRule>,
+): Promise<void> {
+  return setDoc(userDoc(db, uid), { recovery: patch }, { merge: true });
+}
+
+/**
+ * 회복 항목과 규칙을 한 번에 쓴다.
+ *
+ * 두 쓰기를 이어 붙이면(`saveEntry(...).then(() => saveRecoveryRule(...))`) 항목만 남고
+ * 규칙이 갱신되지 않는 창이 열린다. 오프라인 지속성이 켜져 있어 쓰기 promise 는 서버가
+ * 받을 때까지 resolve 하지 않는데, 그 사이에 탭을 닫거나 새로고침하면 항목은 큐에 남아
+ * 나중에 올라가고 `activeEntryId` 는 비어 있다. 다음 접속이 그것을 "아직 안 만들었다"로
+ * 읽고 같은 회차를 한 번 더 만든다.
+ *
+ * 배치는 로컬 캐시에 원자적으로 반영되므로 두 값이 어긋난 상태 자체가 생기지 않는다.
+ */
+export function commitRecovery(
+  db: Firestore, uid: string,
+  change: { rule: RecoveryRule; entry?: Entry | null; removeEntryId?: string | null },
+): Promise<void> {
+  const batch = writeBatch(db);
+  if (change.entry) batch.set(docIn(db, uid, COL.entries, change.entry.id), entryToDoc(change.entry));
+  if (change.removeEntryId) batch.delete(docIn(db, uid, COL.entries, change.removeEntryId));
+  batch.set(userDoc(db, uid), { recovery: recoveryRuleToDoc(change.rule) }, { merge: true });
+  return batch.commit();
 }
 
 // ---------- 쓰기 ----------

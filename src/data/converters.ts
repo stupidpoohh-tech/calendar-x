@@ -8,9 +8,11 @@ import { DEFAULT_COLOR, DEFAULT_CURRENCY, MONEY_TYPE_BY_ID, STATUS_BY_ID } from 
 import { normalizeDate, todayISO, ymRange } from '../domain/date';
 import type {
   Account, ColorId, Debt, Entry, EntryKind, MoneyType, Pin,
+  RecoveryFields, RecoveryOption, RecoveryRule, RecoveryWindowId,
   Recurrence, RepeatFreq, TaskStatus,
 } from '../domain/types';
 import { COLOR_BY_ID } from '../domain/constants';
+import { DEFAULT_RECOVERY_OPTIONS, defaultRecoveryRule, RECOVERY_WINDOWS } from '../domain/recovery';
 
 type Raw = Record<string, unknown>;
 
@@ -46,6 +48,81 @@ function asRecurrence(v: unknown): Recurrence | null {
     interval: Math.max(1, Math.trunc(num(r.interval, 1))),
     until: until || null,
     count: typeof r.count === 'number' && r.count > 0 ? Math.trunc(r.count) : null,
+  };
+}
+
+/**
+ * 회복 표식.
+ *
+ * options 의 label 은 생성 시점 스냅샷이라 Rule 쪽 옵션이 바뀌어도 그대로 읽는다.
+ * 여기서 Rule 을 참조해 되살리려 들면, 옵션을 지운 순간 지난 회차의 뜻이 사라진다.
+ */
+function asRecoveryFields(v: unknown): RecoveryFields | null {
+  const r = obj(v);
+  if (!r) return null;
+  const rawOptions = Array.isArray(r.options) ? r.options : [];
+  return {
+    options: rawOptions
+      .filter((x): x is Raw => x !== null && typeof x === 'object' && !Array.isArray(x))
+      .map((x) => ({ id: str(x.id), label: str(x.label) }))
+      .filter((o) => o.id !== ''),
+    repayment: bool(r.repayment),
+    movedCount: Math.max(0, Math.trunc(num(r.movedCount))),
+  };
+}
+
+const asRecoveryWindow = (v: unknown): RecoveryWindowId =>
+  RECOVERY_WINDOWS.some((w) => w.id === v) ? (v as RecoveryWindowId) : 'evening';
+
+function asRecoveryOptions(v: unknown): RecoveryOption[] {
+  if (!Array.isArray(v)) return DEFAULT_RECOVERY_OPTIONS.map((o) => ({ ...o }));
+  const out = v
+    .filter((x): x is Raw => x !== null && typeof x === 'object' && !Array.isArray(x))
+    .map((x, i) => ({ id: str(x.id), label: str(x.label), order: num(x.order, i) }))
+    .filter((o) => o.id !== '' && o.label !== '');
+  // 옵션을 전부 지운 상태도 사용자의 선택이다. 배열 자체가 없을 때만 기본값으로 돌린다.
+  return out;
+}
+
+/**
+ * 회복 규칙. `users/{uid}` 문서의 `recovery` 필드에서 읽는다.
+ * 필드가 통째로 없으면 (= 아직 한 번도 켠 적이 없으면) 꺼진 기본값이다.
+ */
+export function recoveryRuleFromDoc(v: unknown): RecoveryRule {
+  const base = defaultRecoveryRule();
+  const r = obj(v);
+  if (!r) return base;
+  const options = asRecoveryOptions(r.options);
+  const known = new Set(options.map((o) => o.id));
+  return {
+    enabled: bool(r.enabled),
+    intervalDays: Math.max(1, Math.trunc(num(r.intervalDays, base.intervalDays))),
+    window: asRecoveryWindow(r.window),
+    generationHorizonDays: Math.max(0, Math.trunc(num(r.generationHorizonDays, base.generationHorizonDays))),
+    lastCompletedAt: normalizeDate(str(r.lastCompletedAt)) || null,
+    nextDueAt: normalizeDate(str(r.nextDueAt)) || null,
+    activeEntryId: typeof r.activeEntryId === 'string' && r.activeEntryId ? r.activeEntryId : null,
+    debtCount: Math.max(0, Math.trunc(num(r.debtCount))),
+    defaultMemo: str(r.defaultMemo),
+    // 지워진 옵션이 기본 선택에 남아 있으면 새 회차가 빈 스냅샷을 안고 태어난다.
+    defaultOptionIds: strArr(r.defaultOptionIds).filter((id) => known.has(id)),
+    options,
+  };
+}
+
+export function recoveryRuleToDoc(r: RecoveryRule): Raw {
+  return {
+    enabled: r.enabled,
+    intervalDays: r.intervalDays,
+    window: r.window,
+    generationHorizonDays: r.generationHorizonDays,
+    lastCompletedAt: r.lastCompletedAt,
+    nextDueAt: r.nextDueAt,
+    activeEntryId: r.activeEntryId,
+    debtCount: r.debtCount,
+    defaultMemo: r.defaultMemo,
+    defaultOptionIds: r.defaultOptionIds,
+    options: r.options.map((o) => ({ id: o.id, label: o.label, order: o.order })),
   };
 }
 
@@ -93,6 +170,8 @@ export function entryFromDoc(id: string, raw: Raw): Entry {
           linkedEntryId: typeof moneyRaw?.linkedEntryId === 'string' ? moneyRaw.linkedEntryId : null,
         }
       : null,
+    // 회복 표식은 할 일 위에만 얹힌다.
+    recovery: kind === 'task' ? asRecoveryFields(raw.recovery) : null,
     createdAt: str(raw.createdAt),
     updatedAt: str(raw.updatedAt),
   };
@@ -116,6 +195,7 @@ export function entryToDoc(e: Entry): Raw {
     recurrence: e.recurrence,
     task: e.task,
     money: e.money,
+    recovery: e.recovery,
     createdAt: e.createdAt,
     updatedAt: e.updatedAt,
   };

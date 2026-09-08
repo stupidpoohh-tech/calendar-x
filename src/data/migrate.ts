@@ -264,6 +264,8 @@ export function convertLegacyItems(items: readonly Raw[]): MigrationResult {
             linkedEntryId: null,
           }
         : null,
+      // 이관 전 구조에는 회복이 없었다. 표식 없이 그대로 온다.
+      recovery: null,
       createdAt: str(raw.createdAt, now),
       updatedAt: str(raw.updatedAt, now),
     });
