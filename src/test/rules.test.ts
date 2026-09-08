@@ -36,10 +36,37 @@ const validEntry = (over: Record<string, unknown> = {}) => ({
   recurrence: null,
   task: { status: 'planned', important: false, urgent: false, order: 0 },
   money: null,
+  recovery: null,
   createdAt: '2026-08-01T00:00:00.000Z',
   updatedAt: '2026-08-01T00:00:00.000Z',
   ...over,
 });
+
+const recoveryFields = {
+  options: [
+    { id: 'personal', label: '개인 프로젝트' },
+    { id: 'work', label: '회사 일' },
+  ],
+  repayment: false,
+  movedCount: 0,
+};
+
+const recoveryRule = {
+  enabled: true,
+  intervalDays: 3,
+  window: 'evening',
+  generationHorizonDays: 1,
+  lastCompletedAt: '2026-08-01',
+  nextDueAt: '2026-08-04',
+  activeEntryId: 'e1',
+  debtCount: 0,
+  defaultMemo: '오늘은 결과물을 만들지 않는다',
+  defaultOptionIds: ['personal', 'work'],
+  options: [
+    { id: 'personal', label: '개인 프로젝트', order: 0 },
+    { id: 'work', label: '회사 일', order: 1 },
+  ],
+};
 
 beforeAll(async () => {
   env = await initializeTestEnvironment({
@@ -139,6 +166,41 @@ describe('accounts / debts / pins', () => {
   it('고정 메모의 렌즈 값을 확인한다', async () => {
     await assertSucceeds(setDoc(doc(db(ME), `users/${ME}/pins/p1`), pin));
     await assertFails(setDoc(doc(db(ME), `users/${ME}/pins/p2`), { ...pin, lens: 'memo' }));
+  });
+});
+
+/*
+  회복은 규칙을 고치지 않고 들어왔다. 항목 규칙은 필수 필드의 타입만 보고 나머지를
+  통과시키도록 쓰여 있고(그래서 새 필드가 조용히 막히지 않는다), 회복 규칙은
+  users/{uid} 문서의 필드라 소유자 검사만 거친다. 그 전제가 무너지면 회복은
+  "저장은 되는데 사라지는" 예전 문제로 돌아가므로 여기에 못 박아 둔다.
+*/
+describe('회복', () => {
+  it('회복 표식이 붙은 항목을 받는다', async () => {
+    await assertSucceeds(setDoc(
+      doc(db(ME), `users/${ME}/entries/e1`),
+      validEntry({ title: 'Recovery — OUTPUT OFF', startTime: '18:00', endTime: '23:59', recovery: recoveryFields }),
+    ));
+  });
+
+  it('회복 규칙은 사용자 문서에 쓸 수 있다', async () => {
+    await assertSucceeds(setDoc(doc(db(ME), `users/${ME}`), { recovery: recoveryRule }, { merge: true }));
+    const snap = await getDoc(doc(db(ME), `users/${ME}`));
+    expect(snap.data()?.recovery?.debtCount).toBe(0);
+  });
+
+  it('규칙을 필드 단위로 고칠 수 있다 — 이웃 필드는 남는다', async () => {
+    await setDoc(doc(db(ME), `users/${ME}`), { migratedAt: '2026-08-01T00:00:00.000Z', recovery: recoveryRule });
+    await assertSucceeds(setDoc(doc(db(ME), `users/${ME}`), { recovery: { nextDueAt: '2026-08-07' } }, { merge: true }));
+    const data = (await getDoc(doc(db(ME), `users/${ME}`))).data();
+    expect(data?.recovery?.nextDueAt).toBe('2026-08-07');
+    // 부분 쓰기가 나머지를 지우면 설정에서 방금 적은 기본 메모가 사라진다.
+    expect(data?.recovery?.defaultMemo).toBe('오늘은 결과물을 만들지 않는다');
+    expect(data?.migratedAt).toBe('2026-08-01T00:00:00.000Z');
+  });
+
+  it('남의 회복 규칙은 건드릴 수 없다', async () => {
+    await assertFails(setDoc(doc(db(OTHER), `users/${ME}`), { recovery: recoveryRule }, { merge: true }));
   });
 });
 

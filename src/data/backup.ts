@@ -6,11 +6,11 @@
  * 쓰고 화면만 바꿔서 다음 스냅샷에 사라졌다. 여기서는 양쪽 다 Firestore 를 본다.
  */
 import { todayISO } from '../domain/date';
-import type { Account, Debt, Entry, Pin } from '../domain/types';
-import { accountFromDoc, debtFromDoc, entryFromDoc, pinFromDoc } from './converters';
+import type { Account, Debt, Entry, Pin, RecoveryRule } from '../domain/types';
+import { accountFromDoc, debtFromDoc, entryFromDoc, pinFromDoc, recoveryRuleFromDoc } from './converters';
 import { convertLegacyItems } from './migrate';
 
-export const BACKUP_VERSION = 2;
+export const BACKUP_VERSION = 3;
 
 export interface BackupPayload {
   app: 'Dada Calendar';
@@ -20,6 +20,12 @@ export interface BackupPayload {
   accounts: Account[];
   debts: Debt[];
   pins: Pin[];
+  /**
+   * 회복 규칙. 항목이 아니라 설정이라 개수에 세지 않는다.
+   * 빼 두면 "전체 데이터를 한 파일로" 라고 적어 두고 회복 간격과 밀린 횟수를
+   * 조용히 흘리게 된다. 예전 버전 파일에는 이 값이 없다.
+   */
+  recovery: RecoveryRule | null;
 }
 
 export interface BackupData {
@@ -27,6 +33,7 @@ export interface BackupData {
   accounts: Account[];
   debts: Debt[];
   pins: Pin[];
+  recovery: RecoveryRule | null;
 }
 
 export function buildBackup(data: BackupData): BackupPayload {
@@ -38,6 +45,7 @@ export function buildBackup(data: BackupData): BackupPayload {
     accounts: data.accounts,
     debts: data.debts,
     pins: data.pins,
+    recovery: data.recovery,
   };
 }
 
@@ -84,6 +92,8 @@ export function parseBackup(text: string): BackupData {
       accounts: converted.accounts,
       debts: converted.debts,
       pins: converted.pins,
+      // 이관 전 구조에는 회복이 없었다.
+      recovery: null,
     };
   }
 
@@ -104,10 +114,13 @@ export function parseBackup(text: string): BackupData {
     accounts: list(raw.accounts, accountFromDoc),
     debts: list(raw.debts, debtFromDoc),
     pins: list(raw.pins, pinFromDoc),
+    // version 2 이하 파일에는 없다. 없으면 지금 설정을 그대로 둔다.
+    recovery: raw.recovery ? recoveryRuleFromDoc(raw.recovery) : null,
   };
 }
 
-export function countBackup(d: BackupData): number {
+/** 항목 수. 회복 규칙은 항목이 아니라 설정이라 세지 않는다. */
+export function countBackup(d: Omit<BackupData, 'recovery'>): number {
   return d.entries.length + d.accounts.length + d.debts.length + d.pins.length;
 }
 
@@ -122,5 +135,7 @@ export function mergeBackup(current: BackupData, incoming: BackupData): BackupDa
     accounts: merge(current.accounts, incoming.accounts),
     debts: merge(current.debts, incoming.debts),
     pins: merge(current.pins, incoming.pins),
+    // 설정은 병합할 수 없다. 쓰고 있는 규칙을 남긴다.
+    recovery: current.recovery ?? incoming.recovery,
   };
 }

@@ -69,6 +69,7 @@ export function newEntry(kind: EntryKind, patch: Partial<Entry> = {}): Entry {
     money: kind === 'money'
       ? { type: 'expense', amountMinor: 0, currency: DEFAULT_CURRENCY, linkedEntryId: null }
       : null,
+    recovery: null,
     createdAt: now,
     updatedAt: now,
   };
@@ -98,6 +99,8 @@ export function convertKind(e: Entry, to: EntryKind): Entry {
     money: to === 'money'
       ? e.money ?? { type: 'expense', amountMinor: 0, currency: DEFAULT_CURRENCY, linkedEntryId: null }
       : null,
+    // 회복 표식은 할 일 위에만 얹힌다. 다른 축으로 옮기면 표식이 남을 자리가 없다.
+    recovery: to === 'task' ? e.recovery : null,
   };
   // 아이디어는 기간도 반복도 갖지 않으므로 강등 시 접는다.
   if (to === 'idea') {

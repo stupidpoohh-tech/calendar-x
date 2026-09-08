@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { newEntry } from '../domain/entry';
+import { defaultRecoveryRule } from '../domain/recovery';
 import { BackupParseError, buildBackup, countBackup, mergeBackup, parseBackup } from './backup';
 import type { Account } from '../domain/types';
 
@@ -11,11 +12,31 @@ const account: Account = {
 
 describe('buildBackup / parseBackup 왕복', () => {
   it('내보낸 것을 그대로 되읽는다', () => {
-    const data = { entries: [newEntry('task', { title: '치과' })], accounts: [account], debts: [], pins: [] };
+    const data = { entries: [newEntry('task', { title: '치과' })], accounts: [account], debts: [], pins: [], recovery: null };
     const restored = parseBackup(JSON.stringify(buildBackup(data)));
     expect(restored.entries[0]?.title).toBe('치과');
     expect(restored.accounts[0]?.balanceMinor).toBe(1_000_000);
     expect(countBackup(restored)).toBe(2);
+  });
+
+  it('회복 규칙도 함께 실어 보낸다', () => {
+    // 규칙이 빠지면 "전체 데이터를 한 파일로" 라고 적어 두고 회복 간격과 밀린 횟수를
+    // 조용히 흘리게 된다.
+    const rule = { ...defaultRecoveryRule(), enabled: true, intervalDays: 5, debtCount: 2 };
+    const restored = parseBackup(JSON.stringify(buildBackup({
+      entries: [], accounts: [], debts: [], pins: [], recovery: rule,
+    })));
+    expect(restored.recovery?.enabled).toBe(true);
+    expect(restored.recovery?.intervalDays).toBe(5);
+    expect(restored.recovery?.debtCount).toBe(2);
+    expect(restored.recovery?.options).toHaveLength(4);
+    // 설정은 항목이 아니다.
+    expect(countBackup(restored)).toBe(0);
+  });
+
+  it('회복이 없던 시절의 파일도 그대로 읽는다', () => {
+    const old = { app: 'Dada Calendar', version: 2, exportedAt: '', entries: [], accounts: [], debts: [], pins: [] };
+    expect(parseBackup(JSON.stringify(old)).recovery).toBeNull();
   });
 });
 
@@ -56,8 +77,8 @@ describe('mergeBackup', () => {
     const b = newEntry('task', { id: 'x', title: '들어온 것' });
     const c = newEntry('task', { id: 'y', title: '새 항목' });
     const merged = mergeBackup(
-      { entries: [a], accounts: [], debts: [], pins: [] },
-      { entries: [b, c], accounts: [], debts: [], pins: [] },
+      { entries: [a], accounts: [], debts: [], pins: [], recovery: null },
+      { entries: [b, c], accounts: [], debts: [], pins: [], recovery: null },
     );
     expect(merged.entries).toHaveLength(2);
     expect(merged.entries.find((e) => e.id === 'x')?.title).toBe('원본');
