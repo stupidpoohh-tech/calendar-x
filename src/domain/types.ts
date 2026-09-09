@@ -235,6 +235,8 @@ export interface RecoveryRule {
 }
 
 export type ThemePref = 'system' | 'light' | 'dark';
+/** 글씨 크기. 'auto' 는 브라우저·OS 설정을 따른다는 뜻이다. */
+export type FontScale = 'auto' | 'sm' | 'md' | 'lg';
 export type WeekStart = 'mon' | 'sun';
 export type LensId = EntryKind | 'all';
 export type ViewId = 'calendar' | 'list';
@@ -242,6 +244,7 @@ export type ViewId = 'calendar' | 'list';
 /** 기기에 남는 UI 설정. 사용자 데이터가 아니므로 Firestore 에 올리지 않는다. */
 export interface Prefs {
   theme: ThemePref;
+  fontScale: FontScale;
   lens: LensId;
   view: ViewId;
   weekStart: WeekStart;

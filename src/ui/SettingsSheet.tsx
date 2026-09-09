@@ -1,12 +1,13 @@
 import { useState } from 'react';
 import type { User } from 'firebase/auth';
-import type { RecoveryRule, ThemePref, WeekStart } from '../domain/types';
+import type { FontScale, RecoveryRule, ThemePref, WeekStart } from '../domain/types';
 import { Icon } from './Icon';
 import { RecoverySettings } from './RecoverySettings';
 
 interface Props {
   user: User;
   theme: ThemePref;
+  fontScale: FontScale;
   weekStart: WeekStart;
   entryCount: number;
   legacyCount: number | null;
@@ -15,6 +16,7 @@ interface Props {
   recoveryRule: RecoveryRule;
   onRecoveryRule: (next: RecoveryRule) => void;
   onTheme: (t: ThemePref) => void;
+  onFontScale: (f: FontScale) => void;
   onWeekStart: (w: WeekStart) => void;
   onExport: () => void | Promise<void>;
   onImport: () => void | Promise<void>;
@@ -23,10 +25,17 @@ interface Props {
   onClose: () => void;
 }
 
+const FONT_SCALES: Array<[FontScale, string]> = [
+  ['auto', '자동'],
+  ['sm', '작게'],
+  ['md', '중간'],
+  ['lg', '크게'],
+];
+
 export function SettingsSheet({
-  user, theme, weekStart, entryCount, legacyCount, migratedAt,
+  user, theme, fontScale, weekStart, entryCount, legacyCount, migratedAt,
   recoveryRule, onRecoveryRule,
-  onTheme, onWeekStart, onExport, onImport, onMigrate, onSignOut, onClose,
+  onTheme, onFontScale, onWeekStart, onExport, onImport, onMigrate, onSignOut, onClose,
 }: Props) {
   const [showRedo, setShowRedo] = useState(false);
   const [busy, setBusy] = useState<string | null>(null);
@@ -100,6 +109,30 @@ export function SettingsSheet({
                 ))}
               </div>
             </div>
+            {/*
+              작게 → 크게 순으로 늘어놓는다. '자동' 이 맨 앞인 것은 테마의 '시스템' 과
+              같은 자리이기 때문이다.
+            */}
+            <div className="set-row-inline">
+              <span>글씨 크기</span>
+              <div className="seg">
+                {FONT_SCALES.map(([id, label]) => (
+                  <button
+                    key={id}
+                    className={'seg-btn' + (fontScale === id ? ' on' : '')}
+                    onClick={() => onFontScale(id)}
+                  >
+                    {label}
+                  </button>
+                ))}
+              </div>
+            </div>
+            <p className="set-note">
+              {fontScale === 'auto'
+                ? '브라우저·휴대폰의 글씨 크기 설정을 따릅니다.'
+                : '브라우저 설정과 무관하게 이 크기로 고정합니다.'}
+            </p>
+
             <div className="set-row-inline">
               <span>주 시작</span>
               <div className="seg">

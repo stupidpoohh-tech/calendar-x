@@ -766,6 +766,7 @@ function Workspace({ uid, user, onSignOut }: WorkspaceProps) {
         <SettingsSheet
           user={user}
           theme={prefs.theme}
+          fontScale={prefs.fontScale}
           weekStart={prefs.weekStart}
           entryCount={store.entries.length}
           legacyCount={legacy?.count ?? null}
@@ -773,6 +774,7 @@ function Workspace({ uid, user, onSignOut }: WorkspaceProps) {
           recoveryRule={recovery.rule}
           onRecoveryRule={recovery.saveRule}
           onTheme={(t) => set('theme', t)}
+          onFontScale={(f) => set('fontScale', f)}
           onWeekStart={(w) => set('weekStart', w)}
           onExport={handleExport}
           onImport={handleImport}

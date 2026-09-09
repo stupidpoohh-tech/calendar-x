@@ -5,6 +5,7 @@ const PREF_KEY = 'dada.pref.v2';
 
 const DEFAULTS: Prefs = {
   theme: 'system',
+  fontScale: 'auto',
   lens: 'all',
   view: 'calendar',
   weekStart: 'mon',
@@ -44,6 +45,13 @@ export function usePrefs() {
     if (prefs.theme === 'system') delete root.dataset.theme;
     else root.dataset.theme = prefs.theme;
   }, [prefs.theme]);
+
+  // 테마와 같은 규칙. 'auto' 면 속성을 지워 html 의 font-size 를 브라우저에 맡긴다.
+  useEffect(() => {
+    const root = document.documentElement;
+    if (prefs.fontScale === 'auto') delete root.dataset.fontScale;
+    else root.dataset.fontScale = prefs.fontScale;
+  }, [prefs.fontScale]);
 
   return { prefs, set };
 }
