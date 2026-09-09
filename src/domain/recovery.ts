@@ -265,9 +265,38 @@ export function scheduleDebtRecovery(
 
 // ---------- 옵션 관리 ----------
 
+/** 화면에 보이는 이름을 정리한다. 저장되는 값이 곧 이 값이다. */
+export function normalizeOptionLabel(raw: string): string {
+  return raw.trim().replace(/\s+/g, ' ').slice(0, 40);
+}
+
+/**
+ * 같은 이름의 옵션을 찾는다.
+ *
+ * 이름은 사용자가 직접 관리하는 목록이라, 같은 것을 두 번 적는 일이 실제로 생긴다
+ * ('사우나' 와 '사우나 '). 대소문자와 공백만 무시하고 같은 것으로 본다.
+ */
+export function findRecoveryOption(rule: RecoveryRule, label: string): RecoveryOption | undefined {
+  const key = normalizeOptionLabel(label).toLowerCase();
+  if (!key) return undefined;
+  return rule.options.find((o) => normalizeOptionLabel(o.label).toLowerCase() === key);
+}
+
+/**
+ * 옵션 추가.
+ *
+ * 같은 이름이 이미 있으면 목록을 불리지 않고 그것의 기본 선택만 켠다 —
+ * 이 목록은 사용자가 직접 손으로 관리하므로, 중복이 쌓이면 관리 자체가 일이 된다.
+ */
 export function addRecoveryOption(rule: RecoveryRule, label: string): RecoveryRule {
-  const text = label.trim().slice(0, 40);
+  const text = normalizeOptionLabel(label);
   if (!text) return rule;
+
+  const existing = findRecoveryOption(rule, text);
+  if (existing) {
+    return rule.defaultOptionIds.includes(existing.id) ? rule : toggleDefaultOption(rule, existing.id);
+  }
+
   const option: RecoveryOption = {
     id: uid(),
     label: text,
@@ -282,8 +311,11 @@ export function addRecoveryOption(rule: RecoveryRule, label: string): RecoveryRu
 }
 
 export function renameRecoveryOption(rule: RecoveryRule, id: string, label: string): RecoveryRule {
-  const text = label.trim().slice(0, 40);
+  const text = normalizeOptionLabel(label);
   if (!text) return rule;
+  // 다른 옵션이 이미 그 이름이면 두 개가 같은 이름으로 남는다. 그대로 둔다.
+  const clash = findRecoveryOption(rule, text);
+  if (clash && clash.id !== id) return rule;
   return { ...rule, options: rule.options.map((o) => (o.id === id ? { ...o, label: text } : o)) };
 }
 
@@ -388,6 +420,35 @@ export function toggleEntryOption(rule: RecoveryRule, entry: Entry, id: string):
   const next = [...rec.options, { id: def.id, label: def.label }]
     .sort((a, b) => (order.get(a.id) ?? 999) - (order.get(b.id) ?? 999));
   return withDerived({ ...entry, recovery: { ...rec, options: next } });
+}
+
+/**
+ * 회차에서 바로 새 항목을 만든다.
+ *
+ * 두 층을 한 번에 건드리는 유일한 동작이다 — 목록(Rule)에 더하고, 이 회차에서도 켠다.
+ * 여기서 만든 것이 다음 회차부터 기본으로 붙는 것이 의도다. 사용자가 자기 기준을
+ * 손으로 쌓아 가는 목록이라, 한 번 적은 항목을 매번 다시 적게 하지 않는다.
+ *
+ * 같은 이름이 이미 있으면 새로 만들지 않고 그것을 켠다.
+ * 만들 것이 없으면(빈 문자열) null 을 돌려준다 — 부르는 쪽이 아무것도 저장하지 않는다.
+ */
+export function addOptionFromEntry(
+  rule: RecoveryRule, entry: Entry, label: string,
+): { rule: RecoveryRule; entry: Entry } | null {
+  const text = normalizeOptionLabel(label);
+  if (!text || !entry.recovery) return null;
+
+  const existing = findRecoveryOption(rule, text);
+  const nextRule = addRecoveryOption(rule, text);
+  const option = existing
+    ?? nextRule.options.find((o) => !rule.options.some((x) => x.id === o.id));
+  if (!option) return null;
+
+  const alreadyOn = entry.recovery.options.some((o) => o.id === option.id);
+  return {
+    rule: nextRule,
+    entry: alreadyOn ? entry : toggleEntryOption(nextRule, entry, option.id),
+  };
 }
 
 /** 이 회차의 메모만 고친다. Rule 기본 메모는 그대로다. */

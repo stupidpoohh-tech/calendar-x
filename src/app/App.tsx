@@ -725,6 +725,7 @@ function Workspace({ uid, user, onSignOut }: WorkspaceProps) {
           rule={recovery.rule}
           todayISO={today}
           onSaveEntry={recovery.saveEntryOnly}
+          onChangeRule={recovery.saveRule}
           onComplete={(e) => {
             recovery.complete(e, today);
             setRecoveryId(null);

@@ -11,17 +11,21 @@
 import { useEffect, useState } from 'react';
 import { fmtDayFull } from '../domain/date';
 import {
-  describeRecoveryTime, recoveryOptionChoices, setEntryMemo, toggleEntryOption,
+  addOptionFromEntry, describeRecoveryTime, recoveryOptionChoices,
+  setEntryMemo, toggleEntryOption,
 } from '../domain/recovery';
 import type { Entry, RecoveryRule, TimeHM } from '../domain/types';
 import { Icon } from './Icon';
+import { RecoveryOptionAdd, RecoveryOptionManager } from './RecoveryOptionManager';
 
 interface Props {
   entry: Entry;
   rule: RecoveryRule;
   todayISO: string;
-  /** 메모 · OFF 항목 수정. 이 회차에만 적용된다. */
+  /** 메모 · OFF 항목 켜고 끄기. 이 회차에만 적용된다. */
   onSaveEntry: (e: Entry) => void;
+  /** 항목 목록 자체를 고친다. 다음 회차부터 함께 바뀐다. */
+  onChangeRule: (next: RecoveryRule) => void;
   onComplete: (e: Entry) => void;
   onMove: (e: Entry, toDate: string, toTime: TimeHM | null) => void;
   onSkip: (e: Entry) => void;
@@ -29,9 +33,10 @@ interface Props {
 }
 
 export function RecoverySheet({
-  entry, rule, todayISO, onSaveEntry, onComplete, onMove, onSkip, onClose,
+  entry, rule, todayISO, onSaveEntry, onChangeRule, onComplete, onMove, onSkip, onClose,
 }: Props) {
   const [memo, setMemo] = useState(entry.note);
+  const [managing, setManaging] = useState(false);
   const [moving, setMoving] = useState(false);
   const [moveDate, setMoveDate] = useState(entry.startDate);
   const [moveTime, setMoveTime] = useState(entry.startTime ?? '');
@@ -52,6 +57,17 @@ export function RecoverySheet({
   const commitMemo = () => {
     if (memo === entry.note) return;
     onSaveEntry(setEntryMemo(entry, memo));
+  };
+
+  /*
+    새 항목은 목록에 더하고 이 회차에서도 켠다. 문서가 둘이라 쓰기도 둘이지만,
+    사용자에게는 한 동작이다 — 적으면 지금 켜지고 다음 회차부터 기본으로 붙는다.
+  */
+  const addOption = (label: string) => {
+    const next = addOptionFromEntry(rule, entry, label);
+    if (!next) return;
+    onChangeRule(next.rule);
+    if (next.entry !== entry) onSaveEntry(next.entry);
   };
 
   return (
@@ -85,15 +101,40 @@ export function RecoverySheet({
                   className={'chip' + (c.on ? ' on' : '') + (c.gone ? ' gone' : '')}
                   aria-pressed={c.on}
                   onClick={() => onSaveEntry(toggleEntryOption(rule, entry, c.id))}
-                  title={c.gone ? '설정에서 지운 항목입니다. 이 회차에는 남아 있습니다.' : undefined}
+                  title={c.gone ? '목록에서 지운 항목입니다. 이 회차에는 남아 있습니다.' : undefined}
                 >
                   {c.on && <Icon.Check size={11} />}
                   {c.label}
                 </button>
               ))}
-              {choices.length === 0 && <span className="rec-none">끌 항목이 없습니다.</span>}
+              <button
+                type="button"
+                className={'chip ghost' + (managing ? ' on' : '')}
+                aria-expanded={managing}
+                aria-label={managing ? '항목 편집 닫기' : '항목 편집'}
+                onClick={() => setManaging((x) => !x)}
+              >
+                <Icon.Settings size={11} /> 편집
+              </button>
             </div>
           </div>
+
+          {/*
+            목록 자체를 여기서 고친다. 사용자가 자기 기준을 쌓아 가는 목록이라,
+            새 항목을 적으려고 설정 화면까지 가야 하면 결국 적지 않게 된다.
+          */}
+          {managing && (
+            <div className="mod-row">
+              <span className="mod-lbl" />
+              <div className="rec-manage">
+                <RecoveryOptionAdd placeholder="새 항목 — 예: 사우나" onAdd={addOption} />
+                <RecoveryOptionManager rule={rule} onChange={onChangeRule} />
+                <p className="set-row-s">
+                  여기서 고친 목록은 다음 회복에도 그대로 쓰입니다. 지난 회복은 그때의 이름을 그대로 둡니다.
+                </p>
+              </div>
+            </div>
+          )}
 
           <div className="mod-row">
             <label className="mod-lbl" htmlFor="rec-memo">메모</label>

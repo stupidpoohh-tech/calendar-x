@@ -7,12 +7,13 @@
  */
 import { useEffect, useState } from 'react';
 import {
-  addRecoveryOption, describeRecoveryRule, horizonLabel, moveRecoveryOption,
+  addRecoveryOption, describeRecoveryRule, horizonLabel,
   RECOVERY_HORIZON_CHOICES, RECOVERY_INTERVAL_CHOICES, RECOVERY_WINDOWS,
-  removeRecoveryOption, renameRecoveryOption, setRecoveryInterval, toggleDefaultOption,
+  setRecoveryInterval, toggleDefaultOption,
 } from '../domain/recovery';
 import type { RecoveryRule, RecoveryWindowId } from '../domain/types';
 import { Icon } from './Icon';
+import { RecoveryOptionAdd, RecoveryOptionManager } from './RecoveryOptionManager';
 
 interface Props {
   rule: RecoveryRule;
@@ -21,7 +22,6 @@ interface Props {
 
 export function RecoverySettings({ rule, onChange }: Props) {
   const [manageOptions, setManageOptions] = useState(false);
-  const [newOption, setNewOption] = useState('');
   const sorted = [...rule.options].sort((a, b) => a.order - b.order);
 
   /*
@@ -30,7 +30,6 @@ export function RecoverySettings({ rule, onChange }: Props) {
     전량을 실어 나르던 구조를 걷어내면서 읽기·쓰기 비용을 줄여 온 참이다.
   */
   const [memoDraft, setMemoDraft] = useState(rule.defaultMemo);
-  const [labelDrafts, setLabelDrafts] = useState<Record<string, string>>({});
 
   // 다른 기기에서 바뀐 값은 편집 중이 아닐 때만 따라간다.
   useEffect(() => { setMemoDraft(rule.defaultMemo); }, [rule.defaultMemo]);
@@ -38,20 +37,6 @@ export function RecoverySettings({ rule, onChange }: Props) {
   const commitMemo = () => {
     if (memoDraft === rule.defaultMemo) return;
     onChange({ ...rule, defaultMemo: memoDraft });
-  };
-
-  const commitLabel = (id: string, current: string) => {
-    const draft = labelDrafts[id];
-    setLabelDrafts((d) => { const { [id]: _drop, ...rest } = d; return rest; });
-    if (draft === undefined || draft.trim() === current) return;
-    onChange(renameRecoveryOption(rule, id, draft));
-  };
-
-  const addOption = () => {
-    const text = newOption.trim();
-    if (!text) return;
-    onChange(addRecoveryOption(rule, text));
-    setNewOption('');
   };
 
   return (
@@ -169,51 +154,11 @@ export function RecoverySettings({ rule, onChange }: Props) {
 
           {manageOptions && (
             <div className="rec-manage">
-              <ul className="rec-opts">
-                {sorted.map((o, i) => (
-                  <li key={o.id}>
-                    <input
-                      className="mod-input"
-                      value={labelDrafts[o.id] ?? o.label}
-                      onChange={(e) => setLabelDrafts((d) => ({ ...d, [o.id]: e.target.value }))}
-                      onBlur={() => commitLabel(o.id, o.label)}
-                      aria-label={`${o.label} 이름`}
-                    />
-                    <button
-                      className="ico-btn sm" aria-label="위로" disabled={i === 0}
-                      onClick={() => onChange(moveRecoveryOption(rule, o.id, -1))}
-                    >
-                      <Icon.Chevron size={13} dir="up" />
-                    </button>
-                    <button
-                      className="ico-btn sm" aria-label="아래로" disabled={i === sorted.length - 1}
-                      onClick={() => onChange(moveRecoveryOption(rule, o.id, 1))}
-                    >
-                      <Icon.Chevron size={13} dir="down" />
-                    </button>
-                    <button
-                      className="ico-btn sm" aria-label={`${o.label} 삭제`}
-                      onClick={() => onChange(removeRecoveryOption(rule, o.id))}
-                    >
-                      <Icon.Trash size={13} />
-                    </button>
-                  </li>
-                ))}
-              </ul>
-              <div className="rec-add">
-                <input
-                  className="mod-input"
-                  value={newOption}
-                  placeholder="새 옵션 — 예: 과외 준비"
-                  onChange={(e) => setNewOption(e.target.value)}
-                  onKeyDown={(e) => {
-                    // 조합 중 Enter 가 두 번 발화하면 입력이 사라진다.
-                    if (e.nativeEvent.isComposing) return;
-                    if (e.key === 'Enter') { e.preventDefault(); addOption(); }
-                  }}
-                />
-                <button className="btn" onClick={addOption}><Icon.Plus size={13} /> 추가</button>
-              </div>
+              <RecoveryOptionAdd
+                placeholder="새 항목 — 예: 사우나"
+                onAdd={(label) => onChange(addRecoveryOption(rule, label))}
+              />
+              <RecoveryOptionManager rule={rule} onChange={onChange} />
               <p className="set-row-s">
                 이름을 바꾸거나 지워도 지난 회복은 그대로 남습니다 — 각 회차가 그때의 이름을 함께 들고 있습니다.
               </p>

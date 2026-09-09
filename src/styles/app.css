@@ -1147,8 +1147,19 @@
   font-size: 11px; font-weight: 600; color: var(--ink-3);
   border: 1px solid var(--line); border-radius: 999px; padding: 1px 7px;
 }
-/* 설정에서 지운 옵션. 이 회차의 스냅샷으로만 남아 있어 뜻은 살아 있다. */
+/*
+ * 목록에서 지운 항목. 이 회차의 스냅샷으로만 남아 있다.
+ *
+ * 켜진 칩(.on)은 배경이 잉크색이라 점선 테두리가 그 위에서 보이지 않는다. 목록을
+ * 직접 관리하게 된 이상 "이건 내 목록에 없는 것" 이 한눈에 갈려야 하므로,
+ * 채우지 않고 점선 윤곽으로 되돌린다. 체크 표시는 그대로 남아 켜짐은 유지된다.
+ */
 .chip.gone { border-style: dashed; }
+.chip.gone.on {
+  background: transparent;
+  color: var(--ink-2);
+  border-color: var(--ink-4);
+}
 .rec-none { font-size: 12.5px; color: var(--ink-3); }
 .rec-move {
   border: 1px solid var(--line); border-radius: var(--radius-sm);
@@ -1158,6 +1169,16 @@
 .rec-move .mod-hint { margin: 0; }
 .rec-move-do { display: flex; gap: 6px; justify-content: flex-end; }
 .rec-foot { gap: 6px; }
+
+/*
+ * 상세 안의 항목 편집.
+ *
+ * 칩 줄에 '편집' 칩 하나를 더해 두고, 누르면 그 아래에 목록이 펼쳐진다. 상세를 두 화면으로
+ * 가르지 않는 이유는 이 목록이 사용자가 손으로 쌓아 가는 것이라, 적으러 다른 화면까지
+ * 가야 하면 결국 적지 않게 되기 때문이다.
+ */
+.rec-mod .rec-manage { flex: 1; min-width: 0; }
+.chip.ghost .ico { flex-shrink: 0; }
 
 /* ---- 회복 설정 ---- */
 
@@ -1179,8 +1200,9 @@
 }
 .rec-opts { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 5px; }
 .rec-opts li { display: flex; gap: 3px; align-items: center; }
-.rec-opts li .mod-input { flex: 1; min-width: 0; }
+/* 이름 칸이 먼저 줄어든다. 버튼 넷은 폭이 고정이라 모바일에서도 눌리는 크기를 지킨다. */
+.rec-opts li .mod-input { flex: 1 1 0; min-width: 0; }
 .rec-add { display: flex; gap: 6px; }
-.rec-add .mod-input { flex: 1; min-width: 0; }
+.rec-add .mod-input { flex: 1 1 0; min-width: 0; }
 .rec-manage .set-row-s { line-height: 1.55; }
 .rec-state { padding: 2px 4px; line-height: 1.55; }

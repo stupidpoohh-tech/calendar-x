@@ -10,12 +10,13 @@
  */
 import { describe, expect, it } from 'vitest';
 import {
-  addRecoveryOption, buildRecoveryEntry, completeRecovery, defaultRecoveryRule,
+  addOptionFromEntry, addRecoveryOption, buildRecoveryEntry, completeRecovery, defaultRecoveryRule,
   generateRecovery, moveRecovery, moveRecoveryOption, nextDueFrom, primeRule,
   recoveryOptionChoices, removeRecoveryOption, renameRecoveryOption,
   scheduleDebtRecovery, setEntryMemo, setRecoveryInterval, shouldGenerate,
   skipRecovery, snapshotOptions, toggleDefaultOption, toggleEntryOption,
 } from './recovery';
+import { newEntry } from './entry';
 import type { RecoveryRule } from './types';
 
 const rule = (p: Partial<RecoveryRule> = {}): RecoveryRule => ({
@@ -388,6 +389,81 @@ describe('Scenario F — 옵션 관리', () => {
     for (const id of ['personal', 'work', 'ai', 'output']) r = removeRecoveryOption(r, id);
     const t = generateRecovery(r, '2026-09-03')!;
     expect(t.entry?.recovery?.options).toEqual([]);
+  });
+});
+
+describe('회차에서 바로 항목 만들기', () => {
+  it('목록에 더하고 이 회차에서도 켠다', () => {
+    const t = generateRecovery(rule({ nextDueAt: '2026-09-04' }), '2026-09-03')!;
+    const next = addOptionFromEntry(t.rule, t.entry!, '사우나')!;
+
+    expect(next.rule.options.map((o) => o.label)).toContain('사우나');
+    expect(next.entry.recovery?.options.map((o) => o.label)).toContain('사우나');
+    // 손으로 쌓아 가는 목록이라 다음 회차부터 기본으로 붙는다.
+    const added = next.rule.options.find((o) => o.label === '사우나')!;
+    expect(next.rule.defaultOptionIds).toContain(added.id);
+    expect(snapshotOptions(next.rule).map((o) => o.label)).toContain('사우나');
+  });
+
+  it('빈 이름이면 아무것도 하지 않는다', () => {
+    const t = generateRecovery(rule({ nextDueAt: '2026-09-04' }), '2026-09-03')!;
+    expect(addOptionFromEntry(t.rule, t.entry!, '   ')).toBeNull();
+  });
+
+  it('앞뒤 공백과 중복 공백을 정리해 넣는다', () => {
+    const t = generateRecovery(rule({ nextDueAt: '2026-09-04' }), '2026-09-03')!;
+    const next = addOptionFromEntry(t.rule, t.entry!, '  유튜브   보기 ')!;
+    expect(next.rule.options.map((o) => o.label)).toContain('유튜브 보기');
+  });
+
+  it('이미 있는 이름이면 새로 만들지 않고 그것을 켠다', () => {
+    const t = generateRecovery(rule({ nextDueAt: '2026-09-04' }), '2026-09-03')!;
+    // 이 회차에서 끈 항목을 같은 이름으로 다시 적는 경우.
+    const off = toggleEntryOption(t.rule, t.entry!, 'work');
+    const next = addOptionFromEntry(t.rule, off, '회사 일')!;
+
+    expect(next.rule.options).toHaveLength(4);
+    expect(next.entry.recovery?.options.map((o) => o.id)).toContain('work');
+  });
+
+  it('이미 켜져 있는 이름을 다시 적어도 두 번 들어가지 않는다', () => {
+    const t = generateRecovery(rule({ nextDueAt: '2026-09-04' }), '2026-09-03')!;
+    const next = addOptionFromEntry(t.rule, t.entry!, '회사 일')!;
+    expect(next.entry).toBe(t.entry);
+    expect(next.entry.recovery?.options).toHaveLength(4);
+  });
+
+  it('회복 표식이 없는 항목에는 아무것도 하지 않는다', () => {
+    const plain = newEntry('task', { title: '스크럼' });
+    expect(addOptionFromEntry(rule(), plain, '사우나')).toBeNull();
+  });
+});
+
+describe('같은 이름 막기', () => {
+  it('목록에 같은 이름을 두 번 만들지 않는다', () => {
+    const r = addRecoveryOption(addRecoveryOption(rule(), '사우나'), '사우나');
+    expect(r.options.filter((o) => o.label === '사우나')).toHaveLength(1);
+  });
+
+  it('대소문자와 공백만 다른 이름도 같은 것으로 본다', () => {
+    const r = addRecoveryOption(addRecoveryOption(rule(), 'Netflix'), '  netflix ');
+    expect(r.options.filter((o) => /netflix/i.test(o.label))).toHaveLength(1);
+  });
+
+  it('꺼 둔 기본 항목을 같은 이름으로 다시 적으면 다시 켜진다', () => {
+    const off = toggleDefaultOption(rule(), 'work');
+    expect(off.defaultOptionIds).not.toContain('work');
+    const back = addRecoveryOption(off, '회사 일');
+    expect(back.options).toHaveLength(4);
+    expect(back.defaultOptionIds).toContain('work');
+  });
+
+  it('다른 항목이 쓰는 이름으로는 바꾸지 않는다', () => {
+    const r = rule();
+    expect(renameRecoveryOption(r, 'ai', '회사 일')).toBe(r);
+    // 자기 이름을 다듬는 것은 된다.
+    expect(renameRecoveryOption(r, 'ai', ' AI 작업 ').options.find((o) => o.id === 'ai')?.label)
+      .toBe('AI 작업');
   });
 });
 
