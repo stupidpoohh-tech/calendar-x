@@ -8,6 +8,17 @@
  * 영원히 대기한다. 그래서 이 promise 를 기다려 화면을 막거나 스피너를 돌리면 안 된다.
  * 평소 편집은 오프라인에서도 그대로 되고, 연결이 돌아오면 큐가 알아서 나간다.
  *
+ * ── 대기와 거절은 다르다 ────────────────────────────────────────
+ *
+ * 연결이 없어 **아직 못 보낸** 쓰기는 promise 가 pending 인 채로 남는다. 그것이 오프라인
+ * 큐가 들고 있다는 뜻이고, 연결이 돌아오면 스스로 나간다 — 여기에 걸리지도 않는다.
+ *
+ * 반대로 **promise 가 거절된** 쓰기는 큐에서 이미 빠졌다. 아무도 다시 보내 주지 않는다.
+ * 오류 코드가 `unavailable` 이든 `permission-denied` 이든, 그 순간 `navigator.onLine` 이
+ * 무엇이든 마찬가지다. 한때 오류 코드를 보고 "연결되면 보냅니다" 로 넘겼는데, 그 쓰기는
+ * 실제로 다시 보내지지 않았고 적은 값도 함께 사라졌다. **거절은 종류를 가리지 않고
+ * 전부 붙잡는다.**
+ *
  * ── 거절당하면 값은 사라진다 ────────────────────────────────────
  *
  * 예전 안내는 "화면에는 반영돼 있지만 이 기기에서만 보이는 값으로 남습니다" 였다.
@@ -22,7 +33,7 @@
  * 밀려난 쪽은 다시 찾을 길이 없다. 여기서는 토스트 한 줄과 **없어지지 않는 목록**으로
  * 알린다. "나중에" 는 그냥 목록에 두는 것이고, 목록은 새로고침을 넘긴다.
  */
-import { useCallback, useMemo, useState } from 'react';
+import { useCallback, useMemo, useRef, useState } from 'react';
 import { describeFirestoreError } from '../data/errors';
 import { getFirebase } from '../data/firebase';
 import {
@@ -82,13 +93,30 @@ export function useWriteQueue(uid: string | null): WriteQueue {
 
   const ops = state.uid === uid ? state.ops : EMPTY;
 
+  /** 지금 화면이 누구 것인지. 늦게 도착한 실패가 어느 갈래로 갈지 정하는 데 쓴다. */
+  const shownUid = useRef<string | null>(state.uid);
+  shownUid.current = state.uid;
+
   /**
-   * 목록을 바꾸고 같은 계정 앞으로 보관한다.
+   * 목록을 바꾸고 그 계정 앞으로 보관한다.
    *
-   * 보관에 실패하면 (자리가 꽉 찼거나 브라우저가 막았거나) 그 사실을 들고 있는다 —
-   * "이 기기에 남겨 두었습니다" 를 못 지킬 때 그렇게 말하면 안 된다.
+   * `owner` 가 지금 보고 있는 계정이면 화면과 저장소를 함께 갱신한다. 보관에 실패하면
+   * (자리가 꽉 찼거나 브라우저가 막았거나) 그 사실을 들고 있는다 — "이 기기에 남겨
+   * 두었습니다" 를 못 지킬 때 그렇게 말하면 안 된다.
+   *
+   * `owner` 가 **이미 지나간 계정**이면 화면에는 올리지 않고 그 계정 자리에만 적는다.
+   * A 에서 저장을 걸어 두고 B 로 바꾼 사이에 A 의 실패가 도착하는 순서가 실제로 있고,
+   * 예전에는 그때 값을 통째로 버렸다. B 화면에 남의 것을 띄우지 않으면서도 A 로 돌아오면
+   * 그대로 있어야 한다.
+   *
+   * 지나간 계정 갈래는 `setState` 밖에서 처리한다 — updater 안에서 읽고-더하고-쓰면
+   * StrictMode 의 이중 호출에 두 번 쌓인다.
    */
   const write = useCallback((owner: string, next: (prev: PendingOp[]) => PendingOp[]) => {
+    if (shownUid.current !== owner) {
+      saveFailed(owner, next(loadFailed(owner)));
+      return;
+    }
     setState((prev) => {
       if (prev.uid !== owner) return prev;
       const ops2 = next(prev.ops);
@@ -103,6 +131,9 @@ export function useWriteQueue(uid: string | null): WriteQueue {
       ...prev,
       { ...input, summary: trim(input.summary), id: newId(), at: new Date().toISOString(), reason, tries: 0 },
     ]);
+    // 이미 다른 계정으로 넘어갔으면 알리지 않는다. 지금 사람이 할 수 있는 일이 없고,
+    // 화면에 없는 목록을 가리키는 안내가 된다. 값은 그 계정 자리에 남아 있다.
+    if (shownUid.current !== owner) return;
     dialog.toast(
       `${input.label}${objectParticle(input.label)} 서버에 저장하지 못했습니다. `
       + '적은 내용은 아래 "저장하지 못한 것" 에 남겨 두었습니다.',
@@ -121,15 +152,16 @@ export function useWriteQueue(uid: string | null): WriteQueue {
       enqueue(owner, input, err);
       return;
     }
-    void sending.catch((err: unknown) => {
-      if (isOfflineError(err)) {
-        // 연결이 없어 못 보낸 것은 잃은 것이 아니다. 오프라인 큐가 들고 있다.
-        dialog.toast(`연결되면 ${input.label}${objectParticle(input.label)} 보냅니다.`);
-        return;
-      }
-      enqueue(owner, input, err);
-    });
-  }, [uid, db, enqueue, dialog]);
+    /*
+      거절은 종류를 가리지 않고 전부 붙잡는다.
+
+      promise 가 거절됐다는 것은 그 쓰기가 오프라인 큐에서 이미 빠졌다는 뜻이다 —
+      아무도 다시 보내 주지 않는다. 오류 코드가 `unavailable` 이어도, 그 순간
+      `navigator.onLine` 이 false 여도 마찬가지다. 아직 큐에 남아 있는 쓰기는 애초에
+      pending 인 채라 여기 오지 않는다.
+    */
+    void sending.catch((err: unknown) => enqueue(owner, input, err));
+  }, [uid, db, enqueue]);
 
   const discard = useCallback((id: string) => {
     if (!uid) return;

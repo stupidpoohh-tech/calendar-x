@@ -22,7 +22,9 @@ interface Sent { uid: string; op: CommitInput }
 
 const sent: Sent[] = [];
 /** 다음 보내기의 결과. 큐에서 하나씩 꺼내 쓴다 — 비면 성공. */
-const outcomes: (Error | 'ok' | 'throw')[] = [];
+const outcomes: (Error | 'ok' | 'throw' | 'defer')[] = [];
+/** 'defer' 로 띄워 둔 쓰기. 원하는 순간에 거절시킨다. */
+const deferred: { reject: (err: unknown) => void }[] = [];
 /** freshnessOf 가 돌려줄 값. */
 let freshness: 'fresh' | 'stale' | 'unknown' = 'fresh';
 /** 확인창에서 사용자가 고를 값. */
@@ -38,6 +40,12 @@ vi.mock('../data/pendingWrites', async (importOriginal) => {
     sendPending: (_db: unknown, uid: string, op: CommitInput) => {
       const next = outcomes.shift() ?? 'ok';
       if (next === 'throw') throw new Error('동기 예외');
+      if (next === 'defer') {
+        // 아직 결과가 나지 않은 쓰기. 실제 오프라인 큐에 들어간 쓰기가 이 모양이다.
+        return new Promise<void>((_resolve, reject) => {
+          deferred.push({ reject });
+        });
+      }
       if (next instanceof Error) return Promise.reject(next);
       sent.push({ uid, op });
       return Promise.resolve();
@@ -51,7 +59,8 @@ const { useWriteQueue } = await import('./useWriteQueue');
 const wrap = ({ children }: { children: ReactNode }) => <DialogHost>{children}</DialogHost>;
 
 const denied = () => Object.assign(new Error('권한 없음'), { code: 'permission-denied' });
-const offline = () => Object.assign(new Error('연결 없음'), { code: 'unavailable' });
+const unavailable = () => Object.assign(new Error('연결 없음'), { code: 'unavailable' });
+const tooSlow = () => Object.assign(new Error('시간 초과'), { code: 'deadline-exceeded' });
 
 const entryOp = (id: string, updatedAt: string): CommitInput => ({
   kind: 'entry', label: '항목', summary: `제목 ${id}`,
@@ -61,6 +70,7 @@ const entryOp = (id: string, updatedAt: string): CommitInput => ({
 beforeEach(() => {
   sent.length = 0;
   outcomes.length = 0;
+  deferred.length = 0;
   confirmed.length = 0;
   freshness = 'fresh';
   confirmAnswer = true;
@@ -149,27 +159,144 @@ describe('서버가 거절하면', () => {
   });
 });
 
-describe('연결이 없어 못 보낸 것은', () => {
-  it('실패로 세지 않는다 — 오프라인 큐가 들고 있다', async () => {
+describe('대기와 거절을 가른다', () => {
+  it('아직 결과가 없는 쓰기는 목록에 넣지 않는다', async () => {
+    // 오프라인 큐에 들어간 쓰기는 pending 인 채로 남는다. 그것이 "아직 보내는 중" 이다.
     const { result } = mount();
-    outcomes.push(offline());
+    outcomes.push('defer');
     act(() => { result.current.commit(entryOp('a', '2026-09-10T00:00:00.000Z')); });
 
-    await waitFor(() => expect(document.querySelector('.toast')).not.toBeNull());
-    expect(document.querySelector('.toast')!.textContent).toContain('연결되면');
+    await act(async () => { await Promise.resolve(); });
+    expect(deferred).toHaveLength(1);
     expect(result.current.failed).toEqual([]);
   });
 
-  it('연결이 돌아오면 같은 값이 서버로 나간다', async () => {
+  it.each([
+    ['unavailable', unavailable],
+    ['deadline-exceeded', tooSlow],
+  ])('%s 로 거절돼도 적은 값을 보존한다', async (_label, makeError) => {
+    const boom = vi.spyOn(console, 'error').mockImplementation(() => {});
     const { result } = mount();
-    outcomes.push(offline());
+    outcomes.push('defer');
     act(() => { result.current.commit(entryOp('a', '2026-09-10T00:00:00.000Z')); });
-    await waitFor(() => expect(result.current.failed).toEqual([]));
+    await act(async () => { await Promise.resolve(); });
 
-    // 오프라인 큐가 실제로 하는 일 — 같은 쓰기가 뒤늦게 나간다.
+    // 큐가 이 쓰기를 포기했다. 아무도 다시 보내 주지 않는다.
+    await act(async () => { deferred[0]!.reject(makeError()); await Promise.resolve(); });
+
+    await waitFor(() => expect(result.current.failed).toHaveLength(1));
+    expect(result.current.failed[0]!.payload).toMatchObject({ id: 'a' });
+    // 다시 보내진다고 약속하지 않는다.
+    expect(document.body.textContent).not.toContain('연결되면');
+    boom.mockRestore();
+  });
+
+  it('오프라인 상태에서 규칙에 거절당해도 보존한다', async () => {
+    const boom = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const online = vi.spyOn(navigator, 'onLine', 'get').mockReturnValue(false);
+    const { result } = mount();
+    outcomes.push(denied());
     act(() => { result.current.commit(entryOp('a', '2026-09-10T00:00:00.000Z')); });
-    await waitFor(() => expect(sent).toHaveLength(1));
-    expect(sent[0]!.op.payload).toMatchObject({ id: 'a' });
+
+    await waitFor(() => expect(result.current.failed).toHaveLength(1));
+    expect(result.current.failed[0]!.payload).toMatchObject({ id: 'a' });
+    online.mockRestore();
+    boom.mockRestore();
+  });
+
+  it('연결 문제로 거절된 것도 새로고침을 넘겨 남는다', async () => {
+    const boom = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const first = mount();
+    outcomes.push(unavailable());
+    act(() => { first.result.current.commit(entryOp('a', '2026-09-10T00:00:00.000Z')); });
+    await waitFor(() => expect(first.result.current.failed).toHaveLength(1));
+    first.unmount();
+
+    const again = mount();
+    expect(again.result.current.failed).toHaveLength(1);
+    expect(again.result.current.failed[0]!.payload).toMatchObject({ id: 'a' });
+    boom.mockRestore();
+  });
+});
+
+describe('계정을 바꾼 뒤 앞 계정의 실패가 도착하면', () => {
+  /** A 에서 저장을 걸고 → B 로 바꾸고 → A 의 실패가 도착하는 순서. */
+  const switchThenFail = async (rerender: (p: { id: string }) => void, err: unknown) => {
+    await act(async () => { await Promise.resolve(); });
+    rerender({ id: 'u2' });
+    await act(async () => { deferred[0]!.reject(err); await Promise.resolve(); });
+  };
+
+  it('B 화면에는 뜨지 않는다', async () => {
+    const boom = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const { result, rerender } = mount('u1');
+    outcomes.push('defer');
+    act(() => { result.current.commit(entryOp('a', '2026-09-10T00:00:00.000Z')); });
+
+    await switchThenFail(rerender, denied());
+
+    expect(result.current.failed).toEqual([]);
+    expect(localStorage.getItem('calendarx.failed.u2')).toBeNull();
+    boom.mockRestore();
+  });
+
+  it('A 계정 자리에 보존된다', async () => {
+    const boom = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const { result, rerender } = mount('u1');
+    outcomes.push('defer');
+    act(() => { result.current.commit(entryOp('a', '2026-09-10T00:00:00.000Z')); });
+
+    await switchThenFail(rerender, denied());
+
+    const kept = localStorage.getItem('calendarx.failed.u1');
+    expect(kept).not.toBeNull();
+    expect(kept).toContain('제목 a');
+    boom.mockRestore();
+  });
+
+  it('A 로 돌아오면 그대로 있다', async () => {
+    const boom = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const { result, rerender } = mount('u1');
+    outcomes.push('defer');
+    act(() => { result.current.commit(entryOp('a', '2026-09-10T00:00:00.000Z')); });
+
+    await switchThenFail(rerender, denied());
+    rerender({ id: 'u1' });
+
+    expect(result.current.failed).toHaveLength(1);
+    expect(result.current.failed[0]!.summary).toBe('제목 a');
+    expect(result.current.failed[0]!.payload).toMatchObject({ id: 'a' });
+    boom.mockRestore();
+  });
+
+  it('새로고침 뒤에도 A 계정에 남아 있다', async () => {
+    const boom = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const first = mount('u1');
+    outcomes.push('defer');
+    act(() => { first.result.current.commit(entryOp('a', '2026-09-10T00:00:00.000Z')); });
+    await switchThenFail(first.rerender, denied());
+    first.unmount();
+
+    const again = mount('u1');
+    expect(again.result.current.failed).toHaveLength(1);
+    expect(again.result.current.failed[0]!.payload).toMatchObject({ id: 'a' });
+    boom.mockRestore();
+  });
+
+  it('앞 계정에 이미 있던 것 위에 더한다 — 덮어쓰지 않는다', async () => {
+    const boom = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const { result, rerender } = mount('u1');
+    outcomes.push(denied());
+    act(() => { result.current.commit(entryOp('먼저', '2026-09-10T00:00:00.000Z')); });
+    await waitFor(() => expect(result.current.failed).toHaveLength(1));
+
+    outcomes.push('defer');
+    act(() => { result.current.commit(entryOp('나중', '2026-09-10T00:00:00.000Z')); });
+    await switchThenFail(rerender, denied());
+    rerender({ id: 'u1' });
+
+    expect(result.current.failed.map((o) => o.summary)).toEqual(['제목 먼저', '제목 나중']);
+    boom.mockRestore();
   });
 });
 
