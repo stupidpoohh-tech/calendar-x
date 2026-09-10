@@ -24,6 +24,7 @@ import {
 import type { Account, Entry } from '../domain/types';
 import { Icon } from './Icon';
 import { BalanceInput, BalanceNote, useBalanceEditor } from './balanceEditor';
+import { calcHeadline, calcNotice, type CalcState } from './calcState';
 
 interface Props {
   /** 오늘. 자정을 넘기면 바뀌므로 화면이 스스로 재지 않고 위에서 받는다. */
@@ -32,6 +33,11 @@ interface Props {
   entries: readonly Entry[];
   /** 계산 목록이 덮는 가장 이른 날. 정산이 자료 부족을 판정하는 데 쓴다. */
   tideFrom?: string | null;
+  /**
+   * 계산용 자료를 받았는가. 'ready' 가 아니면 숫자를 지어내지 않는다.
+   * 기본값은 'ready' — 목록을 손으로 넘기는 자리(테스트 등)에서는 기다릴 것이 없다.
+   */
+  calcState?: CalcState;
   hasBalance: boolean;
   onSaveAccount: (a: Account) => void;
   onEntryClick?: (entry: Entry) => void;
@@ -42,7 +48,8 @@ interface Props {
 }
 
 export function TideBar({
-  todayISO, accounts, entries, tideFrom, hasBalance, onSaveAccount, onEntryClick,
+  todayISO, accounts, entries, tideFrom, calcState = 'ready',
+  hasBalance, onSaveAccount, onEntryClick,
   collapsed, onToggleCollapsed, children,
 }: Props) {
   const today = todayISO;
@@ -73,6 +80,20 @@ export function TideBar({
       <Icon.Chevron size={14} dir={collapsed ? 'right' : 'down'} />
     </button>
   );
+
+  if (calcState !== 'ready') {
+    return (
+      <section className={'tide' + (collapsed ? ' collapsed' : '')} aria-label="며칠 버티나">
+        {head(calcHeadline(calcState))}
+        {!collapsed && (
+          <>
+            <p className="tide-empty">{calcNotice(calcState)}</p>
+            {children && <div className="tide-more">{children}</div>}
+          </>
+        )}
+      </section>
+    );
+  }
 
   if (!hasBalance) {
     return (

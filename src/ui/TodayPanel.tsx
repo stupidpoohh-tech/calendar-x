@@ -18,6 +18,7 @@ import { displayTitle, effectiveEndDate, isDone, newEntry } from '../domain/entr
 import { formatAmount } from '../domain/money';
 import type { Entry, TaskStatus } from '../domain/types';
 import { BalanceInput, BalanceNote, useBalanceEditor } from './balanceEditor';
+import { calcNotice, type CalcState } from './calcState';
 import { Icon } from './Icon';
 
 interface Props {
@@ -31,6 +32,8 @@ interface Props {
   tideEntries: readonly Entry[];
   /** 계산 목록이 덮는 가장 이른 날. 정산이 자료 부족을 판정하는 데 쓴다. */
   tideFrom?: string | null;
+  /** 계산용 자료를 받았는가. 'ready' 가 아니면 금액을 지어내지 않는다. */
+  calcState?: CalcState;
   accounts: readonly Account[];
   /** 잔고를 한 번도 입력하지 않았으면 tide 값을 0으로 단정하지 않는다. */
   hasBalance: boolean;
@@ -50,7 +53,7 @@ function occursOnDay(e: Entry, iso: string): boolean {
 }
 
 export function TodayPanel({
-  todayISO, entries, tideEntries, tideFrom, accounts, hasBalance,
+  todayISO, entries, tideEntries, tideFrom, calcState = 'ready', accounts, hasBalance,
   collapsed, onToggleCollapsed, moneyCollapsed, onToggleMoneyCollapsed,
   onEntryClick, onStatusChange, onPromote, onQuickIdea, onSaveAccount,
 }: Props) {
@@ -76,8 +79,8 @@ export function TodayPanel({
   // '오늘 마감 예상' 대신 tide-over 규칙 — 다음 입금까지 남는 한도.
   const horizon = useMemo(() => horizonOf(tideEntries, todayISO), [tideEntries, todayISO]);
   const tideLimit = useMemo(
-    () => hasBalance ? headlineLimit(accounts, tideEntries, todayISO) : null,
-    [hasBalance, accounts, tideEntries, todayISO],
+    () => hasBalance && calcState === 'ready' ? headlineLimit(accounts, tideEntries, todayISO) : null,
+    [hasBalance, calcState, accounts, tideEntries, todayISO],
   );
 
   const submitIdea = () => {
@@ -201,10 +204,13 @@ export function TodayPanel({
                       </span>
                       <strong className="num">₩ {formatAmount(tideLimit)}</strong>
                     </button>
+                  ) : calcState !== 'ready' ? (
+                    <p className="tp-empty">{calcNotice(calcState)}</p>
                   ) : (
                     <p className="tp-empty">잔고를 적으면 다음 입금까지 남는 한도가 여기 뜹니다.</p>
                   )}
-                  {!editor.editing && <BalanceNote editor={editor} />}
+                  {/* 자료가 없는 동안에는 잔고 편집도 열지 않는다 — 정산이 어긋난다. */}
+                  {!editor.editing && calcState === 'ready' && <BalanceNote editor={editor} />}
                   <ul className="tp-ul">
                     {money.map((e) => {
                       const type = e.money ? MONEY_TYPE_BY_ID[e.money.type] : null;

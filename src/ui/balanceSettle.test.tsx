@@ -160,3 +160,34 @@ describe('기준일', () => {
     expect(screen.getByText('잔고 2026-09-08 기준')).toBeTruthy();
   });
 });
+
+describe('계산용 자료를 아직 못 받았을 때', () => {
+  const render0 = (calcState: 'loading' | 'error') => render(
+    <DialogHost>
+      <TideBar
+        todayISO="2026-09-10"
+        accounts={[account()]}
+        entries={[]}
+        tideFrom="2026-09-01"
+        calcState={calcState}
+        hasBalance
+        onSaveAccount={() => {}}
+        collapsed={false}
+        onToggleCollapsed={() => {}}
+      />
+    </DialogHost>,
+  );
+
+  it('0원을 그리지 않고 무엇을 기다리는지 적는다', () => {
+    render0('loading');
+    expect(screen.queryByLabelText('잔고 고치기')).toBeNull();
+    expect(screen.getByLabelText('며칠 버티나').textContent).toContain('불러오는 중');
+  });
+
+  it('조회가 실패하면 그 사실을 적는다 — 0원으로 감추지 않는다', () => {
+    render0('error');
+    const card = screen.getByLabelText('며칠 버티나');
+    expect(card.textContent).toContain('불러오지 못했습니다');
+    expect(card.textContent).not.toContain('₩ 0');
+  });
+});

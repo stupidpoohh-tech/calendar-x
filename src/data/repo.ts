@@ -28,6 +28,27 @@ export type Unsubscribe = () => void;
 /** onSnapshot 은 에러를 던지지 않고 콜백으로 준다. 삼켜지면 원인을 못 찾는다. */
 export type ErrorSink = (scope: string, err: unknown) => void;
 
+/**
+ * 스냅샷이 어디서 왔는지.
+ *
+ * 오프라인 지속성이 켜져 있어서 첫 스냅샷은 대개 로컬 캐시에서 온다. 캐시가 비어 있으면
+ * **빈 목록**이 오는데, 그것은 "자료가 없다" 가 아니라 "아직 서버 것을 못 받았다" 다.
+ * 둘을 같은 값으로 다루면 화면이 자료 없음을 0원으로 그린다.
+ */
+export interface SnapMeta {
+  /** 서버가 아니라 로컬 캐시에서 온 값. */
+  fromCache: boolean;
+  /** 아직 서버가 확인하지 않은 로컬 쓰기가 섞여 있다. */
+  hasPendingWrites: boolean;
+}
+
+export type SnapSink<T> = (items: T[], meta: SnapMeta) => void;
+
+const metaOf = (snap: QuerySnapshot): SnapMeta => ({
+  fromCache: snap.metadata.fromCache,
+  hasPendingWrites: snap.metadata.hasPendingWrites,
+});
+
 function mapSnap<T>(snap: QuerySnapshot, make: (id: string, raw: Record<string, unknown>) => T): T[] {
   const out: T[] = [];
   snap.forEach((d) => out.push(make(d.id, d.data() as Record<string, unknown>)));
@@ -41,13 +62,15 @@ function mapSnap<T>(snap: QuerySnapshot, make: (id: string, raw: Record<string, 
  */
 export function subscribeEntriesForMonths(
   db: Firestore, uid: string, months: YearMonth[],
-  cb: (entries: Entry[]) => void, onError: ErrorSink,
+  cb: SnapSink<Entry>, onError: ErrorSink,
 ): Unsubscribe {
-  if (months.length === 0) { cb([]); return () => {}; }
+  // 달이 하나도 없으면 조회 자체가 성립하지 않는다. 캐시에서 온 빈 목록과 구분되도록
+  // fromCache 를 세워 둔다 — 이 상태를 "자료 없음" 으로 읽으면 안 된다.
+  if (months.length === 0) { cb([], { fromCache: true, hasPendingWrites: false }); return () => {}; }
   const q = query(col(db, uid, COL.entries), where('ymSpan', 'array-contains-any', months.slice(0, 30)));
   return onSnapshot(
     q,
-    (snap) => cb(mapSnap(snap, entryFromDoc)),
+    (snap) => cb(mapSnap(snap, entryFromDoc), metaOf(snap)),
     (err) => onError('entries', err),
   );
 }
@@ -58,22 +81,22 @@ export function subscribeEntriesForMonths(
  */
 export function subscribeRecurringEntries(
   db: Firestore, uid: string,
-  cb: (entries: Entry[]) => void, onError: ErrorSink,
+  cb: SnapSink<Entry>, onError: ErrorSink,
 ): Unsubscribe {
   const q = query(col(db, uid, COL.entries), where('isRecurring', '==', true));
   return onSnapshot(
     q,
-    (snap) => cb(mapSnap(snap, entryFromDoc)),
+    (snap) => cb(mapSnap(snap, entryFromDoc), metaOf(snap)),
     (err) => onError('recurring', err),
   );
 }
 
 export function subscribeAccounts(
-  db: Firestore, uid: string, cb: (v: Account[]) => void, onError: ErrorSink,
+  db: Firestore, uid: string, cb: SnapSink<Account>, onError: ErrorSink,
 ): Unsubscribe {
   return onSnapshot(
     col(db, uid, COL.accounts),
-    (snap) => cb(mapSnap(snap, accountFromDoc).sort((a, b) => a.order - b.order)),
+    (snap) => cb(mapSnap(snap, accountFromDoc).sort((a, b) => a.order - b.order), metaOf(snap)),
     (err) => onError('accounts', err),
   );
 }

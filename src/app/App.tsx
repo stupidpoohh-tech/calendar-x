@@ -21,10 +21,11 @@ import { convertKind, newEntry, withDerived } from '../domain/entry';
 import { applyFilters, collectTags, emptyFilters, hasActiveFilter } from '../domain/filters';
 import { baseIdOf, materialize } from '../domain/recurrence';
 import { isRecoveryEntry } from '../domain/recovery';
-import type { Account, Entry, Filters, LensId, TaskStatus, ViewId } from '../domain/types';
+import type { Account, Entry, Filters, LensId, TaskStatus, ViewId, YearMonth } from '../domain/types';
 import { Auth } from '../ui/Auth';
 import { BrandFooter } from '../ui/BrandFooter';
 import { DaySheet } from '../ui/DaySheet';
+import type { CalcState } from '../ui/calcState';
 import { TideBar } from '../ui/TideBar';
 import { EntryModal } from '../ui/EntryModal';
 import { FilterPanel } from '../ui/FilterPanel';
@@ -78,6 +79,9 @@ interface WorkspaceProps {
   user: import('firebase/auth').User | null;
   onSignOut: () => void | Promise<void>;
 }
+
+/** 매 렌더 새 배열을 만들면 달력이 헛돈다. */
+const EMPTY_MONTHS: YearMonth[] = [];
 
 function Workspace({ uid, user, onSignOut }: WorkspaceProps) {
   const dialog = useDialog();
@@ -166,6 +170,17 @@ function Workspace({ uid, user, onSignOut }: WorkspaceProps) {
   const hasBalance = store.accounts.length > 0;
   /** 계산 목록이 덮는 가장 이른 날. 정산이 "자료가 모자라다" 를 판정하는 기준이다. */
   const tideFrom = store.tideMonths[0] ? `${store.tideMonths[0]}-01` : null;
+  /*
+    계산용 자료가 손에 들어왔는가. 화면용(`loading`)과 따로 본다.
+
+    첫 스냅샷은 대개 로컬 캐시에서 오고, 캐시가 비어 있으면 빈 목록이 온다. 그것을
+    "예정된 입출금이 없다" 로 읽으면 한도가 잔고 그대로 떴다가 잠시 뒤 값이 튄다.
+    조회가 실패했을 때는 0원이 오류를 감춘다. 둘 다 숫자를 비워 두고 이유를 적는다.
+  */
+  const calcState: CalcState =
+    store.calc.status === 'error' ? 'error'
+      : store.calc.ready ? 'ready'
+        : 'loading';
 
   // 이관 전 컬렉션이 남아 있는지, 이미 옮겼는지 한 번만 확인한다.
   const checkedLegacy = useRef(false);
@@ -762,6 +777,7 @@ function Workspace({ uid, user, onSignOut }: WorkspaceProps) {
             entries={materialized}
             tideEntries={store.tideEntries}
             tideFrom={tideFrom}
+            calcState={calcState}
             accounts={store.accounts}
             hasBalance={hasBalance}
             collapsed={prefs.todayCollapsed}
@@ -783,6 +799,7 @@ function Workspace({ uid, user, onSignOut }: WorkspaceProps) {
             accounts={store.accounts}
             entries={store.tideEntries}
             tideFrom={tideFrom}
+            calcState={calcState}
             hasBalance={hasBalance}
             onSaveAccount={saveBalance}
             onEntryClick={openEdit}
@@ -818,7 +835,8 @@ function Workspace({ uid, user, onSignOut }: WorkspaceProps) {
             onCursorChange={setCursor}
             entries={visible}
             tideEntries={store.tideEntries}
-            tideMonths={store.tideMonths}
+            // 계산 자료를 못 받았으면 덮는 달이 없는 것과 같다 — 셀에 숫자를 적지 않는다.
+            tideMonths={calcState === 'ready' ? store.tideMonths : EMPTY_MONTHS}
             accounts={store.accounts}
             hasBalance={hasBalance}
             lens={lens}
