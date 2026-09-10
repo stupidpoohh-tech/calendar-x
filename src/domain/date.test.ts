@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
-  addMonthsISO, daysBetween, isValidDate, monthGrid, normalizeDate,
+  addMonthsISO, daysBetween, isValidDate, localDateOf, monthGrid, normalizeDate,
   spanDays, toISO, weekdayIndex, weekdayLabels, ymRange,
 } from './date';
 
@@ -95,5 +95,20 @@ describe('daysBetween', () => {
   });
   it('서머타임 전환 구간에서도 정수 일수를 낸다', () => {
     expect(daysBetween('2026-03-07', '2026-03-09')).toBe(2);
+  });
+});
+
+describe('localDateOf', () => {
+  it('순간에서 그 기기의 벽시계 날짜를 뽑는다', () => {
+    // 이 저장소의 테스트는 TZ=Asia/Seoul 로 돈다. 08:00 KST 는 UTC 로 전날 23:00 이라
+    // toISOString().slice(0, 10) 은 하루 앞선 날짜를 낸다.
+    const instant = '2026-09-10T08:00:00+09:00';
+    expect(new Date(instant).toISOString().slice(0, 10)).toBe('2026-09-09');
+    expect(localDateOf(instant)).toBe('2026-09-10');
+  });
+
+  it('깨진 값에는 빈 문자열을 낸다', () => {
+    expect(localDateOf('')).toBe('');
+    expect(localDateOf('어제')).toBe('');
   });
 });

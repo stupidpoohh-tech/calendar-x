@@ -29,7 +29,7 @@
  * income/expense 부호를 겸한다. save · free 는 sign 0 이라 이 계산에서 빠진다.
  */
 import { MONEY_TYPE_BY_ID } from './constants';
-import { addDaysISO, daysBetween, normalizeDate, parseDate, toISO } from './date';
+import { addDaysISO, daysBetween, localDateOf, normalizeDate, parseDate, toISO } from './date';
 import { effectiveEndDate } from './entry';
 import { isVirtualEntry } from './recurrence';
 import type { Account, DateISO, Entry } from './types';
@@ -333,6 +333,13 @@ export function headlineLimit(
  * checkedAt 이 없으면(예전 asOf 만 있는 데이터) asOf 를 자정으로 본다.
  */
 export interface Settlement {
+  /**
+   * 정산 구간의 시작 — 잔고를 적은 **날짜**.
+   *
+   * 시각이 아니라 날짜다. 예정 항목은 `startDate` 만 갖고 시각이 없으므로, 정산은
+   * 애초에 날짜 단위로만 정확할 수 있다. `checkedAt`(순간)은 여러 계좌 중 어느 기록이
+   * 가장 최근인지 고르는 데만 쓰고, 구간의 경계로는 쓰지 않는다.
+   */
   since: DateISO;
   /**
    * 정산 구간 전체를 볼 자료가 있었는가.
@@ -361,15 +368,23 @@ export function settle(
 ): Settlement {
   // 정산 구간이 비면 occurrences 를 거치지 않고 끝난다. 여기서도 직접 본다.
   assertOriginals(entries);
-  // 가장 최근에 확인된 잔고 시점을 기준으로 삼는다.
+  /*
+    가장 최근에 확인된 잔고 기록을 고른다.
+
+    고르는 순서는 `checkedAt`(순간)으로 정하고 — 하루에 두 번 갈아엎어도 순서가 잡힌다 —
+    구간의 경계는 그 기록의 **날짜**(`asOf`)로 잡는다. 예전에는 경계까지 checkedAt 에서
+    뽑았는데, `toISOString().slice(0, 10)` 은 UTC 날짜라 한국 시간 오전 9시 이전에 적은
+    잔고가 전날로 읽혔다. 그러면 (전날, 오늘] 이 되어 오늘 예정분이 이미 지나간 것으로
+    잡힌다.
+  */
   let since = todayISO;
-  let sinceTime = 0;
+  let sinceTime = -Infinity;
   for (const a of accounts) {
     const t = a.checkedAt ? Date.parse(a.checkedAt) : Date.parse(`${a.asOf}T00:00:00`);
-    if (Number.isFinite(t) && t >= sinceTime) {
-      sinceTime = t;
-      since = normalizeDate(a.checkedAt?.slice(0, 10) ?? a.asOf) || todayISO;
-    }
+    if (!Number.isFinite(t) || t < sinceTime) continue;
+    sinceTime = t;
+    // asOf 는 이미 벽시계 날짜다. 없거나 깨졌으면 순간에서 기기 날짜를 뽑는다.
+    since = normalizeDate(a.asOf) || localDateOf(a.checkedAt ?? '') || todayISO;
   }
   const currentBalance = accounts.reduce((s, a) => s + a.balanceMinor, 0);
   const passed = occurrences(entries, since, todayISO);

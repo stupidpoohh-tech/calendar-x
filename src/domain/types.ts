@@ -125,18 +125,22 @@ export interface Entry {
 /**
  * 잔고. 이전 '::balance::' 우회를 대체한다. 계좌 단위로 여러 개를 둘 수 있다.
  *
- * tide 계산은 잔고를 "언제 확인했나"의 시각까지 필요하다 (정산 diff 를 그
- * 시점부터 오늘까지 지나간 예정과 비교하기 때문). 그래서 날짜(asOf)와
- * 시각(checkedAt)을 함께 둔다 — asOf 는 화면 표시용, checkedAt 은 계산용.
+ * 날짜(`asOf`)와 시각(`checkedAt`)을 함께 두는데, **둘의 역할이 다르다.**
+ *
+ * - `asOf` — 정산 구간의 **경계**. 예정 항목은 `startDate` 만 갖고 시각이 없으므로
+ *   정산은 애초에 날짜 단위로만 정확할 수 있다. 벽시계 날짜라 시간대에 흔들리지 않는다.
+ * - `checkedAt` — **순서**. 하루에 두 번 적거나 계좌가 여럿일 때 어느 기록이 가장
+ *   최근인지 고르는 데만 쓴다. 여기서 날짜를 뽑아 쓰지 않는다 — UTC 로 환산되어
+ *   한국 시간 오전에는 하루가 밀린다 (`localDateOf` 참고).
  */
 export interface Account {
   id: string;
   name: string;
   balanceMinor: number;
   currency: string;
-  /** 이 잔고가 사실이었던 날짜. 화면 표시와 월 조회에 쓴다. */
+  /** 이 잔고가 사실이었던 날짜. 화면 표시이자 정산 구간의 시작이다. */
   asOf: DateISO;
-  /** 잔고를 옮겨 적은 시각 (ISO datetime). 정산 diff 기준점. */
+  /** 잔고를 옮겨 적은 순간 (ISO datetime). 가장 최근 기록을 고르는 데만 쓴다. */
   checkedAt: string;
   order: number;
   createdAt: string;

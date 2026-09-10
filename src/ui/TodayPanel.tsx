@@ -56,7 +56,7 @@ export function TodayPanel({
 }: Props) {
   const [idea, setIdea] = useState('');
   // 정산은 계산이다. 원본을 넘긴다.
-  const editor = useBalanceEditor(accounts, tideEntries, onSaveAccount, tideFrom);
+  const editor = useBalanceEditor(accounts, tideEntries, onSaveAccount, tideFrom, todayISO);
 
   const weekEndISO = addDaysISO(todayISO, 6);
 

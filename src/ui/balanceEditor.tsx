@@ -11,7 +11,7 @@
  */
 import { useState } from 'react';
 import { DEFAULT_CURRENCY } from '../domain/constants';
-import { fmtDayShort, todayISO as computeToday } from '../domain/date';
+import { fmtDayShort, todayISO as domainToday } from '../domain/date';
 import { uid } from '../domain/entry';
 import { formatAmount, formatSigned, minorToInput, parseAmountToMinor } from '../domain/money';
 import { settle, summarize } from '../domain/tide';
@@ -35,6 +35,8 @@ export function useBalanceEditor(
   onSave: (a: Account) => void,
   /** `entries` 가 덮는 가장 이른 날. 기준일이 이보다 앞서면 정산 금액을 확정할 수 없다. */
   coveredFrom?: string | null,
+  /** 오늘. 자정을 넘긴 뒤 저장해도 어제 날짜로 적히지 않도록 위에서 받는다. */
+  todayISO?: string,
 ): BalanceEditor {
   const primary = accounts[0] ?? null;
   const [editing, setEditing] = useState(false);
@@ -52,6 +54,8 @@ export function useBalanceEditor(
    * 반대편 — 그 사이 실제로 쓴 돈을 여기서 청산한다.
    */
   const commit = () => {
+    // prop 이 없으면(테스트 등) 그 순간에 잰다. 화면에서는 언제나 위에서 내려온다.
+    const today = todayISO ?? domainToday();
     const minor = parseAmountToMinor(text);
     setEditing(false);
     if (minor === null) return;
@@ -64,7 +68,7 @@ export function useBalanceEditor(
       currency: primary?.currency ?? DEFAULT_CURRENCY,
       // 잔고를 고친 날·시각이 tide 계산의 기준점이다. 시각까지 남겨야
       // 하루 안에 두 번 갈아엎을 때도 정산이 순서대로 잡힌다.
-      asOf: computeToday(),
+      asOf: today,
       checkedAt: now,
       order: primary?.order ?? 0,
       createdAt: primary?.createdAt || now,
@@ -74,7 +78,7 @@ export function useBalanceEditor(
     // 이전 잔고가 없으면 정산할 것도 없다 — 첫 입력.
     if (!primary) { onSave(build()); return; }
 
-    const r = settle(accounts, entries, minor, computeToday(), coveredFrom);
+    const r = settle(accounts, entries, minor, today, coveredFrom);
     const items = summarize(r.passed);
 
     // 정산할 예정도 없고 diff 도 0 이면 조용히 저장.

@@ -8,6 +8,7 @@
  *   4. 오늘 이전 지나간 발생분은 한도를 못 건드린다
  */
 import { describe, expect, it } from 'vitest';
+import { localDateOf } from './date';
 import { newEntry, setRecurrence } from './entry';
 import {
   entriesOn, horizonOf, limitOn, netBetween,
@@ -15,11 +16,19 @@ import {
 } from './tide';
 import type { Account, Entry, MoneyType } from './types';
 
-const account = (p: Partial<Account> = {}): Account => ({
-  id: 'a1', name: '주계좌', balanceMinor: 1_000_000, currency: 'KRW',
-  asOf: '2026-08-01', checkedAt: '2026-08-01T00:00:00.000Z',
-  order: 0, createdAt: '', updatedAt: '', ...p,
-});
+/**
+ * 앱은 잔고를 적을 때 `asOf` 와 `checkedAt` 을 언제나 같이 쓴다 (`balanceEditor`).
+ * 여기서도 그렇게 둔다 — `checkedAt` 만 옮겨 놓고 `asOf` 를 그대로 두면
+ * 실제로는 생기지 않는 조합이 된다.
+ */
+const account = (p: Partial<Account> = {}): Account => {
+  const checkedAt = p.checkedAt ?? '2026-08-01T00:00:00+09:00';
+  return {
+    id: 'a1', name: '주계좌', balanceMinor: 1_000_000, currency: 'KRW',
+    asOf: localDateOf(checkedAt) as Account['asOf'], checkedAt,
+    order: 0, createdAt: '', updatedAt: '', ...p,
+  };
+};
 
 const money = (
   type: MoneyType, amountMinor: number, startDate: string,
@@ -237,5 +246,38 @@ describe('netBetween', () => {
     const salary = money('income', 3_000_000, '2026-08-25');
     const util = money('expense', 300_000, '2026-08-15');
     expect(netBetween([salary, util], '2026-08-10', '2026-08-31')).toBe(2_700_000);
+  });
+});
+
+describe('settle — 정산 기준일', () => {
+  it('한국 시간 오전에 적은 잔고가 전날로 읽히지 않는다', () => {
+    // checkedAt 을 UTC 로 잘라 쓰면 08:00 KST 가 전날이 된다. 그러면 그 날 나갈
+    // 예정이 "이미 지나간 것" 으로 잡혀 없던 차액이 생긴다.
+    const a = account({ asOf: '2026-09-10', checkedAt: '2026-09-10T08:00:00+09:00' });
+    expect(new Date(a.checkedAt).toISOString().slice(0, 10)).toBe('2026-09-09');
+
+    const out = money('expense', 50_000, '2026-09-10');
+    const r = settle([a], [out], 1_000_000, '2026-09-10');
+
+    expect(r.since).toBe('2026-09-10');
+    expect(r.passed).toHaveLength(0);
+    expect(r.diff).toBe(0);
+  });
+
+  it('계좌가 여럿이면 가장 최근에 확인한 것의 날짜를 쓴다', () => {
+    const older = account({ id: 'a1', asOf: '2026-09-01', checkedAt: '2026-09-01T09:00:00+09:00' });
+    const newer = account({ id: 'a2', asOf: '2026-09-08', checkedAt: '2026-09-08T09:00:00+09:00' });
+    expect(settle([older, newer], [], 0, '2026-09-10').since).toBe('2026-09-08');
+    expect(settle([newer, older], [], 0, '2026-09-10').since).toBe('2026-09-08');
+  });
+
+  it('asOf 가 비었으면 순간에서 벽시계 날짜를 뽑는다', () => {
+    const a = account({ asOf: '' as never, checkedAt: '2026-09-10T08:00:00+09:00' });
+    expect(settle([a], [], 0, '2026-09-10').since).toBe('2026-09-10');
+  });
+
+  it('패딩 없는 asOf 도 맞춰 읽는다', () => {
+    const a = account({ asOf: '2026-9-3' as never, checkedAt: '2026-09-03T09:00:00+09:00' });
+    expect(settle([a], [], 0, '2026-09-10').since).toBe('2026-09-03');
   });
 });

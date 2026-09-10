@@ -16,9 +16,7 @@ import {
   REPLACE_DISABLED_REASON, safeMerge, type RestoreIO,
 } from '../data/restore';
 import { LENSES, LENS_BY_ID } from '../domain/constants';
-import {
-  endOfMonth, fmtMonthTitle, startOfMonth, toISO, todayISO as computeToday,
-} from '../domain/date';
+import { endOfMonth, fmtMonthTitle, startOfMonth, toISO } from '../domain/date';
 import { convertKind, newEntry, withDerived } from '../domain/entry';
 import { applyFilters, collectTags, emptyFilters, hasActiveFilter } from '../domain/filters';
 import { baseIdOf, materialize } from '../domain/recurrence';
@@ -46,6 +44,7 @@ import { usePrefs } from './usePrefs';
 import { useDemoStore } from './useDemoStore';
 import { useRecovery } from './useRecovery';
 import { useStore } from './useStore';
+import { useToday } from './useToday';
 
 export function App() {
   const { state, logout } = useAuth();
@@ -96,7 +95,8 @@ function Workspace({ uid, user, onSignOut }: WorkspaceProps) {
   /** 회복 상세를 띄운 항목의 id. 항목 자체가 아니라 id 를 들고 있어야 스냅샷을 따라간다. */
   const [recoveryId, setRecoveryId] = useState<string | null>(null);
 
-  const today = useMemo(() => computeToday(), []);
+  // 자정을 넘기거나 백그라운드에서 돌아오면 다시 잰다. 이 값이 계산 창·한도·정산 기준을 정한다.
+  const today = useToday();
   const cursorISO = toISO(cursor);
   const isAnon = uid === null;
   // 훅은 조건부 호출이 안 된다. 둘 다 부르고 로그인 상태에 따라 결과를 고른다.
@@ -779,6 +779,7 @@ function Workspace({ uid, user, onSignOut }: WorkspaceProps) {
         {/* 가계부 렌즈도 카드 하나다. 대출과 고정 메모는 며칠 버티나 카드 안쪽에 접힌다. */}
         {lens === 'money' && (
           <TideBar
+            todayISO={today}
             accounts={store.accounts}
             entries={store.tideEntries}
             tideFrom={tideFrom}

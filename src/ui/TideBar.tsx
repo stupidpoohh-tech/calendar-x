@@ -15,7 +15,7 @@
  */
 import { useMemo, type ReactNode } from 'react';
 import { MONEY_TYPE_BY_ID } from '../domain/constants';
-import { daysBetween, fmtDayShort, todayISO as computeToday } from '../domain/date';
+import { daysBetween, fmtDayShort } from '../domain/date';
 import { formatAmount, formatSigned } from '../domain/money';
 import {
   headlineLimit, horizonOf, summarize, upcomingInHorizon,
@@ -26,6 +26,8 @@ import { Icon } from './Icon';
 import { BalanceInput, BalanceNote, useBalanceEditor } from './balanceEditor';
 
 interface Props {
+  /** 오늘. 자정을 넘기면 바뀌므로 화면이 스스로 재지 않고 위에서 받는다. */
+  todayISO: string;
   accounts: readonly Account[];
   entries: readonly Entry[];
   /** 계산 목록이 덮는 가장 이른 날. 정산이 자료 부족을 판정하는 데 쓴다. */
@@ -40,11 +42,11 @@ interface Props {
 }
 
 export function TideBar({
-  accounts, entries, tideFrom, hasBalance, onSaveAccount, onEntryClick,
+  todayISO, accounts, entries, tideFrom, hasBalance, onSaveAccount, onEntryClick,
   collapsed, onToggleCollapsed, children,
 }: Props) {
-  const today = useMemo(() => computeToday(), []);
-  const editor = useBalanceEditor(accounts, entries, onSaveAccount, tideFrom);
+  const today = todayISO;
+  const editor = useBalanceEditor(accounts, entries, onSaveAccount, tideFrom, todayISO);
 
   const horizon = useMemo(() => horizonOf(entries, today), [entries, today]);
   const limit = useMemo(

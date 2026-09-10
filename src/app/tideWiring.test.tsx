@@ -24,7 +24,7 @@ import { MonthCalendar } from '../ui/MonthCalendar';
 import { TideBar } from '../ui/TideBar';
 import { TodayPanel } from '../ui/TodayPanel';
 
-/** 화면이 오늘로 삼는 날. TideBar 는 오늘을 prop 이 아니라 시계에서 읽는다. */
+/** 화면이 오늘로 삼는 날. 오늘은 App 이 재어서 prop 으로 내려 준다(`useToday`). */
 const TODAY = '2026-09-10';
 
 beforeAll(() => {
@@ -87,6 +87,7 @@ describe('며칠 버티나 카드 — 계산 입력은 커서와 무관하다', 
 
     wrap(
       <TideBar
+        todayISO={TODAY}
         accounts={ACCOUNTS}
         entries={RAW}
         hasBalance
@@ -110,6 +111,7 @@ describe('며칠 버티나 카드 — 계산 입력은 커서와 무관하다', 
     const boom = vi.spyOn(console, 'error').mockImplementation(() => {});
     expect(() => wrap(
       <TideBar
+        todayISO={TODAY}
         accounts={ACCOUNTS}
         entries={shown}
         hasBalance
