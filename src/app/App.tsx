@@ -13,7 +13,7 @@ import {
   readMigrationMark, saveAccount, saveDebt, saveEntry, savePin, saveTaskOrder, writeMany,
 } from '../data/repo';
 import {
-  REPLACE_DISABLED_REASON, safeMerge, type RestoreIO,
+  MERGE_SKIPS_RECOVERY, REPLACE_DISABLED_REASON, safeMerge, type RestoreIO,
 } from '../data/restore';
 import { LENSES, LENS_BY_ID } from '../domain/constants';
 import { endOfMonth, fmtMonthTitle, startOfMonth, toISO } from '../domain/date';
@@ -345,11 +345,19 @@ function Workspace({ uid, user, onSignOut }: WorkspaceProps) {
       return;
     }
 
-    const file = await pickFile('application/json');
-    if (!file) return;
+    /*
+      깃발을 **파일 고르기 전에** 세운다.
 
+      예전에는 고르고 난 뒤에 세웠다. 파일 선택 창은 사용자가 파일을 고를 때까지 열려
+      있는데, 그 사이에 설정에서 가져오기를 한 번 더 누르면 두 번째도 그대로 통과했다.
+      둘 다 파일을 고르면 서로의 중간 상태를 읽는다.
+
+      취소하거나 실패해도 반드시 내린다 — 안 그러면 그 뒤로 영영 가져올 수 없다.
+    */
     importing.current = true;
     try {
+      const file = await pickFile('application/json');
+      if (!file) return;
       const read = readBackupFile(await file.text());
       if (!read.ok) {
         await dialog.confirm({
@@ -401,6 +409,8 @@ function Workspace({ uid, user, onSignOut }: WorkspaceProps) {
       ], (
         <>
           <p>파일에 {countBackup(incoming).toLocaleString('ko-KR')}건이 들어 있습니다.</p>
+          {/* 회복 규칙은 컬렉션이 아니라 계정 설정이라 병합 경로가 건드리지 않는다. */}
+          {incoming.recovery && <p className="dlg-warn">{MERGE_SKIPS_RECOVERY}</p>}
           {/*
             평소 편집은 오프라인에서도 되지만 가져오기는 다르다. 이미 있는 문서를 덮지
             않으려면 "읽고 나서 없을 때만 쓰기" 를 한 번에 해야 하고(트랜잭션),

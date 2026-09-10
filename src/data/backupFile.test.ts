@@ -282,3 +282,146 @@ describe('예전 형식 — 달라지는 것을 숨기지 않는다', () => {
     expect(problemsOf(read({ items: ['문자열'] }))[0]).toContain('객체가 아닙니다');
   });
 });
+
+describe('판정 순서 — app · version 이 items 보다 앞선다', () => {
+  const legacyItem = {
+    id: 'i1', tab: 'task', title: '옛 항목', date: '2026-09-12',
+  };
+
+  it('메타데이터 없는 진짜 옛 백업은 그대로 받는다', () => {
+    const r = read({ items: [legacyItem] });
+    expect(r.ok).toBe(true);
+    if (r.ok) expect(r.file.format).toBe('legacy');
+  });
+
+  it('version 1 + items 도 받는다', () => {
+    const r = read({ app: 'Dada Calendar', version: 1, items: [legacyItem] });
+    expect(r.ok).toBe(true);
+    if (r.ok) expect(r.file.format).toBe('legacy');
+  });
+
+  it('남의 앱 백업은 items 가 있어도 거절한다', () => {
+    // 예전에는 items 를 먼저 보고 그대로 이관 변환기로 넘겼다.
+    const r = read({ app: '다른 앱', version: 1, items: [legacyItem] });
+    expect(r.ok).toBe(false);
+    expect(problemsOf(r)[0]).toContain('이 앱의 백업이 아닙니다');
+  });
+
+  it('아직 모르는 버전은 items 가 있어도 거절한다', () => {
+    const r = read({ app: 'Dada Calendar', version: 99, items: [legacyItem] });
+    expect(r.ok).toBe(false);
+    expect(problemsOf(r)[0]).toContain('아직 모르는 버전');
+  });
+
+  it('지원하지 않는 버전은 items 가 있어도 거절한다', () => {
+    const r = read({ app: 'Dada Calendar', version: 0, items: [legacyItem] });
+    expect(r.ok).toBe(false);
+    expect(problemsOf(r)[0]).toContain('지원하지 않는 버전');
+  });
+
+  it('version 1 인데 items 가 없으면 잘린 파일로 본다', () => {
+    const r = read({ app: 'Dada Calendar', version: 1 });
+    expect(r.ok).toBe(false);
+    expect(problemsOf(r)[0]).toContain('items 배열이 없습니다');
+  });
+
+  it('버전도 items 도 없으면 버전이 없다고 말한다', () => {
+    const r = read({ app: 'Dada Calendar', entries: [] });
+    expect(r.ok).toBe(false);
+    expect(problemsOf(r)[0]).toContain('버전이 없습니다');
+  });
+
+  it('v3 파일에 items 가 섞여 있어도 v3 로 읽는다', () => {
+    const r = read(v3({ items: [legacyItem], entries: [entry()] }));
+    expect(r.ok).toBe(true);
+    if (r.ok) {
+      expect(r.file.format).toBe('v3');
+      expect(r.file.data.entries.map((e) => e.id)).toEqual(['e1']);
+    }
+  });
+});
+
+describe('뜻이 바뀌는 값은 조용히 바꾸지 않는다', () => {
+  it('모르는 money.type 을 거절한다 — expense 로 떨어지면 입금이 지출이 된다', () => {
+    const r = read(v3({
+      entries: [moneyEntry({
+        money: { type: '입금', amountMinor: 1_000, currency: 'KRW', linkedEntryId: null },
+      })],
+    }));
+    expect(r.ok).toBe(false);
+    expect(problemsOf(r)[0]).toContain('가계부 종류를 알 수 없습니다');
+    expect(problemsOf(r)[0]).toContain('income');
+  });
+
+  it('아는 money.type 은 통과한다', () => {
+    for (const type of ['income', 'expense', 'living', 'save', 'free']) {
+      const r = read(v3({
+        entries: [moneyEntry({
+          money: { type, amountMinor: 1_000, currency: 'KRW', linkedEntryId: null },
+        })],
+      }));
+      expect(r.ok, type).toBe(true);
+    }
+  });
+
+  it('money.linkedEntryId 가 문자열이 아니면 거절한다', () => {
+    const r = read(v3({
+      entries: [moneyEntry({
+        money: { type: 'expense', amountMinor: 1_000, currency: 'KRW', linkedEntryId: 7 },
+      })],
+    }));
+    expect(r.ok).toBe(false);
+  });
+
+  it('모르는 task.status 를 거절한다 — planned 로 떨어지면 끝낸 일이 되살아난다', () => {
+    const r = read(v3({
+      entries: [entry({ task: { status: '완료', important: false, urgent: false, order: 0 } })],
+    }));
+    expect(r.ok).toBe(false);
+    expect(problemsOf(r)[0]).toContain('할 일 상태를 알 수 없습니다');
+    expect(problemsOf(r)[0]).toContain('done');
+  });
+
+  it('아는 task.status 는 통과한다', () => {
+    for (const status of ['planned', 'in-progress', 'done']) {
+      const r = read(v3({
+        entries: [entry({ task: { status, important: false, urgent: false, order: 0 } })],
+      }));
+      expect(r.ok, status).toBe(true);
+    }
+  });
+
+  it('important · urgent 가 참·거짓이 아니면 거절한다', () => {
+    const r = read(v3({
+      entries: [entry({ task: { status: 'planned', important: 'yes', urgent: false, order: 0 } })],
+    }));
+    expect(r.ok).toBe(false);
+    expect(problemsOf(r)[0]).toContain('참·거짓이 아닙니다');
+  });
+
+  it('task.order 가 정수가 아니면 거절한다', () => {
+    const r = read(v3({
+      entries: [entry({ task: { status: 'planned', important: false, urgent: false, order: 1.5 } })],
+    }));
+    expect(r.ok).toBe(false);
+  });
+});
+
+describe('뜻이 흐려지는 보정은 보고한다', () => {
+  it('모르는 색은 거절하지 않고 무엇이 달라지는지 알린다', () => {
+    const r = read(v3({ entries: [entry({ color: '형광연두' })] }));
+    expect(r.ok).toBe(true);
+    if (r.ok) {
+      expect(r.file.notes).toHaveLength(1);
+      expect(r.file.notes[0]?.id).toBe('e1');
+      expect(r.file.notes[0]?.reason).toContain('형광연두');
+      expect(r.file.notes[0]?.reason).toContain('기본색');
+    }
+  });
+
+  it('아는 색은 아무 말도 하지 않는다', () => {
+    const r = read(v3({ entries: [entry({ color: 'blue' })] }));
+    expect(r.ok).toBe(true);
+    if (r.ok) expect(r.file.notes).toEqual([]);
+  });
+});

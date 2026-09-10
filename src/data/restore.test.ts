@@ -14,7 +14,8 @@ import type { BackupData } from './backup';
 import { readBackupFile } from './backupFile';
 import type { CreateManyResult } from './repo';
 import {
-  countDocs, describeProblem, planMerge, REPLACE_DISABLED_REASON, safeMerge, safeReplace,
+  countDocs, describeProblem, MERGE_SKIPS_RECOVERY, planMerge, REPLACE_DISABLED_REASON,
+  safeMerge, safeReplace,
   validateBackup, type RestoreIO,
 } from './restore';
 
@@ -400,5 +401,19 @@ describe('병합 — 기존 문서를 덮어쓰지 않는다', () => {
     const outcome = await safeMerge(data({ entries: [newEntry('task', { id: 'A' })] }), io);
     expect(outcome.kind).toBe('ok');
     expect(log).toEqual(['fetchAll']);
+  });
+});
+
+describe('안내 문구', () => {
+  it('전체 교체의 대안으로 손으로 지우라고 하지 않는다', () => {
+    // 손으로 지우는 일이야말로 되돌릴 수 없고, 무엇을 지워야 할지 알 방법도 없다.
+    expect(REPLACE_DISABLED_REASON).not.toContain('직접 지운');
+    expect(REPLACE_DISABLED_REASON).toContain('기존 데이터에 더하기');
+    expect(REPLACE_DISABLED_REASON).toContain('새 계정');
+  });
+
+  it('병합이 회복 설정을 적용하지 않는다고 알린다', () => {
+    expect(MERGE_SKIPS_RECOVERY).toContain('적용되지 않습니다');
+    expect(MERGE_SKIPS_RECOVERY).toContain('설정 화면');
   });
 });

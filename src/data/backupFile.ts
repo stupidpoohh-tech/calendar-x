@@ -18,13 +18,14 @@
  *
  * | 형식 | 알아보는 법 | 담고 있는 것 |
  * |------|------------|-------------|
- * | legacy | `items` 배열 | 이관 전 단일 컬렉션. 변환 시 제외·절단 항목을 함께 보고한다 |
+ * | legacy | `version: 1` 또는 버전 없음 + `items` 배열 | 이관 전 단일 컬렉션. 변환 시 제외·절단 항목을 함께 보고한다 |
  * | v2 | `version: 2` | entries · accounts · debts · pins **네 배열 모두 필수** |
  * | v3 | `version: 3` | v2 + `recovery` (null 허용) |
  *
  * 없는 컬렉션을 빈 배열로 넘겨 짚지 않는다. v2·v3 파일에 `debts` 가 없다면 그건
  * 빈 백업이 아니라 깨진 파일이다.
  */
+import { COLORS, MONEY_TYPES, STATUSES } from '../domain/constants';
 import { isValidDate } from '../domain/date';
 import type { BackupCollection } from '../domain/types';
 import type { BackupData } from './backup';
@@ -53,7 +54,12 @@ export interface BackupFile {
   format: BackupFormat;
   version: number;
   data: BackupData;
-  /** legacy 변환에서 제외되거나 잘린 항목. */
+  /**
+   * 변환이 손댄 곳.
+   *
+   * legacy 는 제외·절단 항목, v2·v3 은 뜻이 흐려지는 보정(모르는 색 → 기본색)이 들어온다.
+   * 뜻이 **바뀌는** 값(money.type · task.status)은 여기 오지 않는다 — 그건 거절한다.
+   */
   notes: ConversionNote[];
 }
 
@@ -165,6 +171,30 @@ function describe(v: unknown): string {
 
 const KINDS = ['task', 'idea', 'money'];
 const FREQS = ['daily', 'weekly', 'monthly'];
+/*
+  뜻이 바뀌는 값들. 이것들은 "문자열이면 통과" 로 두면 안 된다.
+
+  converters 는 읽기 계층이라 방어적이다 — 모르는 money.type 은 'expense' 로,
+  모르는 task.status 는 'planned' 로 조용히 바뀐다. 입금이 지출이 되고 완료가 예정이
+  되는데도 사용자는 "가져왔습니다" 만 본다. 그래서 여기서 막는다.
+*/
+const MONEY_TYPE_IDS: readonly string[] = MONEY_TYPES.map((t) => t.id);
+const STATUS_IDS: readonly string[] = STATUSES.map((s) => s.id);
+/*
+  색은 뜻이 바뀌지 않는다 (기본색으로 떨어질 뿐이다). 거절하지 않고 보고만 한다 —
+  조용히 바꾸면 사용자는 자기가 칠한 색이 사라진 이유를 알 수 없다.
+*/
+const COLOR_IDS: readonly string[] = COLORS.map((c) => c.id);
+
+function colorNotes(rows: readonly Raw[]): ConversionNote[] {
+  const out: ConversionNote[] = [];
+  for (const r of rows) {
+    const color = r.color;
+    if (typeof color !== 'string' || !color || COLOR_IDS.includes(color)) continue;
+    out.push({ id: String(r.id), reason: `모르는 색 '${color}' 이라 기본색으로 들어갑니다.` });
+  }
+  return out;
+}
 
 function checkEntryRaw(c: Collector, where: string, e: Raw): void {
   const kind = e.kind;
@@ -215,11 +245,41 @@ function checkEntryRaw(c: Collector, where: string, e: Raw): void {
       c.add(`${where}.money.amountMinor`, `음수입니다: ${m.amountMinor} — 부호는 종류가 정합니다.`);
     }
     reqStr(c, `${where}.money.currency`, m.currency);
-    if (typeof m.type !== 'string') c.add(`${where}.money.type`, `종류가 문자열이 아닙니다: ${describe(m.type)}`);
+    // 부호를 정하는 값이다. 모르는 값을 'expense' 로 바꾸면 입금이 지출이 된다.
+    if (typeof m.type !== 'string' || !MONEY_TYPE_IDS.includes(m.type)) {
+      c.add(
+        `${where}.money.type`,
+        `가계부 종류를 알 수 없습니다: ${describe(m.type)} — `
+        + `쓸 수 있는 값: ${MONEY_TYPE_IDS.join(' · ')}`,
+      );
+    }
+    if (m.linkedEntryId !== undefined && m.linkedEntryId !== null && typeof m.linkedEntryId !== 'string') {
+      c.add(`${where}.money.linkedEntryId`, `문자열이 아닙니다: ${describe(m.linkedEntryId)}`);
+    }
   }
 
-  if (kind === 'task' && e.task !== undefined && e.task !== null && !isObj(e.task)) {
-    c.add(`${where}.task`, `객체가 아닙니다: ${describe(e.task)}`);
+  if (kind === 'task' && e.task !== undefined && e.task !== null) {
+    const t = e.task;
+    if (!isObj(t)) {
+      c.add(`${where}.task`, `객체가 아닙니다: ${describe(e.task)}`);
+    } else {
+      // 모르는 상태를 'planned' 로 바꾸면 끝낸 일이 안 끝난 일이 된다.
+      if (t.status !== undefined && t.status !== null
+          && (typeof t.status !== 'string' || !STATUS_IDS.includes(t.status))) {
+        c.add(
+          `${where}.task.status`,
+          `할 일 상태를 알 수 없습니다: ${describe(t.status)} — `
+          + `쓸 수 있는 값: ${STATUS_IDS.join(' · ')}`,
+        );
+      }
+      for (const flag of ['important', 'urgent'] as const) {
+        const v = t[flag];
+        if (v !== undefined && v !== null && typeof v !== 'boolean') {
+          c.add(`${where}.task.${flag}`, `참·거짓이 아닙니다: ${describe(v)}`);
+        }
+      }
+      optInt(c, `${where}.task.order`, t.order);
+    }
   }
 }
 
@@ -287,6 +347,9 @@ function checkCollection(c: Collector, name: BackupCollection, value: unknown): 
  *
  * 문제가 하나라도 있으면 `{ ok: false }` 를 돌려주고 **변환하지 않는다.**
  * 부르는 쪽은 저장소를 건드리기 전에 이 결과를 봐야 한다.
+ *
+ * 판정 순서: JSON → app → version → 형식(legacy / v2·v3) → 컬렉션 → 항목.
+ * app·version 이 items 보다 앞에 있어야 남의 앱 백업이 이관 갈래로 새지 않는다.
  */
 export function readBackupFile(text: string): ReadResult {
   const c = new Collector();
@@ -301,34 +364,53 @@ export function readBackupFile(text: string): ReadResult {
     return { ok: false, problems: [{ where: '파일', reason: `백업 파일의 내용을 읽을 수 없습니다: ${describe(obj)}` }] };
   }
 
-  // ---- 이관 전 형식 ----
-  if (Array.isArray(obj.items)) {
-    return readLegacy(c, obj.items);
-  }
+  /*
+    ---- 앱과 버전을 **items 보다 먼저** 본다 ----
 
-  // ---- 앱과 버전 ----
+    예전에는 `items` 배열이 보이면 그 자리에서 이관 전 형식으로 넘겼다. 그러면
+    `app` 도 `version` 도 보지 않은 채 남의 앱 백업이나 아직 모르는 버전의 파일이
+    이관 변환기로 새어 들어갔다 — 변환기는 방어적이라 거절하지 않고 무언가를 만들어 낸다.
+
+    메타데이터가 아예 없던 진짜 옛 백업은 그대로 받아 준다. 그 파일에는 `app` 도
+    `version` 도 없고 `items` 만 있다.
+  */
   if (obj.app !== undefined && obj.app !== 'Dada Calendar') {
     return { ok: false, problems: [{ where: 'app', reason: `이 앱의 백업이 아닙니다: ${describe(obj.app)}` }] };
   }
+
   const version = obj.version;
-  if (version === undefined) {
+  if (version !== undefined) {
+    if (!isIntNum(version)) {
+      return { ok: false, problems: [{ where: 'version', reason: `버전이 정수가 아닙니다: ${describe(version)}` }] };
+    }
+    if (version > LATEST_VERSION) {
+      return {
+        ok: false,
+        problems: [{
+          where: 'version',
+          reason: `이 앱이 아직 모르는 버전입니다 (파일 ${version} · 지원 ${LATEST_VERSION}). `
+            + '앱을 새로고침해 최신 버전으로 다시 시도해 주세요.',
+        }],
+      };
+    }
+    if (!(SUPPORTED_VERSIONS as readonly number[]).includes(version)) {
+      return { ok: false, problems: [{ where: 'version', reason: `지원하지 않는 버전입니다: ${version}` }] };
+    }
+  }
+
+  // ---- 이관 전 형식 (version 1 또는 메타데이터 없는 옛 파일) ----
+  if (version === undefined || version === 1) {
+    if (Array.isArray(obj.items)) return readLegacy(c, obj.items);
+    if (version === 1) {
+      return {
+        ok: false,
+        problems: [{
+          where: 'items',
+          reason: '이관 전(version 1) 백업인데 items 배열이 없습니다. 파일이 잘렸을 수 있습니다.',
+        }],
+      };
+    }
     return { ok: false, problems: [{ where: 'version', reason: '버전이 없습니다. 백업 파일이 맞는지 확인해 주세요.' }] };
-  }
-  if (!isIntNum(version)) {
-    return { ok: false, problems: [{ where: 'version', reason: `버전이 정수가 아닙니다: ${describe(version)}` }] };
-  }
-  if (version > LATEST_VERSION) {
-    return {
-      ok: false,
-      problems: [{
-        where: 'version',
-        reason: `이 앱이 아직 모르는 버전입니다 (파일 ${version} · 지원 ${LATEST_VERSION}). `
-          + '앱을 새로고침해 최신 버전으로 다시 시도해 주세요.',
-      }],
-    };
-  }
-  if (!(SUPPORTED_VERSIONS as readonly number[]).includes(version)) {
-    return { ok: false, problems: [{ where: 'version', reason: `지원하지 않는 버전입니다: ${version}` }] };
   }
 
   const format: BackupFormat = version >= 3 ? 'v3' : 'v2';
@@ -355,7 +437,7 @@ export function readBackupFile(text: string): ReadResult {
     file: {
       format,
       version,
-      notes: [],
+      notes: colorNotes(entries),
       data: {
         entries: entries.map((r) => entryFromDoc(r.id as string, r)),
         accounts: accounts.map((r) => accountFromDoc(r.id as string, r)),
