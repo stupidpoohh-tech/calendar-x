@@ -262,3 +262,39 @@ describe('정산 — 자료가 모자라면 확정 금액을 내지 않는다', 
     expect(partial.expected - full.expected).toBe(500_000);
   });
 });
+
+describe('오래된 반복 — 화면과 계산이 같은 발생분을 본다', () => {
+  // 2년 전에 시작한 매주 지출. 예전에는 화면 쪽만 상한에 잘려 캘린더에서 사라지고,
+  // 계산 쪽은 건너뛰기가 있어 그대로 세었다 — 눈에 보이지 않는 돈이 한도를 깎았다.
+  const weekly = roundTrip(repeating(money('expense', 10_000, '2024-09-03'), {
+    freq: 'weekly', interval: 1, until: null, count: null,
+  }));
+  const salary = roundTrip(repeating(money('income', 3_000_000, '2024-09-25', { title: '급여' }), {
+    freq: 'monthly', interval: 1, until: null, count: null,
+  }));
+  const raw = [weekly, salary];
+  const today = '2026-09-10';
+
+  it('캘린더에 그 달의 발생분이 전부 뜬다', () => {
+    const shown = materialize(raw, '2026-09-01', '2026-09-30');
+    const dates = shown.filter((e) => e.title === '').map((e) => e.startDate);
+    // 2024-09-03 은 화요일. 2026년 9월의 화요일은 1·8·15·22·29.
+    expect(dates).toEqual(['2026-09-01', '2026-09-08', '2026-09-15', '2026-09-22', '2026-09-29']);
+    expect(shown.every(isVirtualEntry)).toBe(true);
+  });
+
+  it('한도는 화면에 보이는 그 발생분만큼만 깎인다', () => {
+    const acc = [account(1_000_000, '2026-09-01')];
+    // (09-10, 09-24] 사이 주간 지출은 09-15 · 09-22 두 번.
+    expect(headlineLimit(acc, raw, today)).toBe(980_000);
+    expect(horizonOf(raw, today).nextIncome).toBe('2026-09-25');
+  });
+
+  it('화면에 뜬 개수와 계산이 센 개수가 같다', () => {
+    const shown = materialize(raw, '2026-09-11', '2026-09-24')
+      .filter((e) => e.title === '');
+    const counted = occurrences(raw, '2026-09-10', '2026-09-24')
+      .filter((o) => o.entry.title === '');
+    expect(counted.map((o) => o.date)).toEqual(shown.map((e) => e.startDate));
+  });
+});
