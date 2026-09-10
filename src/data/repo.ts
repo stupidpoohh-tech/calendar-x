@@ -284,26 +284,82 @@ export async function writeMany(
   return result;
 }
 
-export async function deleteAllEntries(db: Firestore, uid: string): Promise<number> {
-  const snap = await getDocs(col(db, uid, COL.entries));
-  const ids = snap.docs.map((d) => d.id);
+/**
+ * 다건 삭제. 어느 컬렉션이든 문서 단위로 지운다.
+ *
+ * 결과 모양을 `writeMany` 와 같게 맞춘 이유는, 부르는 쪽이 "몇 건 지웠고 몇 건이
+ * 왜 남았는지" 를 쓰기와 똑같이 확인해야 하기 때문이다. 배치가 깨지면 문서 단위로
+ * 다시 시도해 범인을 추린다.
+ *
+ * 예전에는 `deleteAllEntries()` 하나뿐이었고 전체 교체가 그것을 **먼저** 불렀다.
+ * 그래서 저장이 실패해도 이미 지운 뒤였다. 지금 이 함수는 저장이 모두 성공한 뒤에만
+ * 불린다 (`restore.ts` 의 순서).
+ */
+export async function deleteMany(
+  db: Firestore, uid: string,
+  targets: readonly { collection: string; id: string }[],
+  onProgress?: (done: number, total: number) => void,
+): Promise<WriteManyResult> {
+  const result: WriteManyResult = { written: 0, failed: [], allFailed: false };
   const CHUNK = 400;
-  for (let i = 0; i < ids.length; i += CHUNK) {
-    const batch = writeBatch(db);
-    for (const id of ids.slice(i, i + CHUNK)) batch.delete(docIn(db, uid, COL.entries, id));
-    await batch.commit();
+
+  for (let i = 0; i < targets.length; i += CHUNK) {
+    const slice = targets.slice(i, i + CHUNK);
+    try {
+      const batch = writeBatch(db);
+      for (const t of slice) batch.delete(docIn(db, uid, t.collection, t.id));
+      await batch.commit();
+      result.written += slice.length;
+    } catch {
+      for (const t of slice) {
+        try {
+          await deleteDoc(docIn(db, uid, t.collection, t.id));
+          result.written += 1;
+        } catch (err) {
+          result.failed.push({ collection: t.collection, id: t.id, reason: describeFirestoreError(err) });
+        }
+      }
+    }
+    onProgress?.(Math.min(i + CHUNK, targets.length), targets.length);
   }
-  return ids.length;
+
+  result.allFailed = targets.length > 0 && result.written === 0;
+  return result;
 }
 
-/** 보고 있는 달을 중심으로 구독할 달 목록. */
-export function monthWindow(cursorISO: string): YearMonth[] {
-  const [y, m] = ymOf(cursorISO).split('-').map(Number) as [number, number];
-  const at = (offset: number): YearMonth => {
+function monthsAround(anchorISO: string, back: number, forward: number): YearMonth[] {
+  const [y, m] = ymOf(anchorISO).split('-').map(Number) as [number, number];
+  const out: YearMonth[] = [];
+  for (let offset = -back; offset <= forward; offset++) {
     const d = new Date(y, m - 1 + offset, 1);
-    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
-  };
-  return [at(-1), at(0), at(1)];
+    out.push(`${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`);
+  }
+  return out;
+}
+
+/** 보고 있는 달을 중심으로 구독할 달 목록. 화면에 그릴 항목용이다. */
+export function monthWindow(cursorISO: string): YearMonth[] {
+  return monthsAround(cursorISO, 1, 1);
+}
+
+/**
+ * 금액 계산이 덮어야 하는 달 — 뒤로 1달, 앞으로 14달.
+ *
+ * **커서가 아니라 오늘을 기준으로 잡는다.** 한도·다음 입금일·정산은 오늘의 함수이지
+ * 보고 있는 달의 함수가 아니다. 커서 창으로 계산하면 달력을 넘길 때마다 머리 숫자가
+ * 바뀌고, 그 값이 그럴듯해서 틀린 줄 모른다.
+ *
+ * 앞으로 14달인 이유는 `horizonOf` 가 다음 입금을 400일까지 찾기 때문이다. 창이 그보다
+ * 좁으면 실제로 있는 입금을 못 보고 "입금 없음 → 30일 뒤" 로 조용히 물러난다.
+ * 어느 날에서 재도 이 창의 끝이 400일보다 뒤에 오도록 잡았다 (달 말일 기준 426일).
+ *
+ * `array-contains-any` 상한이 30이므로 16달은 여유가 있다.
+ */
+export const TIDE_WINDOW_BACK_MONTHS = 1;
+export const TIDE_WINDOW_FORWARD_MONTHS = 14;
+
+export function tideWindow(todayISO: string): YearMonth[] {
+  return monthsAround(todayISO, TIDE_WINDOW_BACK_MONTHS, TIDE_WINDOW_FORWARD_MONTHS);
 }
 
 /**

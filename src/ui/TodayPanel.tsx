@@ -22,7 +22,13 @@ import { Icon } from './Icon';
 
 interface Props {
   todayISO: string;
+  /** 화면에 그릴 목록. 반복이 펼쳐져 있고 필터 이전이다. */
   entries: readonly Entry[];
+  /**
+   * 금액 계산용 원본. 반복을 펼치지 않은 목록이라야 한다.
+   * 펼친 목록을 넣으면 tide 가 한 번 더 전개해 같은 입출금을 여러 번 센다.
+   */
+  tideEntries: readonly Entry[];
   accounts: readonly Account[];
   /** 잔고를 한 번도 입력하지 않았으면 tide 값을 0으로 단정하지 않는다. */
   hasBalance: boolean;
@@ -42,12 +48,13 @@ function occursOnDay(e: Entry, iso: string): boolean {
 }
 
 export function TodayPanel({
-  todayISO, entries, accounts, hasBalance,
+  todayISO, entries, tideEntries, accounts, hasBalance,
   collapsed, onToggleCollapsed, moneyCollapsed, onToggleMoneyCollapsed,
   onEntryClick, onStatusChange, onPromote, onQuickIdea, onSaveAccount,
 }: Props) {
   const [idea, setIdea] = useState('');
-  const editor = useBalanceEditor(accounts, entries, onSaveAccount);
+  // 정산은 계산이다. 원본을 넘긴다.
+  const editor = useBalanceEditor(accounts, tideEntries, onSaveAccount);
 
   const weekEndISO = addDaysISO(todayISO, 6);
 
@@ -65,10 +72,10 @@ export function TodayPanel({
   }, [entries, todayISO, weekEndISO]);
 
   // '오늘 마감 예상' 대신 tide-over 규칙 — 다음 입금까지 남는 한도.
-  const horizon = useMemo(() => horizonOf(entries, todayISO), [entries, todayISO]);
+  const horizon = useMemo(() => horizonOf(tideEntries, todayISO), [tideEntries, todayISO]);
   const tideLimit = useMemo(
-    () => hasBalance ? headlineLimit(accounts, entries, todayISO) : null,
-    [hasBalance, accounts, entries, todayISO],
+    () => hasBalance ? headlineLimit(accounts, tideEntries, todayISO) : null,
+    [hasBalance, accounts, tideEntries, todayISO],
   );
 
   const submitIdea = () => {

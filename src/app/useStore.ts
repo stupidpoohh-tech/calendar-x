@@ -3,12 +3,29 @@ import { describeFirestoreError, isPermissionDenied } from '../data/errors';
 import { getFirebase } from '../data/firebase';
 import {
   monthWindow, subscribeAccounts, subscribeDebts, subscribeEntriesForMonths,
-  subscribePins, subscribeRecurringEntries,
+  subscribePins, subscribeRecurringEntries, tideWindow,
 } from '../data/repo';
-import type { Account, Debt, Entry, Pin } from '../domain/types';
+import type { Account, Debt, Entry, Pin, YearMonth } from '../domain/types';
 
 export interface StoreState {
+  /**
+   * 화면에 그릴 항목의 **원본**. 보고 있는 달 주변만 받는다.
+   * 반복은 아직 펼쳐지지 않았다 — 펼치는 것은 화면 쪽 `materialize()` 의 일이다.
+   */
   entries: Entry[];
+  /**
+   * 금액 계산용 **원본**. 오늘 기준 고정 구간이라 달력을 넘겨도 바뀌지 않는다.
+   *
+   * 화면용으로 펼친 목록(`materialize()` 결과)을 여기에 쓰면 안 된다. tide 가 발생분을
+   * 다시 반복 전개해 같은 입출금을 여러 번 센다. 그 사고는 `tide.ts` 가 `virtual`
+   * 표식을 보고 거절해 막지만, 애초에 두 목록을 섞지 않는 것이 이 필드의 존재 이유다.
+   */
+  tideEntries: Entry[];
+  /**
+   * `tideEntries` 가 실제로 덮는 달.
+   * 달력이 "이 셀의 한도를 계산할 자료가 있는가" 를 판정하는 데 쓴다.
+   */
+  tideMonths: YearMonth[];
   accounts: Account[];
   debts: Debt[];
   pins: Pin[];
@@ -22,21 +39,32 @@ export interface StoreState {
 }
 
 const EMPTY: StoreState = {
-  entries: [], accounts: [], debts: [], pins: [],
+  entries: [], tideEntries: [], tideMonths: [],
+  accounts: [], debts: [], pins: [],
   loading: false, error: null, rulesBlocked: false,
 };
 
 /**
  * 구독 계층.
  *
- * 이전 구조는 users/{uid}/items 전체를 한 번에 구독했다. 여기서는 보고 있는 달과 앞뒤
- * 한 달만 받고, 월 조회로 잡히지 않는 반복 항목만 따로 받는다. (F-06)
+ * 세 갈래로 받는다.
+ *   1. 보고 있는 달 주변 — 화면에 그릴 항목
+ *   2. 오늘 주변 고정 구간 — 금액 계산 (커서와 무관해야 한다)
+ *   3. 반복 항목 전량 — 월 조회로 잡히지 않는다
+ *
+ * 1번만 두고 계산까지 시키면 달력을 넘길 때마다 한도·다음 입금일·정산이 달라진다.
+ * 이전 구조는 users/{uid}/items 전체를 한 번에 구독했다 (F-06). 여기서는 셋 다
+ * 상한이 있다 — 2번이 16달로 가장 넓고, 그 값은 커서를 아무리 옮겨도 그대로다.
  */
-export function useStore(uid: string | null, cursorISO: string): StoreState {
+export function useStore(uid: string | null, cursorISO: string, todayISO: string): StoreState {
   const months = useMemo(() => monthWindow(cursorISO), [cursorISO]);
   const monthKey = months.join(',');
 
+  const tideMonths = useMemo(() => tideWindow(todayISO), [todayISO]);
+  const tideKey = tideMonths.join(',');
+
   const [monthEntries, setMonthEntries] = useState<Entry[]>([]);
+  const [tideRaw, setTideRaw] = useState<Entry[]>([]);
   const [recurring, setRecurring] = useState<Entry[]>([]);
   const [accounts, setAccounts] = useState<Account[]>([]);
   const [debts, setDebts] = useState<Debt[]>([]);
@@ -52,7 +80,8 @@ export function useStore(uid: string | null, cursorISO: string): StoreState {
 
   useEffect(() => {
     if (!uid) {
-      setMonthEntries([]); setRecurring([]); setAccounts([]); setDebts([]); setPins([]);
+      setMonthEntries([]); setTideRaw([]); setRecurring([]);
+      setAccounts([]); setDebts([]); setPins([]);
       setReady(false);
       return;
     }
@@ -70,6 +99,7 @@ export function useStore(uid: string | null, cursorISO: string): StoreState {
 
     const unsubs = [
       subscribeEntriesForMonths(db, uid, monthKey.split(','), (e) => { setMonthEntries(e); setReady(true); }, onError),
+      subscribeEntriesForMonths(db, uid, tideKey.split(','), setTideRaw, (s, e) => onError(`${s} (계산)`, e)),
       subscribeRecurringEntries(db, uid, setRecurring, onError),
       subscribeAccounts(db, uid, setAccounts, onError),
       subscribeDebts(db, uid, setDebts, onError),
@@ -81,18 +111,25 @@ export function useStore(uid: string | null, cursorISO: string): StoreState {
       setRulesBlocked(false);
       setError(null);
     };
-  }, [uid, monthKey]);
+  }, [uid, monthKey, tideKey]);
 
-  const entries = useMemo(() => {
-    // 반복 항목은 첫 발생 달의 ymSpan 을 갖고 있어 월 조회에도 걸린다.
-    // 두 번 펼쳐지지 않도록 id 로 합친다.
-    const byId = new Map<string, Entry>();
-    for (const e of monthEntries) byId.set(e.id, e);
-    for (const e of recurring) byId.set(e.id, e);
-    return [...byId.values()];
-  }, [monthEntries, recurring]);
+  // 반복 항목은 첫 발생 달의 ymSpan 을 갖고 있어 월 조회에도 걸린다.
+  // 두 번 들어가지 않도록 id 로 합친다.
+  const entries = useMemo(() => mergeById(monthEntries, recurring), [monthEntries, recurring]);
+  const tideEntries = useMemo(() => mergeById(tideRaw, recurring), [tideRaw, recurring]);
 
   if (!uid) return EMPTY;
 
-  return { entries, accounts, debts, pins, loading: !ready, error, rulesBlocked };
+  return {
+    entries, tideEntries, tideMonths,
+    accounts, debts, pins,
+    loading: !ready, error, rulesBlocked,
+  };
+}
+
+function mergeById(a: readonly Entry[], b: readonly Entry[]): Entry[] {
+  const byId = new Map<string, Entry>();
+  for (const e of a) byId.set(e.id, e);
+  for (const e of b) byId.set(e.id, e);
+  return [...byId.values()];
 }

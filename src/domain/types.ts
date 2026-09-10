@@ -105,6 +105,19 @@ export interface Entry {
    */
   recovery: RecoveryFields | null;
 
+  /**
+   * 화면용으로 펼친 가상 발생분 표시. **저장되지 않는다.**
+   *
+   * `entryToDoc` 이 이 필드를 쓰지 않고 `entryFromDoc` 이 읽지 않으므로, 이 값이 켜진
+   * 항목은 오직 `expandEntry()` 가 방금 만든 것뿐이다 — 사용자 데이터로는 들어올 수
+   * 없다. 그래서 금액 계산이 이 표식 하나만 보고 "화면용 목록이 잘못 들어왔다" 를
+   * 확실하게 판정할 수 있다.
+   *
+   * 계산에 발생분을 넣으면 tide 가 그것을 또 한 번 반복 전개해 같은 입출금을
+   * 여러 번 센다. 그 사고를 타입이 아니라 값으로 막는 자리다.
+   */
+  virtual?: true;
+
   createdAt: string;
   updatedAt: string;
 }
@@ -233,6 +246,9 @@ export interface RecoveryRule {
   defaultOptionIds: string[];
   options: RecoveryOption[];
 }
+
+/** 백업이 담는 네 컬렉션. 전체 교체는 이 넷 모두에 똑같이 적용된다. */
+export type BackupCollection = 'entries' | 'accounts' | 'debts' | 'pins';
 
 export type ThemePref = 'system' | 'light' | 'dark';
 /** 글씨 크기. 'auto' 는 브라우저·OS 설정을 따른다는 뜻이다. */

@@ -31,7 +31,38 @@
 import { MONEY_TYPE_BY_ID } from './constants';
 import { addDaysISO, daysBetween, normalizeDate, parseDate, toISO } from './date';
 import { effectiveEndDate } from './entry';
+import { isVirtualEntry } from './recurrence';
 import type { Account, DateISO, Entry } from './types';
+
+/**
+ * 계산에 화면용 목록이 들어왔다.
+ *
+ * 배선 실수지 사용자 데이터 문제가 아니다 — `virtual` 은 저장 경로에 없어서
+ * `expandEntry()` 말고는 켤 수 없다. 조용히 지나가면 같은 입출금을 여러 번 세어
+ * 금액이 몇 배로 부풀고, 그 숫자가 그럴듯해서 아무도 눈치채지 못한다.
+ */
+export class TideInputError extends Error {
+  constructor(entryId: string) {
+    super(
+      `금액 계산에 화면용 발생분이 들어왔습니다 (${entryId}). `
+      + 'materialize() 결과가 아니라 원본 항목을 넘겨야 합니다 — '
+      + '발생분을 넣으면 반복이 한 번 더 전개돼 같은 입출금을 여러 번 셉니다.',
+    );
+    this.name = 'TideInputError';
+  }
+}
+
+/**
+ * 계산 입력 검사.
+ *
+ * tide 로 들어오는 모든 목록이 여기를 지난다. 반복 항목은 `occurrences()` 가 직접
+ * 전개하므로, 이미 전개된 사본을 받으면 안 된다.
+ */
+function assertOriginals(entries: readonly Entry[]): void {
+  for (const e of entries) {
+    if (isVirtualEntry(e)) throw new TideInputError(e.id);
+  }
+}
 
 /**
  * 예정 한 건의 하루 발생분. amount 는 그 날 몫(양수).
@@ -73,6 +104,8 @@ function isSpan(entry: Entry): boolean {
 export function occurrences(
   entries: readonly Entry[], after: DateISO, through: DateISO,
 ): Occurrence[] {
+  assertOriginals(entries);
+
   const afterN = normalizeDate(after);
   const throughN = normalizeDate(through);
   if (!afterN || !throughN || afterN >= throughN) return [];
@@ -244,6 +277,8 @@ const SEARCH_DAYS = 400;
 const FALLBACK_DAYS = 30;
 
 export function horizonOf(entries: readonly Entry[], today: DateISO): Horizon {
+  // 거르기 전에 본다. 걸러낸 뒤에 검사하면 입금이 하나도 없는 화면용 목록이 통과한다.
+  assertOriginals(entries);
   const incomes = entries.filter((e) => signOf(e) > 0 && !isSpan(e));
   const upcoming = occurrences(incomes, today, addDaysISO(today, SEARCH_DAYS));
   const next = upcoming[0]?.date;
@@ -264,6 +299,7 @@ export function limitOn(
   accounts: readonly Account[], entries: readonly Entry[],
   date: DateISO, today: DateISO,
 ): number {
+  assertOriginals(entries);
   const balance = accounts.reduce((s, a) => s + a.balanceMinor, 0);
   let total = balance;
   for (const entry of entries) {
@@ -311,6 +347,8 @@ export function settle(
   accounts: readonly Account[], entries: readonly Entry[],
   newAmountMinor: number, todayISO: DateISO,
 ): Settlement {
+  // 정산 구간이 비면 occurrences 를 거치지 않고 끝난다. 여기서도 직접 본다.
+  assertOriginals(entries);
   // 가장 최근에 확인된 잔고 시점을 기준으로 삼는다.
   let since = todayISO;
   let sinceTime = 0;
@@ -342,6 +380,7 @@ export function settle(
 export function upcomingInHorizon(
   entries: readonly Entry[], today: DateISO, horizon?: Horizon,
 ): Occurrence[] {
+  assertOriginals(entries);
   const h = horizon ?? horizonOf(entries, today);
   const out: Occurrence[] = [];
   for (const entry of entries) {

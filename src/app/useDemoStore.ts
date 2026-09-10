@@ -6,6 +6,7 @@
  * 상대적이라 언제 열어도 "오늘 잡힌 일" 이 있어 보인다.
  */
 import { useMemo } from 'react';
+import { tideWindow } from '../data/repo';
 import { addDaysISO, todayISO } from '../domain/date';
 import { newEntry, setRecurrence } from '../domain/entry';
 import type { StoreState } from './useStore';
@@ -79,6 +80,10 @@ export function useDemoStore(): StoreState {
 
     return {
       entries,
+      // 데모는 전부 메모리에 있어 화면용·계산용 원본이 같은 목록이다.
+      // 계산 쪽에는 반복을 펼치지 않은 이 목록이 그대로 들어가야 한다.
+      tideEntries: entries,
+      tideMonths: tideWindow(today),
       accounts: [{
         id: 'demo-account', name: '주계좌',
         balanceMinor: 850_000, currency: 'KRW',

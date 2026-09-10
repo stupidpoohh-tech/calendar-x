@@ -1,7 +1,7 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import {
   backupFilename, buildBackup, countBackup, downloadJSON,
-  mergeBackup, parseBackup, type BackupData,
+  parseBackup, type BackupData,
 } from '../data/backup';
 import {
   describeFirestoreError, isPermissionDenied, RULES_CONSOLE_PATH, RULES_DEPLOY_COMMAND,
@@ -9,9 +9,14 @@ import {
 import { getFirebase } from '../data/firebase';
 import { convertLegacyItems, readLegacyItems, summarize } from '../data/migrate';
 import {
-  deleteAllEntries, deleteDebt, deleteEntry, deletePin, fetchAll, markMigrated,
-  readMigrationMark, saveAccount, saveDebt, saveEntry, savePin, saveTaskOrder, writeMany,
+  deleteDebt, deleteEntry, deleteMany, deletePin, fetchAll, markMigrated,
+  readMigrationMark, saveAccount, saveDebt, saveEntry, savePin, saveTaskOrder,
+  writeMany, type WriteManyResult,
 } from '../data/repo';
+import {
+  countDocs, describeProblem, safeMerge, safeReplace, validateBackup,
+  type BackupProblem, type RestoreIO, type RestoreOutcome,
+} from '../data/restore';
 import { LENSES, LENS_BY_ID } from '../domain/constants';
 import {
   endOfMonth, fmtMonthTitle, startOfMonth, toISO, todayISO as computeToday,
@@ -97,7 +102,7 @@ function Workspace({ uid, user, onSignOut }: WorkspaceProps) {
   const cursorISO = toISO(cursor);
   const isAnon = uid === null;
   // 훅은 조건부 호출이 안 된다. 둘 다 부르고 로그인 상태에 따라 결과를 고른다.
-  const liveStore = useStore(uid, cursorISO);
+  const liveStore = useStore(uid, cursorISO, today);
   const demoStore = useDemoStore();
   const store = isAnon ? demoStore : liveStore;
   const { db } = getFirebase();
@@ -132,7 +137,18 @@ function Workspace({ uid, user, onSignOut }: WorkspaceProps) {
   const rangeFrom = toISO(startOfMonth(cursor));
   const rangeTo = toISO(endOfMonth(cursor));
 
-  // 반복 항목을 보고 있는 구간에 맞춰 펼친다. 펼친 결과는 저장하지 않는다.
+  /*
+    ── 화면용과 계산용은 다른 목록이다 ──────────────────────────────
+
+    materialized  보고 있는 구간으로 펼친 **화면용** 발생분. 저장하지 않는다.
+    visible       거기에 렌즈·필터를 건 것. 역시 화면용이다.
+    store.tideEntries  금액 계산용 **원본**. 반복을 펼치지 않았고, 커서가 아니라
+                  오늘을 기준으로 받는다.
+
+    계산에 materialized 를 넘기면 tide 가 발생분을 다시 반복 전개해 같은 입출금을
+    여러 번 센다 (주간 반복 1만원 한 달치가 −4만이 아니라 −14만이 된다).
+    tide 쪽이 `virtual` 표식을 보고 거절하므로 이 규칙을 어기면 테스트가 깨진다.
+  */
   const materialized = useMemo(
     () => materialize(store.entries, rangeFrom, rangeTo),
     [store.entries, rangeFrom, rangeTo],
@@ -295,6 +311,13 @@ function Workspace({ uid, user, onSignOut }: WorkspaceProps) {
     }
   }, [db, uid, isAnon, promptLogin, dialog, recovery]);
 
+  /**
+   * 백업 가져오기.
+   *
+   * 순서가 곧 안전장치다 — 검증 → 쓰기 → 결과 확인 → (교체일 때만) 지우기.
+   * 지우는 일은 언제나 맨 마지막이고, 쓰기가 한 건이라도 실패하면 거기서 멈춘다.
+   * 중간에 끊겨도 "지웠는데 복원이 안 된" 구간이 없다.
+   */
   const handleImport = useCallback(async () => {
     if (isAnon || !uid) { void promptLogin(); return; }
     const file = await pickFile('application/json');
@@ -308,44 +331,136 @@ function Workspace({ uid, user, onSignOut }: WorkspaceProps) {
       return;
     }
 
+    // 1. 파일 전체를 먼저 본다. 한 건이라도 걸리면 아무것도 건드리지 않는다 —
+    //    잘못된 값을 오늘 날짜나 기본값으로 조용히 바꿔 넣지 않는다.
+    const problems = validateBackup(incoming);
+    if (problems.length > 0) {
+      await dialog.confirm({
+        title: `이 파일은 가져올 수 없습니다 — ${problems.length.toLocaleString('ko-KR')}건이 규칙에 맞지 않습니다`,
+        body: (
+          <>
+            <ul className="dlg-skips">
+              {problems.slice(0, 8).map((p: BackupProblem, i: number) => (
+                <li key={`${p.collection}-${p.at}-${i}`}>{describeProblem(p)}</li>
+              ))}
+              {problems.length > 8 && <li>그 외 {(problems.length - 8).toLocaleString('ko-KR')}건</li>}
+            </ul>
+            <p className="dlg-note">
+              지금 데이터는 그대로입니다. 파일을 고친 뒤 다시 시도해 주세요.
+            </p>
+          </>
+        ),
+        confirmLabel: '알겠습니다',
+        cancelLabel: '닫기',
+      });
+      return;
+    }
+
     const mode = await dialog.choose('가져온 데이터를 어떻게 할까요?', [
       { id: 'merge', label: '기존 데이터에 더하기', hint: '같은 항목은 지금 것을 남깁니다.' },
-      { id: 'replace', label: '전체 교체', hint: '지금 항목을 모두 지우고 파일 내용으로 바꿉니다.', danger: true },
+      { id: 'replace', label: '전체 교체', hint: '파일에 없는 일정·잔고·대출·고정 메모를 지웁니다.', danger: true },
     ], `파일에 ${countBackup(incoming).toLocaleString('ko-KR')}건이 들어 있습니다.`);
     if (!mode) return;
 
-    try {
-      if (mode === 'replace') {
-        const confirmed = await dialog.confirm({
-          title: '지금 데이터를 모두 지울까요?',
-          body: '되돌릴 수 없습니다. 먼저 백업을 받아 두는 편이 안전합니다.',
-          confirmLabel: '지우고 교체',
-          danger: true,
-        });
-        if (!confirmed) return;
-        await deleteAllEntries(db, uid);
-        await writeMany(db, uid, incoming);
-        if (incoming.recovery) {
-          // 파일이 규칙을 들고 있으면 그대로 되돌린다. activeEntryId 가 가리키는 회차도
-          // 방금 함께 복원됐으므로 참조가 맞아떨어진다.
-          recovery.saveRule(incoming.recovery);
-        } else {
-          // 잡혀 있던 회복 항목도 함께 지워졌다. 참조를 끊어야 다음 회차가 다시 생긴다.
-          recovery.clearActive();
-        }
-      } else {
-        const current = await fetchAll(db, uid);
-        const merged = mergeBackup({ ...current, recovery: recovery.rule }, incoming);
-        await writeMany(db, uid, {
-          entries: merged.entries.filter((e) => !current.entries.some((c) => c.id === e.id)),
-          accounts: merged.accounts.filter((a) => !current.accounts.some((c) => c.id === a.id)),
-          debts: merged.debts.filter((d) => !current.debts.some((c) => c.id === d.id)),
-          pins: merged.pins.filter((p) => !current.pins.some((c) => c.id === p.id)),
-        });
+    /** 쓰기·지우기 결과를 사람이 읽고 다음 행동을 알 수 있는 창으로 옮긴다. */
+    const reportFailure = async (title: string, result: WriteManyResult, note: ReactNode) => {
+      await dialog.confirm({
+        title,
+        body: (
+          <>
+            <ul className="dlg-skips">
+              {result.failed.slice(0, 6).map((f) => (
+                <li key={`${f.collection}/${f.id}`}><code>{f.collection}/{f.id}</code> — {f.reason}</li>
+              ))}
+              {result.failed.length > 6 && <li>그 외 {(result.failed.length - 6).toLocaleString('ko-KR')}건</li>}
+            </ul>
+            {note}
+          </>
+        ),
+        confirmLabel: '알겠습니다',
+        cancelLabel: '닫기',
+      });
+    };
+
+    // 저장 계층을 한 곳에 모아 둔다. 순서와 결과 판정은 restore.ts 가 맡는다 —
+    // 그래야 실패를 주입한 테스트가 같은 순서를 그대로 돌려 볼 수 있다.
+    const io: RestoreIO = {
+      fetchAll: () => fetchAll(db, uid),
+      writeMany: (payload) => writeMany(db, uid, payload),
+      deleteMany: (targets) => deleteMany(db, uid, [...targets]),
+    };
+
+    const report = async (outcome: RestoreOutcome) => {
+      if (outcome.kind === 'invalid') return; // 위에서 이미 걸러진다
+      if (outcome.kind === 'write-failed') {
+        await reportFailure(
+          `${outcome.written.written.toLocaleString('ko-KR')}건을 저장했고 `
+          + `${outcome.written.failed.length.toLocaleString('ko-KR')}건이 실패했습니다`,
+          outcome.written,
+          <p className="dlg-note">
+            <b>아무것도 지우지 않았습니다.</b> 지금 데이터는 그대로 있습니다.
+            원인을 고친 뒤 같은 파일로 다시 가져오면 이어서 끝납니다.
+          </p>,
+        );
+        return;
       }
-      dialog.toast('가져왔습니다.');
+      if (outcome.kind === 'remove-failed') {
+        await reportFailure(
+          `복원은 끝났고, 지우지 못한 것이 ${outcome.removed.failed.length.toLocaleString('ko-KR')}건 남았습니다`,
+          outcome.removed,
+          <p className="dlg-note">
+            파일의 내용은 모두 들어갔습니다. 남은 것은 파일에 없던 예전 문서입니다 —
+            다시 가져오면 지우기만 한 번 더 시도합니다.
+          </p>,
+        );
+        return;
+      }
+      dialog.toast(
+        `${outcome.written.written.toLocaleString('ko-KR')}건을 ${mode === 'merge' ? '더했습니다' : '복원했습니다'}.`
+        + (outcome.removed.written > 0
+          ? ` 파일에 없던 ${outcome.removed.written.toLocaleString('ko-KR')}건은 지웠습니다.`
+          : ''),
+      );
+    };
+
+    try {
+      if (mode === 'merge') {
+        await report(await safeMerge(incoming, io, recovery.rule));
+        return;
+      }
+
+      const confirmed = await dialog.confirm({
+        title: '파일에 없는 데이터를 지울까요?',
+        body: (
+          <>
+            <p>
+              먼저 파일의 {countDocs(incoming).toLocaleString('ko-KR')}건을 모두 저장하고,
+              <b> 저장이 전부 끝난 뒤에만 </b>
+              파일에 없는 일정·잔고·대출·고정 메모를 지웁니다.
+            </p>
+            <p className="dlg-note">
+              중간에 끊기면 지우는 단계까지 가지 않습니다 — 지금 데이터가 사라지는 구간은 없습니다.
+              그래도 먼저 <b>JSON으로 백업 내려받기</b>를 해 두는 편이 안전합니다.
+            </p>
+          </>
+        ),
+        confirmLabel: '저장하고 교체',
+        danger: true,
+      });
+      if (!confirmed) return;
+
+      const outcome = await safeReplace(incoming, io);
+      if (outcome.kind === 'ok' || outcome.kind === 'remove-failed') {
+        // 파일의 규칙을 되돌린다. 규칙이 없던 파일이면 매달린 참조만 끊는다.
+        if (incoming.recovery) recovery.saveRule(incoming.recovery);
+        else recovery.clearActive();
+      }
+      await report(outcome);
     } catch (err) {
-      dialog.toast(`가져오지 못했습니다. ${describeFirestoreError(err)}`, 'bad');
+      dialog.toast(
+        `가져오지 못했습니다. ${describeFirestoreError(err)} 지금 데이터는 지우지 않았습니다.`,
+        'bad',
+      );
     }
   }, [db, uid, isAnon, promptLogin, dialog, recovery]);
 
@@ -622,6 +737,7 @@ function Workspace({ uid, user, onSignOut }: WorkspaceProps) {
           <TodayPanel
             todayISO={today}
             entries={materialized}
+            tideEntries={store.tideEntries}
             accounts={store.accounts}
             hasBalance={hasBalance}
             collapsed={prefs.todayCollapsed}
@@ -640,7 +756,7 @@ function Workspace({ uid, user, onSignOut }: WorkspaceProps) {
         {lens === 'money' && (
           <TideBar
             accounts={store.accounts}
-            entries={materialized}
+            entries={store.tideEntries}
             hasBalance={hasBalance}
             onSaveAccount={saveBalance}
             onEntryClick={openEdit}
@@ -675,7 +791,8 @@ function Workspace({ uid, user, onSignOut }: WorkspaceProps) {
             cursor={cursor}
             onCursorChange={setCursor}
             entries={visible}
-            tideEntries={materialized}
+            tideEntries={store.tideEntries}
+            tideMonths={store.tideMonths}
             accounts={store.accounts}
             hasBalance={hasBalance}
             lens={lens}
@@ -712,7 +829,7 @@ function Workspace({ uid, user, onSignOut }: WorkspaceProps) {
           dateISO={daySheet}
           todayISO={today}
           entries={daySheetEntries}
-          moneyEntries={materialized}
+          moneyEntries={store.entries}
           onClose={() => setDaySheet(null)}
           onEntryClick={(e) => { setDaySheet(null); openEdit(e); }}
           onAdd={() => { const iso = daySheet; setDaySheet(null); openCreate({ startDate: iso }); }}

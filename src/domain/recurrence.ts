@@ -21,6 +21,17 @@ export function isOccurrenceId(id: string): boolean {
 }
 
 /** 가상 발생분의 id 에서 원본 항목 id 를 되찾는다. 편집·삭제는 항상 원본을 향한다. */
+/**
+ * 화면용으로 펼친 가상 발생분인가.
+ *
+ * id 모양(`원본id@날짜`)이 아니라 `virtual` 표식으로 판정한다. id 는 백업 파일에서
+ * 들어올 수 있어 사용자가 '@' 가 든 id 를 만들 수 있지만, `virtual` 은 저장 경로에
+ * 아예 없어서 `expandEntry()` 말고는 켤 방법이 없다.
+ */
+export function isVirtualEntry(entry: Pick<Entry, 'virtual'>): boolean {
+  return entry.virtual === true;
+}
+
 export function baseIdOf(id: string): string {
   const i = id.indexOf(OCCURRENCE_SEP);
   return i === -1 ? id : id.slice(0, i);
@@ -72,6 +83,8 @@ export function expandEntry(entry: Entry, from: DateISO, to: DateISO): Entry[] {
       startDate: occStart,
       endDate: durationDays > 0 ? occEnd : null,
       ymSpan: ymRange(occStart, occEnd),
+      // 화면용 사본이라는 표식. 금액 계산은 이 값을 보고 거절한다.
+      virtual: true,
     });
   }
   return out;

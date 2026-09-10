@@ -1,10 +1,10 @@
 import { useMemo, useRef } from 'react';
 import { colorHex, MONEY_TYPE_BY_ID } from '../domain/constants';
-import { isWeekend, monthGrid, normalizeDate, toISO, weekdayLabels } from '../domain/date';
+import { isWeekend, monthGrid, normalizeDate, toISO, weekdayLabels, ymOf } from '../domain/date';
 import { displayTitle, effectiveEndDate, isDone } from '../domain/entry';
 import { compactAmount } from '../domain/money';
 import { limitOn } from '../domain/tide';
-import type { Account, Entry, LensId, WeekStart } from '../domain/types';
+import type { Account, Entry, LensId, WeekStart, YearMonth } from '../domain/types';
 import { Icon } from './Icon';
 
 interface Props {
@@ -12,10 +12,18 @@ interface Props {
   onCursorChange: (next: Date) => void;
   entries: readonly Entry[];
   /**
-   * 한도 계산용. `entries` 는 필터가 걸린 목록이라 쓸 수 없다 —
-   * 필터로 항목을 가렸다고 한도가 늘어나면 안 된다.
+   * 한도 계산용 **원본**. `entries` 는 필터가 걸린 데다 반복이 펼쳐진 목록이라 쓸 수 없다 —
+   * 필터로 항목을 가렸다고 한도가 늘면 안 되고, 펼친 발생분을 넣으면 tide 가 한 번 더
+   * 전개해 같은 입출금을 여러 번 센다.
    */
   tideEntries: readonly Entry[];
+  /**
+   * `tideEntries` 가 실제로 덮는 달.
+   *
+   * 한도는 (오늘, d] 를 더한 값이라 그 사이의 모든 달이 있어야 한다. 자료가 없는 달의
+   * 셀에는 숫자를 적지 않는다 — 빠진 예정을 0으로 세면 그럴듯하게 틀린 값이 나온다.
+   */
+  tideMonths: readonly YearMonth[];
   accounts: readonly Account[];
   hasBalance: boolean;
   lens: LensId;
@@ -85,7 +93,7 @@ function barMetrics(laneCount: number) {
 }
 
 export function MonthCalendar({
-  cursor, onCursorChange, entries, tideEntries, accounts, hasBalance, lens, weekStart, todayISO,
+  cursor, onCursorChange, entries, tideEntries, tideMonths, accounts, hasBalance, lens, weekStart, todayISO,
   onEntryClick, onDayOpen, onDayCreate,
 }: Props) {
   const grid = useMemo(() => monthGrid(cursor, weekStart), [cursor, weekStart]);
@@ -104,14 +112,17 @@ export function MonthCalendar({
   const showLimits = lens === 'money' && hasBalance;
   const limits = useMemo(() => {
     if (!showLimits) return null;
+    // 계산 창은 연속된 달의 묶음이라, 양 끝이 들어 있으면 사이도 들어 있다.
+    const covered = new Set(tideMonths);
     const map = new Map<string, number>();
     for (const d of grid) {
       const iso = toISO(d);
       if (iso < todayISO) continue;
+      if (!covered.has(ymOf(iso))) continue;
       map.set(iso, limitOn(accounts, tideEntries, iso, todayISO));
     }
     return map;
-  }, [showLimits, grid, accounts, tideEntries, todayISO]);
+  }, [showLimits, grid, accounts, tideEntries, tideMonths, todayISO]);
 
   const touch = useRef({ x: 0, y: 0 });
   const onTouchStart = (e: React.TouchEvent) => {

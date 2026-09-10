@@ -56,7 +56,8 @@ export default defineConfig({
     environment: 'jsdom',
     setupFiles: ['./src/test/setup.ts'],
     include: ['src/**/*.test.{ts,tsx}'],
-    exclude: ['src/test/rules.test.ts', 'node_modules/**'],
+    // 에뮬레이터가 필요한 것들은 npm run test:rules 가 따로 돌린다.
+    exclude: ['src/test/*.emulator.test.ts', 'src/test/rules.test.ts', 'node_modules/**'],
     css: false,
   },
 });
