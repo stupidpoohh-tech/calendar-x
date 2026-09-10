@@ -28,10 +28,73 @@
  * money.type 의 sign(+1 = 입금, -1 = 출금, 0 = 흐름에 반영 안 함)이 tide-over의
  * income/expense 부호를 겸한다. save · free 는 sign 0 이라 이 계산에서 빠진다.
  */
-import { MONEY_TYPE_BY_ID } from './constants';
-import { addDaysISO, daysBetween, normalizeDate, parseDate, toISO } from './date';
+import { DEFAULT_CURRENCY, MONEY_TYPE_BY_ID } from './constants';
+import { addDaysISO, daysBetween, localDateOf, normalizeDate, parseDate, toISO } from './date';
 import { effectiveEndDate } from './entry';
+import { isVirtualEntry } from './recurrence';
 import type { Account, DateISO, Entry } from './types';
+
+/**
+ * 계산에 화면용 목록이 들어왔다.
+ *
+ * 배선 실수지 사용자 데이터 문제가 아니다 — `virtual` 은 저장 경로에 없어서
+ * `expandEntry()` 말고는 켤 수 없다. 조용히 지나가면 같은 입출금을 여러 번 세어
+ * 금액이 몇 배로 부풀고, 그 숫자가 그럴듯해서 아무도 눈치채지 못한다.
+ */
+export class TideInputError extends Error {
+  constructor(entryId: string) {
+    super(
+      `금액 계산에 화면용 발생분이 들어왔습니다 (${entryId}). `
+      + 'materialize() 결과가 아니라 원본 항목을 넘겨야 합니다 — '
+      + '발생분을 넣으면 반복이 한 번 더 전개돼 같은 입출금을 여러 번 셉니다.',
+    );
+    this.name = 'TideInputError';
+  }
+}
+
+/**
+ * 계산 입력 검사.
+ *
+ * tide 로 들어오는 모든 목록이 여기를 지난다. 반복 항목은 `occurrences()` 가 직접
+ * 전개하므로, 이미 전개된 사본을 받으면 안 된다.
+ */
+function assertOriginals(entries: readonly Entry[]): void {
+  for (const e of entries) {
+    if (isVirtualEntry(e)) throw new TideInputError(e.id);
+  }
+}
+
+/**
+ * 이 계산이 다룰 수 있는 범위인가.
+ *
+ * ── 지원 범위 ──────────────────────────────────────────────
+ *   계좌는 여럿이어도 된다. 한도는 그 합에서 잰다.
+ *   통화는 **한 번에 하나**다. 환율 변환 기능이 없기 때문이다.
+ *
+ * 금액은 전부 최소 단위 정수(`amountMinor`)다. KRW 는 원, USD 는 센트라 단위가 다르다.
+ * 섞인 채로 더하면 1,000원과 10.00달러가 같은 1,000 이 된다 — 틀린 줄도 모르게 틀린
+ * 숫자가 나온다. 그래서 더하지 않고, 계산할 수 없다고 말한다.
+ */
+export type CurrencyScope =
+  | { ok: true; currency: string }
+  | { ok: false; currencies: string[] };
+
+export function currencyScopeOf(
+  accounts: readonly Account[], entries: readonly Entry[],
+): CurrencyScope {
+  const seen = new Set<string>();
+  for (const a of accounts) {
+    if (a.currency) seen.add(a.currency);
+  }
+  for (const e of entries) {
+    // 흐름에 반영되지 않는 항목(세이브·가용)은 한도를 건드리지 않으니 따지지 않는다.
+    if (!participates(e)) continue;
+    if (e.money?.currency) seen.add(e.money.currency);
+  }
+  const list = [...seen].sort();
+  if (list.length <= 1) return { ok: true, currency: list[0] ?? DEFAULT_CURRENCY };
+  return { ok: false, currencies: list };
+}
 
 /**
  * 예정 한 건의 하루 발생분. amount 는 그 날 몫(양수).
@@ -73,6 +136,8 @@ function isSpan(entry: Entry): boolean {
 export function occurrences(
   entries: readonly Entry[], after: DateISO, through: DateISO,
 ): Occurrence[] {
+  assertOriginals(entries);
+
   const afterN = normalizeDate(after);
   const throughN = normalizeDate(through);
   if (!afterN || !throughN || afterN >= throughN) return [];
@@ -244,6 +309,8 @@ const SEARCH_DAYS = 400;
 const FALLBACK_DAYS = 30;
 
 export function horizonOf(entries: readonly Entry[], today: DateISO): Horizon {
+  // 거르기 전에 본다. 걸러낸 뒤에 검사하면 입금이 하나도 없는 화면용 목록이 통과한다.
+  assertOriginals(entries);
   const incomes = entries.filter((e) => signOf(e) > 0 && !isSpan(e));
   const upcoming = occurrences(incomes, today, addDaysISO(today, SEARCH_DAYS));
   const next = upcoming[0]?.date;
@@ -264,6 +331,7 @@ export function limitOn(
   accounts: readonly Account[], entries: readonly Entry[],
   date: DateISO, today: DateISO,
 ): number {
+  assertOriginals(entries);
   const balance = accounts.reduce((s, a) => s + a.balanceMinor, 0);
   let total = balance;
   for (const entry of entries) {
@@ -297,7 +365,35 @@ export function headlineLimit(
  * checkedAt 이 없으면(예전 asOf 만 있는 데이터) asOf 를 자정으로 본다.
  */
 export interface Settlement {
+  /**
+   * 정산 구간의 시작 — 잔고를 적은 **날짜**.
+   *
+   * 시각이 아니라 날짜다. 예정 항목은 `startDate` 만 갖고 시각이 없으므로, 정산은
+   * 애초에 날짜 단위로만 정확할 수 있다. `checkedAt`(순간)은 여러 계좌 중 어느 기록이
+   * 가장 최근인지 고르는 데만 쓰고, 구간의 경계로는 쓰지 않는다.
+   */
   since: DateISO;
+  /**
+   * 확정 차액을 낼 수 있는가. false 면 금액으로 보여 주면 안 된다.
+   *
+   * 세 갈래로 false 가 된다 — `reason` 이 어느 쪽인지 알려 준다.
+   */
+  complete: boolean;
+  /**
+   * complete 가 false 인 이유.
+   *
+   *   coverage  잔고 기준일이 자료 구간보다 앞선다. 계산 구독은 오늘 기준 고정 구간
+   *             (뒤로 1달)만 받으므로, 그 사이의 **비반복** 입출금이 목록에 없다.
+   *             (반복 항목은 전량 구독하므로 빠지지 않는다.)
+   *   accounts  계좌가 여럿인데 기준일이 서로 다르다. 정산은 총액 하나를 그 구간의
+   *             예정과 비교하는 일이라, 계좌마다 구간이 다르면 하나로 잴 수 없다.
+   *   currency  통화가 섞여 있다. 최소 단위가 달라 애초에 더할 수 없다.
+   */
+  reason: null | 'coverage' | 'accounts' | 'currency';
+  /** 자료가 있는 가장 이른 날. reason 이 coverage 일 때 어디부터 비는지 알려 준다. */
+  coveredFrom: DateISO | null;
+  /** reason 이 accounts 일 때 계좌별 기준일. currency 일 때 섞인 통화 목록. */
+  detail: string[];
   passed: Occurrence[];
   passedIn: number;
   passedOut: number;
@@ -310,22 +406,60 @@ export interface Settlement {
 export function settle(
   accounts: readonly Account[], entries: readonly Entry[],
   newAmountMinor: number, todayISO: DateISO,
+  /** `entries` 가 덮는 가장 이른 날. 주지 않으면 자료가 충분하다고 본다. */
+  coveredFrom?: DateISO | null,
 ): Settlement {
-  // 가장 최근에 확인된 잔고 시점을 기준으로 삼는다.
+  // 정산 구간이 비면 occurrences 를 거치지 않고 끝난다. 여기서도 직접 본다.
+  assertOriginals(entries);
+  /*
+    가장 최근에 확인된 잔고 기록을 고른다.
+
+    고르는 순서는 `checkedAt`(순간)으로 정하고 — 하루에 두 번 갈아엎어도 순서가 잡힌다 —
+    구간의 경계는 그 기록의 **날짜**(`asOf`)로 잡는다. 예전에는 경계까지 checkedAt 에서
+    뽑았는데, `toISOString().slice(0, 10)` 은 UTC 날짜라 한국 시간 오전 9시 이전에 적은
+    잔고가 전날로 읽혔다. 그러면 (전날, 오늘] 이 되어 오늘 예정분이 이미 지나간 것으로
+    잡힌다.
+  */
   let since = todayISO;
-  let sinceTime = 0;
+  let sinceTime = -Infinity;
   for (const a of accounts) {
     const t = a.checkedAt ? Date.parse(a.checkedAt) : Date.parse(`${a.asOf}T00:00:00`);
-    if (Number.isFinite(t) && t >= sinceTime) {
-      sinceTime = t;
-      since = normalizeDate(a.checkedAt?.slice(0, 10) ?? a.asOf) || todayISO;
-    }
+    if (!Number.isFinite(t) || t < sinceTime) continue;
+    sinceTime = t;
+    // asOf 는 이미 벽시계 날짜다. 없거나 깨졌으면 순간에서 기기 날짜를 뽑는다.
+    since = normalizeDate(a.asOf) || localDateOf(a.checkedAt ?? '') || todayISO;
   }
   const currentBalance = accounts.reduce((s, a) => s + a.balanceMinor, 0);
   const passed = occurrences(entries, since, todayISO);
   const expected = currentBalance + netOf(passed);
+  const from = coveredFrom ? normalizeDate(coveredFrom) : null;
+
+  /*
+    확정 차액을 낼 수 없는 세 갈래. 순서대로 본다 — 통화가 섞였으면 나머지는 따질 것도 없다.
+  */
+  const scope = currencyScopeOf(accounts, entries);
+  const asOfs = [...new Set(accounts.map((a) => normalizeDate(a.asOf) || since))].sort();
+
+  let reason: Settlement['reason'] = null;
+  let detail: string[] = [];
+  if (!scope.ok) {
+    reason = 'currency';
+    detail = scope.currencies;
+  } else if (asOfs.length > 1) {
+    // 계좌마다 마지막으로 적은 날이 다르다. 총액 하나로 한 구간을 잴 수 없다.
+    reason = 'accounts';
+    detail = asOfs;
+  } else if (from && since < from) {
+    reason = 'coverage';
+    detail = [];
+  }
+
   return {
     since,
+    complete: reason === null,
+    reason,
+    coveredFrom: from || null,
+    detail,
     passed,
     passedIn: totalIn(passed),
     passedOut: totalOut(passed),
@@ -342,13 +476,17 @@ export function settle(
 export function upcomingInHorizon(
   entries: readonly Entry[], today: DateISO, horizon?: Horizon,
 ): Occurrence[] {
+  assertOriginals(entries);
   const h = horizon ?? horizonOf(entries, today);
   const out: Occurrence[] = [];
   for (const entry of entries) {
     if (!participates(entry)) continue;
     if (isSpan(entry) && !entry.recurrence) {
+      const start = normalizeDate(entry.startDate);
       const end = normalizeDate(effectiveEndDate(entry));
-      if (end) out.push(...occurrences([entry], today, end));
+      // `limitOn` 과 같은 조건이라야 목록의 합과 머리 숫자가 맞는다.
+      // 끝점 뒤에 시작하는 기간 예산은 한도를 건드리지 않으므로 목록에도 넣지 않는다.
+      if (start && end && start <= h.end) out.push(...occurrences([entry], today, end));
     } else {
       out.push(...occurrences([entry], today, h.end));
     }

@@ -58,6 +58,19 @@ export function todayISO(tz?: string): DateISO {
   }
 }
 
+/**
+ * ISO datetime(순간)에서 **그 기기의 벽시계 날짜**를 뽑는다.
+ *
+ * `'2026-09-10T08:00:00+09:00'.toISOString().slice(0, 10)` 은 `'2026-09-09'` 다 —
+ * UTC 로 환산한 날짜라 한국 시간 오전 9시 이전이면 하루가 밀린다. 이 앱의 날짜는 전부
+ * 벽시계 값이므로, 순간을 날짜로 바꿀 때는 반드시 이 함수를 거친다.
+ */
+export function localDateOf(instantISO: string): DateISO | '' {
+  const t = Date.parse(instantISO);
+  if (!Number.isFinite(t)) return '';
+  return toISO(new Date(t));
+}
+
 export function addDays(d: Date, n: number): Date {
   const x = new Date(d);
   x.setDate(x.getDate() + n);

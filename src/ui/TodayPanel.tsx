@@ -11,18 +11,29 @@
  */
 import { useMemo, useState } from 'react';
 import { MONEY_TYPE_BY_ID } from '../domain/constants';
-import { headlineLimit, horizonOf } from '../domain/tide';
+import { currencyScopeOf, headlineLimit, horizonOf } from '../domain/tide';
 import type { Account } from '../domain/types';
 import { addDaysISO, fmtDayShort } from '../domain/date';
 import { displayTitle, effectiveEndDate, isDone, newEntry } from '../domain/entry';
 import { formatAmount } from '../domain/money';
 import type { Entry, TaskStatus } from '../domain/types';
 import { BalanceInput, BalanceNote, useBalanceEditor } from './balanceEditor';
+import { CALC_READY, calcCaveat, calcNotice, mixedCurrencyNotice, type CalcState } from './calcState';
 import { Icon } from './Icon';
 
 interface Props {
   todayISO: string;
+  /** 화면에 그릴 목록. 반복이 펼쳐져 있고 필터 이전이다. */
   entries: readonly Entry[];
+  /**
+   * 금액 계산용 원본. 반복을 펼치지 않은 목록이라야 한다.
+   * 펼친 목록을 넣으면 tide 가 한 번 더 전개해 같은 입출금을 여러 번 센다.
+   */
+  tideEntries: readonly Entry[];
+  /** 계산 목록이 덮는 가장 이른 날. 정산이 자료 부족을 판정하는 데 쓴다. */
+  tideFrom?: string | null;
+  /** 계산용 자료를 받았는가. 'ready' 가 아니면 금액을 지어내지 않는다. */
+  calcState?: CalcState;
   accounts: readonly Account[];
   /** 잔고를 한 번도 입력하지 않았으면 tide 값을 0으로 단정하지 않는다. */
   hasBalance: boolean;
@@ -42,12 +53,13 @@ function occursOnDay(e: Entry, iso: string): boolean {
 }
 
 export function TodayPanel({
-  todayISO, entries, accounts, hasBalance,
+  todayISO, entries, tideEntries, tideFrom, calcState = CALC_READY, accounts, hasBalance,
   collapsed, onToggleCollapsed, moneyCollapsed, onToggleMoneyCollapsed,
   onEntryClick, onStatusChange, onPromote, onQuickIdea, onSaveAccount,
 }: Props) {
   const [idea, setIdea] = useState('');
-  const editor = useBalanceEditor(accounts, entries, onSaveAccount);
+  // 정산은 계산이다. 원본을 넘긴다.
+  const editor = useBalanceEditor(accounts, tideEntries, onSaveAccount, tideFrom, todayISO);
 
   const weekEndISO = addDaysISO(todayISO, 6);
 
@@ -65,11 +77,18 @@ export function TodayPanel({
   }, [entries, todayISO, weekEndISO]);
 
   // '오늘 마감 예상' 대신 tide-over 규칙 — 다음 입금까지 남는 한도.
-  const horizon = useMemo(() => horizonOf(entries, todayISO), [entries, todayISO]);
+  const horizon = useMemo(() => horizonOf(tideEntries, todayISO), [tideEntries, todayISO]);
+  // 통화가 섞이면 최소 단위가 달라 애초에 더할 수 없다.
+  const scope = useMemo(() => currencyScopeOf(accounts, tideEntries), [accounts, tideEntries]);
+
   const tideLimit = useMemo(
-    () => hasBalance ? headlineLimit(accounts, entries, todayISO) : null,
-    [hasBalance, accounts, entries, todayISO],
+    () => hasBalance && calcState.kind === 'ready' && scope.ok
+      ? headlineLimit(accounts, tideEntries, todayISO)
+      : null,
+    [hasBalance, calcState.kind, scope.ok, accounts, tideEntries, todayISO],
   );
+
+  const caveat = calcCaveat(calcState);
 
   const submitIdea = () => {
     const text = idea.trim();
@@ -192,10 +211,17 @@ export function TodayPanel({
                       </span>
                       <strong className="num">₩ {formatAmount(tideLimit)}</strong>
                     </button>
+                  ) : calcState.kind !== 'ready' ? (
+                    <p className="tp-empty">{calcNotice(calcState)}</p>
+                  ) : !scope.ok ? (
+                    <p className="tp-empty">{mixedCurrencyNotice(scope.currencies)}</p>
                   ) : (
                     <p className="tp-empty">잔고를 적으면 다음 입금까지 남는 한도가 여기 뜹니다.</p>
                   )}
-                  {!editor.editing && <BalanceNote editor={editor} />}
+                  {/* 자료가 없는 동안에는 잔고 편집도 열지 않는다 — 정산이 어긋난다.
+                      통화가 섞인 상태는 반대다. 고칠 길을 막으면 빠져나올 수가 없다. */}
+                  {!editor.editing && calcState.kind === 'ready' && <BalanceNote editor={editor} />}
+                  {caveat && <p className="tp-caveat">{caveat}</p>}
                   <ul className="tp-ul">
                     {money.map((e) => {
                       const type = e.money ? MONEY_TYPE_BY_ID[e.money.type] : null;

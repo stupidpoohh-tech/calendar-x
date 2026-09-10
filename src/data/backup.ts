@@ -1,5 +1,5 @@
 /**
- * 백업과 복원. (F-03)
+ * 백업 파일의 형식과 내보내기. (F-03)
  *
  * 이전 exportJSON() 은 localStorage 를 읽었다. 로그인 사용자의 데이터는 Firestore 에
  * 있으므로 "JSON 백업 내려받기"가 항목 0개짜리 파일을 만들었다. 가져오기도 localStorage 에
@@ -7,8 +7,6 @@
  */
 import { todayISO } from '../domain/date';
 import type { Account, Debt, Entry, Pin, RecoveryRule } from '../domain/types';
-import { accountFromDoc, debtFromDoc, entryFromDoc, pinFromDoc, recoveryRuleFromDoc } from './converters';
-import { convertLegacyItems } from './migrate';
 
 export const BACKUP_VERSION = 3;
 
@@ -65,59 +63,17 @@ export function downloadJSON(payload: unknown, filename: string): void {
   setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
 
-export class BackupParseError extends Error {}
+/*
+  파일을 읽는 일은 `backupFile.ts` 가 맡는다.
 
-/**
- * 백업 파일을 읽는다. 이관 전 구조(version 1, items 배열)도 그대로 받는다.
- * 예전 백업 파일이 손에 남아 있을 수 있으므로 버리지 않는다.
- */
-export function parseBackup(text: string): BackupData {
-  let obj: unknown;
-  try {
-    obj = JSON.parse(text);
-  } catch {
-    throw new BackupParseError('JSON 형식이 아닙니다. 백업 파일이 맞는지 확인해 주세요.');
-  }
-  if (!obj || typeof obj !== 'object') {
-    throw new BackupParseError('백업 파일의 내용을 읽을 수 없습니다.');
-  }
+  예전에는 여기 `parseBackup()` 이 있었고, 그것이 converters 로 값을 먼저 보정한 뒤
+  검증기가 돌았다. 보정이 앞서면 잘못된 날짜는 오늘로, 소수 금액은 잘려서, id 없는
+  항목은 사라진 뒤라 검증기에 원래 오류가 닿지 않는다. 그 함수를 남겨 두면 같은 순서를
+  다시 쓰게 되므로 걷어냈다.
 
-  const raw = obj as Record<string, unknown>;
-
-  // 이관 전 형식: { items: [...] }
-  if (Array.isArray(raw.items)) {
-    const converted = convertLegacyItems(raw.items as Record<string, unknown>[]);
-    return {
-      entries: converted.entries,
-      accounts: converted.accounts,
-      debts: converted.debts,
-      pins: converted.pins,
-      // 이관 전 구조에는 회복이 없었다.
-      recovery: null,
-    };
-  }
-
-  if (!Array.isArray(raw.entries)) {
-    throw new BackupParseError('항목이 들어 있지 않습니다. 다른 앱의 파일일 수 있습니다.');
-  }
-
-  const list = <T>(v: unknown, make: (id: string, r: Record<string, unknown>) => T): T[] => {
-    if (!Array.isArray(v)) return [];
-    return v
-      .filter((x): x is Record<string, unknown> => !!x && typeof x === 'object')
-      .map((x) => make(typeof x.id === 'string' ? x.id : '', x))
-      .filter((x) => (x as { id?: string }).id);
-  };
-
-  return {
-    entries: list(raw.entries, entryFromDoc),
-    accounts: list(raw.accounts, accountFromDoc),
-    debts: list(raw.debts, debtFromDoc),
-    pins: list(raw.pins, pinFromDoc),
-    // version 2 이하 파일에는 없다. 없으면 지금 설정을 그대로 둔다.
-    recovery: raw.recovery ? recoveryRuleFromDoc(raw.recovery) : null,
-  };
-}
+  병합 규칙(`mergeBackup`)도 `restore.ts` 의 `planMerge` 로 옮겼다 — 병합은 계획과
+  쓰기가 한 자리에 있어야 "이미 있으면 건드리지 않는다" 를 끝까지 지킬 수 있다.
+*/
 
 /** 항목 수. 회복 규칙은 항목이 아니라 설정이라 세지 않는다. */
 export function countBackup(d: Omit<BackupData, 'recovery'>): number {

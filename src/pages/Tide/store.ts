@@ -38,6 +38,13 @@ export type Store = {
   dismissToast: () => void;
 };
 
+/** 복원 결과 한 줄. 저장까지 됐는지가 사용자에게 중요한 차이다. */
+function restoreMessage(stored: boolean): string {
+  return stored
+    ? '백업 링크에서 복원했습니다.'
+    : '복원했지만 이 기기에 저장하지 못했습니다. 창을 닫으면 사라집니다 — 백업 링크를 그대로 두세요.';
+}
+
 export function useStore(): Store {
   const [ready, setReady] = useState(false);
   const [state, setStateRaw] = useState<State | null>(null);
@@ -65,16 +72,24 @@ export function useStore(): Store {
 
   const dismissToast = useCallback(() => setToast(null), []);
 
-  const applyRestore = useCallback((next: State) => {
+  /**
+   * 복원한 상태를 화면과 저장소에 반영한다.
+   *
+   * 저장 성공 여부를 **돌려준다.** 예전에는 `saveState` 의 실패를 버리고 호출부가
+   * 무조건 "복원했습니다" 를 띄웠다 — 사생활 보호 모드나 용량 초과로 저장이 막히면
+   * 창을 닫는 순간 사라지는데, 사용자는 복원된 줄 알고 백업 링크를 버린다.
+   */
+  const applyRestore = useCallback((next: State): boolean => {
     setStateRaw(next);
     setLoadIssue(null);
     hasDataRef.current = true;
-    saveState(next);
+    const stored = saveState(next);
     // 복원했다는 건 이 사람에게 백업 링크가 있다는 증거이기도 하다.
     // 이력을 다시 남겨두면 다음에 또 지워졌을 때 안내를 띄울 수 있다.
     markBackupTaken();
     setBackupTakenAt(lastBackupAt());
     setHadBackup(true);
+    return stored;
   }, []);
 
   const takeBackup = useCallback(
@@ -88,8 +103,7 @@ export function useStore(): Store {
         // 덮어쓰기 전에 반드시 물어본다.
         setPendingRestore({ state: decoded.state, exportedAt: decoded.exportedAt });
       } else {
-        applyRestore(decoded.state);
-        showToast('백업 링크에서 복원했습니다.');
+        showToast(restoreMessage(applyRestore(decoded.state)));
       }
     },
     [applyRestore, showToast],
@@ -151,9 +165,9 @@ export function useStore(): Store {
 
   const confirmRestore = useCallback(() => {
     if (!pendingRestore) return;
-    applyRestore(pendingRestore.state);
+    const stored = applyRestore(pendingRestore.state);
     setPendingRestore(null);
-    showToast('백업 링크에서 복원했습니다.');
+    showToast(restoreMessage(stored));
   }, [applyRestore, pendingRestore, showToast]);
 
   const cancelRestore = useCallback(() => setPendingRestore(null), []);

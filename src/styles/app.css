@@ -539,6 +539,13 @@
 .bal-edit-l { font-size: 0.71875rem; color: var(--ink-3); flex-shrink: 0; }
 .bal-edit-row.lg .bal-in { font-size: 1.625rem; }
 .bal-edit-row.sm .bal-in { font-size: 1rem; }
+/* 계좌가 여럿일 때만 뜬다. 어느 계좌를 고치는지 밝히지 않으면 합계에 섞인다. */
+.bal-acc {
+  appearance: none; flex-shrink: 0; max-width: 40%;
+  font: inherit; font-size: 0.71875rem; color: var(--ink-2);
+  background: var(--bg-soft); border: 1px solid var(--line);
+  border-radius: var(--radius-sm); padding: 3px 6px;
+}
 
 .debt { background: var(--bg); border: 1px solid var(--line); border-radius: var(--radius); overflow: hidden; }
 .debt-h {
@@ -821,6 +828,11 @@
 .dlg-b p { margin: 0 0 6px; }
 .dlg-b p:last-child { margin-bottom: 0; }
 .dlg-note { font-size: 0.75rem; color: var(--ink-3); }
+/* 지금 당장 막고 있는 조건. 배경 설명(dlg-note)보다 앞세운다. */
+.dlg-warn {
+  font-size: 0.75rem; font-weight: 600; color: var(--bad);
+  background: var(--bg-soft); border-radius: var(--radius-sm); padding: 8px 10px;
+}
 .dlg-skips { margin: 6px 0; padding-left: 18px; font-size: 0.75rem; color: var(--warn); }
 .dlg-actions { display: flex; gap: 6px; justify-content: flex-end; }
 .dlg-choices { display: flex; flex-direction: column; gap: 6px; }
@@ -1157,6 +1169,41 @@
 .rdebt-f .mod-input.time { flex: 0 0 110px; }
 .rdebt-note { margin: 0; font-size: 0.71875rem; color: var(--ink-3); line-height: 1.5; }
 
+/* ---- 저장하지 못한 것 ---- */
+
+.fw {
+  border: 1px solid color-mix(in oklab, var(--bad) 38%, var(--line));
+  background: color-mix(in oklab, var(--bad) 7%, var(--bg-soft));
+  border-radius: var(--radius);
+  overflow: hidden;
+}
+.fw-head {
+  display: flex; align-items: center; gap: 8px;
+  padding: 9px 12px; font-size: 0.8125rem; color: var(--ink);
+}
+.fw-t { font-weight: 600; flex: 1; }
+.fw-a {
+  appearance: none; border: none; background: transparent; cursor: pointer;
+  font: inherit; font-size: 0.75rem; font-weight: 600; color: var(--bad);
+  padding: 3px 6px; border-radius: var(--radius-sm); flex-shrink: 0;
+}
+.fw-a:hover { background: color-mix(in oklab, var(--bad) 12%, transparent); }
+.fw-a.danger { color: var(--ink-3); }
+.fw-ul {
+  list-style: none; margin: 0; padding: 0 12px 4px;
+  display: flex; flex-direction: column; gap: 6px;
+  border-top: 1px solid color-mix(in oklab, var(--bad) 22%, var(--line));
+  padding-top: 9px;
+}
+.fw-i { display: flex; align-items: center; gap: 6px; }
+.fw-i-main { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 1px; }
+.fw-i-t {
+  font-size: 0.78125rem; color: var(--ink); font-weight: 600;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.fw-i-r { font-size: 0.6875rem; color: var(--ink-3); line-height: 1.4; }
+.fw-note { margin: 0; padding: 6px 12px 10px; font-size: 0.6875rem; color: var(--ink-3); line-height: 1.5; }
+
 /* ---- 회복 상세 ---- */
 
 .rec-mod { max-width: 460px; }
@@ -1224,3 +1271,24 @@
 .rec-add .mod-input { flex: 1 1 0; min-width: 0; }
 .rec-manage .set-row-s { line-height: 1.55; }
 .rec-state { padding: 2px 4px; line-height: 1.55; }
+
+/* 숫자는 내되 완전하지 않을 수 있을 때 덧붙이는 줄. 숫자를 지우지 않고 옆에 세운다. */
+.tide-caveat, .tp-caveat {
+  font-size: 0.6875rem; line-height: 1.5; color: var(--ink-4);
+  margin-top: 4px;
+}
+
+/* ---------- 렌더 오류 ---------- */
+.crash {
+  max-width: 30rem; margin: 12vh auto; padding: 0 20px;
+  display: flex; flex-direction: column; gap: 12px;
+}
+.crash-t { font-size: 1.125rem; font-weight: 700; color: var(--ink); }
+.crash-b { font-size: 0.8125rem; line-height: 1.6; color: var(--ink-3); }
+.crash-e {
+  font-size: 0.75rem; line-height: 1.5; color: var(--ink-2);
+  background: var(--bg-soft); border: 1px solid var(--line);
+  border-radius: var(--radius-sm); padding: 10px 12px;
+  white-space: pre-wrap; word-break: break-word;
+}
+.crash-a { display: flex; gap: 8px; }
