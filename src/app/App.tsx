@@ -44,6 +44,7 @@ import { useAuth } from './useAuth';
 import { usePrefs } from './usePrefs';
 import { useDemoStore } from './useDemoStore';
 import { useRecovery } from './useRecovery';
+import { useCommit } from './useCommit';
 import { useStore } from './useStore';
 import { useToday } from './useToday';
 
@@ -101,6 +102,8 @@ function Workspace({ uid, user, onSignOut }: WorkspaceProps) {
 
   // 자정을 넘기거나 백그라운드에서 돌아오면 다시 잰다. 이 값이 계산 창·한도·정산 기준을 정한다.
   const today = useToday();
+  /* 서버 쓰기의 실패를 알린다. 로컬 반영과 서버 확정은 다른 사건이다 — `useCommit` 참고. */
+  const commit = useCommit();
   const cursorISO = toISO(cursor);
   const isAnon = uid === null;
   // 훅은 조건부 호출이 안 된다. 둘 다 부르고 로그인 상태에 따라 결과를 고른다.
@@ -118,6 +121,7 @@ function Workspace({ uid, user, onSignOut }: WorkspaceProps) {
     uid,
     todayISO: today,
     onError: (message) => dialog.toast(message, 'bad'),
+    commit,
   });
 
   // 저장·편집 시도 시 로그인 유도 팝업. 사용자가 실제 앱을 만져 보다가
@@ -212,10 +216,8 @@ function Workspace({ uid, user, onSignOut }: WorkspaceProps) {
 
   const persist = useCallback((e: Entry) => {
     if (isAnon || !uid) { void promptLogin(); return; }
-    void saveEntry(db, uid, e).catch((err: unknown) => {
-      dialog.toast(`저장하지 못했습니다. ${describeFirestoreError(err)}`, 'bad');
-    });
-  }, [db, uid, isAnon, promptLogin, dialog]);
+    commit('항목', () => saveEntry(db, uid, e));
+  }, [db, uid, isAnon, promptLogin, commit]);
 
   const handleSave = useCallback((e: Entry) => {
     persist(e);
@@ -225,8 +227,8 @@ function Workspace({ uid, user, onSignOut }: WorkspaceProps) {
   /** 잔고 저장. 전체 렌즈(오늘 카드)와 가계부 렌즈(며칠 버티나 카드)가 같이 쓴다. */
   const saveBalance = useCallback((a: Account) => {
     if (isAnon || !uid) { void promptLogin(); return; }
-    void saveAccount(db, uid, a);
-  }, [db, uid, isAnon, promptLogin]);
+    commit('잔고', () => saveAccount(db, uid, a));
+  }, [db, uid, isAnon, promptLogin, commit]);
 
   const handleDelete = useCallback(async (e: Entry) => {
     if (isAnon || !uid) { void promptLogin(); return; }
@@ -307,9 +309,8 @@ function Workspace({ uid, user, onSignOut }: WorkspaceProps) {
       : to + (from < to ? 0 : 1);
     next.splice(Math.max(0, insertAt), 0, moved);
 
-    void saveTaskOrder(db, uid, next.map((e, i) => ({ id: baseIdOf(e.id), order: i })))
-      .catch((err: unknown) => dialog.toast(`순서를 저장하지 못했습니다. ${describeFirestoreError(err)}`, 'bad'));
-  }, [materialized, db, uid, isAnon, promptLogin, dialog]);
+    commit('순서', () => saveTaskOrder(db, uid, next.map((e, i) => ({ id: baseIdOf(e.id), order: i }))));
+  }, [materialized, db, uid, isAnon, promptLogin, commit]);
 
   // ---------- 백업 / 복원 / 이관 ----------
 
@@ -397,7 +398,24 @@ function Workspace({ uid, user, onSignOut }: WorkspaceProps) {
       const mode = await dialog.choose('가져온 데이터를 어떻게 할까요?', [
         { id: 'merge', label: '기존 데이터에 더하기', hint: '같은 항목은 지금 것을 남깁니다. 아무것도 지우지 않습니다.' },
         { id: 'replace', label: '전체 교체 (지금은 사용할 수 없습니다)', hint: '안전하게 되돌릴 방법이 없어 막아 두었습니다.' },
-      ], `파일에 ${countBackup(incoming).toLocaleString('ko-KR')}건이 들어 있습니다.`);
+      ], (
+        <>
+          <p>파일에 {countBackup(incoming).toLocaleString('ko-KR')}건이 들어 있습니다.</p>
+          {/*
+            평소 편집은 오프라인에서도 되지만 가져오기는 다르다. 이미 있는 문서를 덮지
+            않으려면 "읽고 나서 없을 때만 쓰기" 를 한 번에 해야 하고(트랜잭션),
+            트랜잭션은 서버가 있어야 돈다. 오프라인이면 조용히 매달리는 대신 미리 알린다.
+          */}
+          <p className="dlg-note">
+            가져오기는 <b>온라인일 때만</b> 됩니다. 이미 있는 항목을 덮지 않으려면 읽기와
+            쓰기를 한 번에 해야 하는데(트랜잭션), 그것은 서버가 있어야 돌아갑니다.
+            평소 편집은 오프라인에서도 그대로 됩니다.
+          </p>
+          {!navigator.onLine && (
+            <p className="dlg-warn">지금 오프라인으로 보입니다. 연결한 뒤에 다시 시도해 주세요.</p>
+          )}
+        </>
+      ));
       if (!mode) return;
 
       if (mode === 'replace') {
@@ -619,11 +637,11 @@ function Workspace({ uid, user, onSignOut }: WorkspaceProps) {
       onToggleCollapsed={() => set('pinCollapsed', { ...prefs.pinCollapsed, [lens]: !prefs.pinCollapsed[lens] })}
       onSave={(p) => {
         if (isAnon || !uid) { void promptLogin(); return; }
-        void savePin(db, uid, p);
+        commit('고정 메모', () => savePin(db, uid, p));
       }}
       onDelete={(p) => {
         if (isAnon || !uid) { void promptLogin(); return; }
-        void deletePin(db, uid, p.id);
+        commit('고정 메모 삭제', () => deletePin(db, uid, p.id));
       }}
     />
   );
@@ -812,12 +830,12 @@ function Workspace({ uid, user, onSignOut }: WorkspaceProps) {
               onToggleCollapsed={() => set('debtsCollapsed', !prefs.debtsCollapsed)}
               onSaveDebt={(d) => {
                 if (isAnon || !uid) { void promptLogin(); return; }
-                void saveDebt(db, uid, d);
+                commit('대출', () => saveDebt(db, uid, d));
               }}
               onDeleteDebt={async (d) => {
                 if (isAnon || !uid) { void promptLogin(); return; }
                 const ok = await dialog.confirm({ title: `'${d.name}'을(를) 삭제할까요?`, danger: true, confirmLabel: '삭제' });
-                if (ok) void deleteDebt(db, uid, d.id);
+                if (ok) commit('대출 삭제', () => deleteDebt(db, uid, d.id));
               }}
             />
             {pinnedSection}

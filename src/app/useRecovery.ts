@@ -21,6 +21,7 @@ import {
   type RecoveryTransition,
 } from '../domain/recovery';
 import type { Entry, RecoveryRule, TimeHM } from '../domain/types';
+import type { Commit } from './useCommit';
 
 export interface RecoveryApi {
   rule: RecoveryRule;
@@ -39,10 +40,19 @@ export interface RecoveryApi {
 interface Options {
   uid: string | null;
   todayISO: string;
+  /** 조회 실패를 알린다. */
   onError: (message: string) => void;
+  /**
+   * 쓰기 한 건을 보내고 서버가 거절하면 다시 보낼 기회를 준다.
+   *
+   * 회복은 항목과 규칙이 한 배치라 반쪽만 올라가는 일은 없지만, 배치가 통째로
+   * 거절당하면 로컬에만 남는다 — 다음 회차 계산이 그 로컬 값에서 시작해 조용히
+   * 어긋난다. 그래서 회복도 다른 쓰기와 같은 길을 쓴다.
+   */
+  commit: Commit;
 }
 
-export function useRecovery({ uid, todayISO, onError }: Options): RecoveryApi {
+export function useRecovery({ uid, todayISO, onError, commit }: Options): RecoveryApi {
   const [rule, setRule] = useState<RecoveryRule>(defaultRecoveryRule);
   const { db } = getFirebase();
 
@@ -66,14 +76,12 @@ export function useRecovery({ uid, todayISO, onError }: Options): RecoveryApi {
    */
   const push = useCallback((t: RecoveryTransition, removeEntryId?: string) => {
     if (!uid) return;
-    void commitRecovery(db, uid, {
+    commit('회복', () => commitRecovery(db, uid, {
       rule: t.rule,
       entry: t.entry,
       removeEntryId: removeEntryId ?? null,
-    }).catch((err: unknown) => {
-      errorRef.current(`회복을 저장하지 못했습니다. ${describeFirestoreError(err)}`);
-    });
-  }, [db, uid]);
+    }));
+  }, [db, uid, commit]);
 
   /**
    * 예정 채우기 + 실제 항목 생성.
@@ -89,9 +97,7 @@ export function useRecovery({ uid, todayISO, onError }: Options): RecoveryApi {
     const primed = primeRule(rule, todayISO);
     if (primed !== rule) {
       // 계산한 필드만 쓴다. 규칙 전체를 쓰면 같은 순간 설정 화면에서 적고 있던 값을 덮는다.
-      void patchRecoveryRule(db, uid, { nextDueAt: primed.nextDueAt }).catch((err: unknown) => {
-        errorRef.current(`회복 예정일을 저장하지 못했습니다. ${describeFirestoreError(err)}`);
-      });
+      commit('회복 예정일', () => patchRecoveryRule(db, uid, { nextDueAt: primed.nextDueAt }));
       return;
     }
 
@@ -100,23 +106,19 @@ export function useRecovery({ uid, todayISO, onError }: Options): RecoveryApi {
     if (generatedFor.current === rule.nextDueAt) return;
     generatedFor.current = rule.nextDueAt;
     push(t);
-  }, [db, uid, rule, todayISO, push]);
+  }, [db, uid, rule, todayISO, push, commit]);
 
   return useMemo<RecoveryApi>(() => ({
     rule,
 
     saveRule: (next) => {
       if (!uid) return;
-      void saveRecoveryRule(db, uid, next).catch((err: unknown) => {
-        errorRef.current(`회복 설정을 저장하지 못했습니다. ${describeFirestoreError(err)}`);
-      });
+      commit('회복 설정', () => saveRecoveryRule(db, uid, next));
     },
 
     saveEntryOnly: (entry) => {
       if (!uid) return;
-      void saveEntry(db, uid, entry).catch((err: unknown) => {
-        errorRef.current(`저장하지 못했습니다. ${describeFirestoreError(err)}`);
-      });
+      commit('회복 항목', () => saveEntry(db, uid, entry));
     },
 
     complete: (entry, onISO) => push(completeRecovery(rule, entry, onISO)),
@@ -135,7 +137,7 @@ export function useRecovery({ uid, todayISO, onError }: Options): RecoveryApi {
     clearActive: () => {
       if (!uid || !rule.activeEntryId) return;
       generatedFor.current = null;
-      void patchRecoveryRule(db, uid, { activeEntryId: null });
+      commit('회복 참조 정리', () => patchRecoveryRule(db, uid, { activeEntryId: null }));
     },
-  }), [db, uid, rule, push]);
+  }), [db, uid, rule, push, commit]);
 }

@@ -2,6 +2,7 @@ import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
 import { App } from './app/App';
 import { DialogHost } from './ui/Dialog';
+import { ErrorBoundary } from './ui/ErrorBoundary';
 import './styles/base.css';
 import './styles/app.css';
 
@@ -16,7 +17,10 @@ if (!container) throw new Error('#app 엘리먼트를 찾을 수 없습니다.')
 createRoot(container).render(
   <StrictMode>
     <DialogHost>
-      <App />
+      {/* 렌더가 무너져도 하얀 화면 대신 무엇이 났는지 보여 준다. */}
+      <ErrorBoundary>
+        <App />
+      </ErrorBoundary>
     </DialogHost>
   </StrictMode>,
 );

@@ -828,6 +828,11 @@
 .dlg-b p { margin: 0 0 6px; }
 .dlg-b p:last-child { margin-bottom: 0; }
 .dlg-note { font-size: 0.75rem; color: var(--ink-3); }
+/* 지금 당장 막고 있는 조건. 배경 설명(dlg-note)보다 앞세운다. */
+.dlg-warn {
+  font-size: 0.75rem; font-weight: 600; color: var(--bad);
+  background: var(--bg-soft); border-radius: var(--radius-sm); padding: 8px 10px;
+}
 .dlg-skips { margin: 6px 0; padding-left: 18px; font-size: 0.75rem; color: var(--warn); }
 .dlg-actions { display: flex; gap: 6px; justify-content: flex-end; }
 .dlg-choices { display: flex; flex-direction: column; gap: 6px; }
@@ -1231,3 +1236,18 @@
 .rec-add .mod-input { flex: 1 1 0; min-width: 0; }
 .rec-manage .set-row-s { line-height: 1.55; }
 .rec-state { padding: 2px 4px; line-height: 1.55; }
+
+/* ---------- 렌더 오류 ---------- */
+.crash {
+  max-width: 30rem; margin: 12vh auto; padding: 0 20px;
+  display: flex; flex-direction: column; gap: 12px;
+}
+.crash-t { font-size: 1.125rem; font-weight: 700; color: var(--ink); }
+.crash-b { font-size: 0.8125rem; line-height: 1.6; color: var(--ink-3); }
+.crash-e {
+  font-size: 0.75rem; line-height: 1.5; color: var(--ink-2);
+  background: var(--bg-soft); border: 1px solid var(--line);
+  border-radius: var(--radius-sm); padding: 10px 12px;
+  white-space: pre-wrap; word-break: break-word;
+}
+.crash-a { display: flex; gap: 8px; }
