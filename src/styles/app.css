@@ -539,6 +539,13 @@
 .bal-edit-l { font-size: 0.71875rem; color: var(--ink-3); flex-shrink: 0; }
 .bal-edit-row.lg .bal-in { font-size: 1.625rem; }
 .bal-edit-row.sm .bal-in { font-size: 1rem; }
+/* 계좌가 여럿일 때만 뜬다. 어느 계좌를 고치는지 밝히지 않으면 합계에 섞인다. */
+.bal-acc {
+  appearance: none; flex-shrink: 0; max-width: 40%;
+  font: inherit; font-size: 0.71875rem; color: var(--ink-2);
+  background: var(--bg-soft); border: 1px solid var(--line);
+  border-radius: var(--radius-sm); padding: 3px 6px;
+}
 
 .debt { background: var(--bg); border: 1px solid var(--line); border-radius: var(--radius); overflow: hidden; }
 .debt-h {

@@ -18,13 +18,13 @@ import { MONEY_TYPE_BY_ID } from '../domain/constants';
 import { daysBetween, fmtDayShort } from '../domain/date';
 import { formatAmount, formatSigned } from '../domain/money';
 import {
-  headlineLimit, horizonOf, summarize, upcomingInHorizon,
+  currencyScopeOf, headlineLimit, horizonOf, summarize, upcomingInHorizon,
   type Summary,
 } from '../domain/tide';
 import type { Account, Entry } from '../domain/types';
 import { Icon } from './Icon';
 import { BalanceInput, BalanceNote, useBalanceEditor } from './balanceEditor';
-import { calcHeadline, calcNotice, type CalcState } from './calcState';
+import { calcHeadline, calcNotice, mixedCurrencyNotice, type CalcState } from './calcState';
 
 interface Props {
   /** 오늘. 자정을 넘기면 바뀌므로 화면이 스스로 재지 않고 위에서 받는다. */
@@ -54,6 +54,9 @@ export function TideBar({
 }: Props) {
   const today = todayISO;
   const editor = useBalanceEditor(accounts, entries, onSaveAccount, tideFrom, todayISO);
+
+  // 통화가 섞이면 최소 단위가 달라 애초에 더할 수 없다. 숫자를 내지 않는다.
+  const scope = useMemo(() => currencyScopeOf(accounts, entries), [accounts, entries]);
 
   const horizon = useMemo(() => horizonOf(entries, today), [entries, today]);
   const limit = useMemo(
@@ -88,6 +91,21 @@ export function TideBar({
         {!collapsed && (
           <>
             <p className="tide-empty">{calcNotice(calcState)}</p>
+            {children && <div className="tide-more">{children}</div>}
+          </>
+        )}
+      </section>
+    );
+  }
+
+  if (!scope.ok) {
+    return (
+      <section className={'tide' + (collapsed ? ' collapsed' : '')} aria-label="며칠 버티나">
+        {head('통화 섞임')}
+        {!collapsed && (
+          <>
+            <p className="tide-empty">{mixedCurrencyNotice(scope.currencies)}</p>
+            {editor.editing ? <BalanceInput editor={editor} /> : <BalanceNote editor={editor} />}
             {children && <div className="tide-more">{children}</div>}
           </>
         )}

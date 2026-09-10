@@ -11,14 +11,14 @@
  */
 import { useMemo, useState } from 'react';
 import { MONEY_TYPE_BY_ID } from '../domain/constants';
-import { headlineLimit, horizonOf } from '../domain/tide';
+import { currencyScopeOf, headlineLimit, horizonOf } from '../domain/tide';
 import type { Account } from '../domain/types';
 import { addDaysISO, fmtDayShort } from '../domain/date';
 import { displayTitle, effectiveEndDate, isDone, newEntry } from '../domain/entry';
 import { formatAmount } from '../domain/money';
 import type { Entry, TaskStatus } from '../domain/types';
 import { BalanceInput, BalanceNote, useBalanceEditor } from './balanceEditor';
-import { calcNotice, type CalcState } from './calcState';
+import { calcNotice, mixedCurrencyNotice, type CalcState } from './calcState';
 import { Icon } from './Icon';
 
 interface Props {
@@ -78,9 +78,14 @@ export function TodayPanel({
 
   // '오늘 마감 예상' 대신 tide-over 규칙 — 다음 입금까지 남는 한도.
   const horizon = useMemo(() => horizonOf(tideEntries, todayISO), [tideEntries, todayISO]);
+  // 통화가 섞이면 최소 단위가 달라 애초에 더할 수 없다.
+  const scope = useMemo(() => currencyScopeOf(accounts, tideEntries), [accounts, tideEntries]);
+
   const tideLimit = useMemo(
-    () => hasBalance && calcState === 'ready' ? headlineLimit(accounts, tideEntries, todayISO) : null,
-    [hasBalance, calcState, accounts, tideEntries, todayISO],
+    () => hasBalance && calcState === 'ready' && scope.ok
+      ? headlineLimit(accounts, tideEntries, todayISO)
+      : null,
+    [hasBalance, calcState, scope.ok, accounts, tideEntries, todayISO],
   );
 
   const submitIdea = () => {
@@ -206,10 +211,13 @@ export function TodayPanel({
                     </button>
                   ) : calcState !== 'ready' ? (
                     <p className="tp-empty">{calcNotice(calcState)}</p>
+                  ) : !scope.ok ? (
+                    <p className="tp-empty">{mixedCurrencyNotice(scope.currencies)}</p>
                   ) : (
                     <p className="tp-empty">잔고를 적으면 다음 입금까지 남는 한도가 여기 뜹니다.</p>
                   )}
-                  {/* 자료가 없는 동안에는 잔고 편집도 열지 않는다 — 정산이 어긋난다. */}
+                  {/* 자료가 없는 동안에는 잔고 편집도 열지 않는다 — 정산이 어긋난다.
+                      통화가 섞인 상태는 반대다. 고칠 길을 막으면 빠져나올 수가 없다. */}
                   {!editor.editing && calcState === 'ready' && <BalanceNote editor={editor} />}
                   <ul className="tp-ul">
                     {money.map((e) => {

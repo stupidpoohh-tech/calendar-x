@@ -14,13 +14,18 @@ import { DEFAULT_CURRENCY } from '../domain/constants';
 import { fmtDayShort, todayISO as domainToday } from '../domain/date';
 import { uid } from '../domain/entry';
 import { formatAmount, formatSigned, minorToInput, parseAmountToMinor } from '../domain/money';
-import { settle, summarize } from '../domain/tide';
+import { settle, summarize, type Settlement } from '../domain/tide';
 import type { Account, Entry } from '../domain/types';
 import { useDialog } from './Dialog';
 import { Icon } from './Icon';
 
 export interface BalanceEditor {
+  /** 지금 고치고 있는 계좌. 계좌가 없으면 null (첫 입력). */
   primary: Account | null;
+  /** 고를 수 있는 계좌 전부. 하나뿐이면 화면에 고르는 자리를 두지 않는다. */
+  accounts: readonly Account[];
+  /** 편집 대상을 바꾼다. 금액칸도 그 계좌의 값으로 다시 채운다. */
+  pick: (id: string) => void;
   editing: boolean;
   text: string;
   setText: (s: string) => void;
@@ -38,7 +43,16 @@ export function useBalanceEditor(
   /** 오늘. 자정을 넘긴 뒤 저장해도 어제 날짜로 적히지 않도록 위에서 받는다. */
   todayISO?: string,
 ): BalanceEditor {
-  const primary = accounts[0] ?? null;
+  /*
+    편집은 **계좌 한 개**를 대상으로 한다.
+
+    예전에는 합계(모든 계좌의 balanceMinor 합)를 보여 주면서 저장은 첫 계좌에만 했다.
+    계좌가 둘이면 적은 금액이 첫 계좌로 통째로 들어가 나머지 계좌의 잔고와 이중으로
+    세어졌다. 지금은 고른 계좌의 잔고만 바꾸고, 정산은 "나머지 계좌 합 + 새 금액" 을
+    새 총액으로 삼아 잰다.
+  */
+  const [targetId, setTargetId] = useState<string | null>(null);
+  const primary = accounts.find((a) => a.id === targetId) ?? accounts[0] ?? null;
   const [editing, setEditing] = useState(false);
   const [text, setText] = useState('');
   const dialog = useDialog();
@@ -46,6 +60,13 @@ export function useBalanceEditor(
   const start = () => {
     setText(primary ? minorToInput(primary.balanceMinor, primary.currency) : '');
     setEditing(true);
+  };
+
+  const pick = (id: string) => {
+    const next = accounts.find((a) => a.id === id);
+    if (!next) return;
+    setTargetId(id);
+    setText(minorToInput(next.balanceMinor, next.currency));
   };
 
   /**
@@ -78,34 +99,25 @@ export function useBalanceEditor(
     // 이전 잔고가 없으면 정산할 것도 없다 — 첫 입력.
     if (!primary) { onSave(build()); return; }
 
-    const r = settle(accounts, entries, minor, today, coveredFrom);
+    // 고른 계좌만 바뀐다. 나머지 계좌 잔고는 그대로 새 총액에 들어간다.
+    const others = accounts.reduce((t, a) => (a.id === primary.id ? t : t + a.balanceMinor), 0);
+    const newTotal = others + minor;
+    const multi = accounts.length > 1;
+    const r = settle(accounts, entries, newTotal, today, coveredFrom);
     const items = summarize(r.passed);
 
     // 정산할 예정도 없고 diff 도 0 이면 조용히 저장.
     if (r.complete && r.passed.length === 0 && r.diff === 0) { onSave(build()); return; }
 
     /*
-      자료가 모자라면 차액을 확정 금액으로 내지 않는다.
-      기준일이 계산 구독 구간보다 앞서면 그 사이의 비반복 입출금이 목록에 없어서,
-      "예정대로면 얼마" 가 실제보다 크게 나온다. 그럴듯하게 틀린 숫자를 내느니
-      무엇이 빠졌는지 말하고 잔고만 갱신하는 편이 낫다.
+      확정 차액을 낼 수 없는 경우. 그럴듯하게 틀린 숫자를 내느니 무엇이 모자란지
+      말하고 잔고만 갱신한다.
     */
     if (!r.complete) {
       void (async () => {
         const ok = await dialog.confirm({
           title: '정산 금액을 확정할 수 없습니다',
-          body: (
-            <div className="settle">
-              <p>
-                잔고 기준일이 <b>{fmtDayShort(r.since)}</b>로,
-                지금 불러와 둔 구간(<b>{fmtDayShort(r.coveredFrom ?? r.since)}</b> 이후)보다 앞섭니다.
-              </p>
-              <p className="dlg-note">
-                그 사이의 <b>한 번짜리</b> 입출금이 목록에 없어 차액을 정확히 낼 수 없습니다.
-                (반복 항목은 전부 들어 있습니다.) 잔고만 새 금액으로 바꿔 둘까요?
-              </p>
-            </div>
-          ),
+          body: <SettleGap settlement={r} />,
           confirmLabel: '잔고만 바꾸기',
         });
         if (ok) onSave(build());
@@ -135,7 +147,9 @@ export function useBalanceEditor(
               </ul>
             )}
             <p className="settle-diff">
-              새로 적은 <b className="num">₩ {formatAmount(minor)}</b>과
+              {/* 계좌가 여럿이면 정산의 기준은 총액이다. 방금 적은 한 계좌 금액을
+                  적어 두면 차액과 맞지 않아 보인다. */}
+              {multi ? '새 총액' : '새로 적은'} <b className="num">₩ {formatAmount(newTotal)}</b>과
               <b className={'num ' + (r.diff < 0 ? 'minus' : r.diff > 0 ? 'plus' : '')}>
                 {' '}차이 {formatSigned(r.diff)}
               </b>
@@ -149,13 +163,73 @@ export function useBalanceEditor(
     })();
   };
 
-  return { primary, editing, text, setText, start, cancel: () => setEditing(false), commit };
+  return {
+    primary, accounts, pick,
+    editing, text, setText, start, cancel: () => setEditing(false), commit,
+  };
+}
+
+/** 확정 차액을 낼 수 없는 이유. 세 갈래가 각각 다른 말을 한다. */
+function SettleGap({ settlement: r }: { settlement: Settlement }) {
+  if (r.reason === 'currency') {
+    return (
+      <div className="settle">
+        <p>통화가 섞여 있습니다 — <b>{r.detail.join(' · ')}</b>.</p>
+        <p className="dlg-note">
+          이 앱은 <b>한 번에 한 통화</b>만 다룹니다. 환율 변환을 하지 않으므로 서로 다른
+          통화의 금액을 더하지 않습니다. 잔고만 새 금액으로 바꿔 둘까요?
+        </p>
+      </div>
+    );
+  }
+
+  if (r.reason === 'accounts') {
+    return (
+      <div className="settle">
+        <p>
+          계좌마다 마지막으로 적은 날이 다릅니다 —{' '}
+          <b>{r.detail.map((d) => fmtDayShort(d)).join(' · ')}</b>.
+        </p>
+        <p className="dlg-note">
+          정산은 총액 하나를 그 구간의 예정과 비교하는 일이라, 계좌마다 구간이 다르면
+          하나로 잴 수 없습니다. 계좌 잔고를 <b>같은 날 함께</b> 적으면 그 다음부터
+          차액이 나옵니다. 지금은 잔고만 바꿔 둘까요?
+        </p>
+      </div>
+    );
+  }
+
+  return (
+    <div className="settle">
+      <p>
+        잔고 기준일이 <b>{fmtDayShort(r.since)}</b>로,
+        지금 불러와 둔 구간(<b>{fmtDayShort(r.coveredFrom ?? r.since)}</b> 이후)보다 앞섭니다.
+      </p>
+      <p className="dlg-note">
+        그 사이의 <b>한 번짜리</b> 입출금이 목록에 없어 차액을 정확히 낼 수 없습니다.
+        (반복 항목은 전부 들어 있습니다.) 잔고만 새 금액으로 바꿔 둘까요?
+      </p>
+    </div>
+  );
 }
 
 /** 큰 숫자를 누르면 그 자리에 뜨는 입력칸. */
 export function BalanceInput({ editor, size = 'lg' }: { editor: BalanceEditor; size?: 'lg' | 'sm' }) {
   return (
     <div className={'bal-edit-row ' + size}>
+      {/* 계좌가 하나면 고를 것이 없다. 여럿일 때만 어느 계좌를 고치는지 밝힌다. */}
+      {editor.accounts.length > 1 && (
+        <select
+          className="bal-acc"
+          aria-label="고칠 계좌"
+          value={editor.primary?.id ?? ''}
+          onChange={(e) => editor.pick(e.target.value)}
+        >
+          {editor.accounts.map((a) => (
+            <option key={a.id} value={a.id}>{a.name}</option>
+          ))}
+        </select>
+      )}
       <label className="bal-edit-l" htmlFor="bal-input">잔고</label>
       <input
         id="bal-input"
@@ -182,7 +256,13 @@ export function BalanceNote({ editor }: { editor: BalanceEditor }) {
   return (
     <button type="button" className="bal-note" onClick={editor.start}>
       <Icon.Wallet size={12} />
-      <span>{editor.primary ? `잔고 ${editor.primary.asOf} 기준` : '잔고를 적어 두세요'}</span>
+      <span>
+        {editor.primary
+          ? (editor.accounts.length > 1
+            ? `${editor.primary.name} ${editor.primary.asOf} 기준`
+            : `잔고 ${editor.primary.asOf} 기준`)
+          : '잔고를 적어 두세요'}
+      </span>
       <span className="bal-note-a">{editor.primary ? '수정' : '입력'}</span>
     </button>
   );

@@ -11,7 +11,7 @@ import { describe, expect, it } from 'vitest';
 import { localDateOf } from './date';
 import { newEntry, setRecurrence } from './entry';
 import {
-  entriesOn, horizonOf, limitOn, netBetween,
+  currencyScopeOf, entriesOn, headlineLimit, horizonOf, limitOn, netBetween,
   occurrences, settle, summarize, upcomingInHorizon,
 } from './tide';
 import type { Account, Entry, MoneyType } from './types';
@@ -279,5 +279,122 @@ describe('settle — 정산 기준일', () => {
   it('패딩 없는 asOf 도 맞춰 읽는다', () => {
     const a = account({ asOf: '2026-9-3' as never, checkedAt: '2026-09-03T09:00:00+09:00' });
     expect(settle([a], [], 0, '2026-09-10').since).toBe('2026-09-03');
+  });
+});
+
+describe('통화 — 한 번에 하나만 다룬다', () => {
+  const usd = (amountMinor: number, startDate: string): Entry =>
+    newEntry('money', {
+      startDate,
+      money: { type: 'expense', amountMinor, currency: 'USD', linkedEntryId: null },
+    });
+
+  it('계좌와 항목이 같은 통화면 통과한다', () => {
+    const r = currencyScopeOf([account()], [money('expense', 10_000, '2026-08-15')]);
+    expect(r).toEqual({ ok: true, currency: 'KRW' });
+  });
+
+  it('계좌가 없고 항목도 없으면 기본 통화다', () => {
+    expect(currencyScopeOf([], [])).toEqual({ ok: true, currency: 'KRW' });
+  });
+
+  it('계좌끼리 통화가 다르면 계산할 수 없다', () => {
+    const r = currencyScopeOf(
+      [account({ id: 'a1' }), account({ id: 'a2', currency: 'USD' })],
+      [],
+    );
+    expect(r).toEqual({ ok: false, currencies: ['KRW', 'USD'] });
+  });
+
+  it('항목의 통화가 계좌와 다르면 계산할 수 없다', () => {
+    const r = currencyScopeOf([account()], [usd(1_000, '2026-08-15')]);
+    expect(r.ok).toBe(false);
+  });
+
+  it('흐름에 반영되지 않는 항목(세이브)의 통화는 따지지 않는다', () => {
+    // sign 0 이라 한도를 건드리지 않는다. 그것 때문에 계산을 막을 이유가 없다.
+    const save = newEntry('money', {
+      startDate: '2026-08-15',
+      money: { type: 'save', amountMinor: 1_000, currency: 'USD', linkedEntryId: null },
+    });
+    expect(currencyScopeOf([account()], [save]).ok).toBe(true);
+  });
+
+  it('정산은 통화가 섞이면 확정 차액을 내지 않는다', () => {
+    const r = settle(
+      [account({ id: 'a1' }), account({ id: 'a2', currency: 'USD' })],
+      [], 0, '2026-08-10',
+    );
+    expect(r.complete).toBe(false);
+    expect(r.reason).toBe('currency');
+    expect(r.detail).toEqual(['KRW', 'USD']);
+  });
+});
+
+describe('계좌가 여럿일 때', () => {
+  it('기준일이 같으면 총액으로 정산한다', () => {
+    const a = account({ id: 'a1', balanceMinor: 600_000, checkedAt: '2026-08-01T09:00:00+09:00' });
+    const b = account({ id: 'a2', balanceMinor: 400_000, checkedAt: '2026-08-01T10:00:00+09:00' });
+    const util = money('expense', 300_000, '2026-08-05');
+
+    const r = settle([a, b], [util], 650_000, '2026-08-10');
+    expect(r.complete).toBe(true);
+    expect(r.reason).toBeNull();
+    // 총액 1,000,000 − 300,000 = 700,000. 실제 650,000 → −50,000.
+    expect(r.expected).toBe(700_000);
+    expect(r.diff).toBe(-50_000);
+  });
+
+  it('기준일이 다르면 확정 차액을 내지 않는다', () => {
+    // 계좌마다 구간이 다르면 총액 하나로 한 구간을 잴 수 없다.
+    const a = account({ id: 'a1', balanceMinor: 600_000, checkedAt: '2026-08-01T09:00:00+09:00' });
+    const b = account({ id: 'a2', balanceMinor: 400_000, checkedAt: '2026-08-07T09:00:00+09:00' });
+
+    const r = settle([a, b], [], 900_000, '2026-08-10');
+    expect(r.complete).toBe(false);
+    expect(r.reason).toBe('accounts');
+    expect(r.detail).toEqual(['2026-08-01', '2026-08-07']);
+    // 기준일 자체는 가장 최근 것이다.
+    expect(r.since).toBe('2026-08-07');
+  });
+
+  it('한도는 모든 계좌의 합에서 잰다', () => {
+    const a = account({ id: 'a1', balanceMinor: 600_000 });
+    const b = account({ id: 'a2', balanceMinor: 400_000 });
+    const util = money('expense', 300_000, '2026-08-15');
+    expect(limitOn([a, b], [util], '2026-08-31', '2026-08-10')).toBe(700_000);
+  });
+});
+
+describe('머리 숫자와 목록이 같은 기간 예산을 본다', () => {
+  const salary = monthly('income', 3_000_000, '2026-08-25');
+  const acc = [account({ balanceMinor: 1_000_000, checkedAt: '2026-08-10T09:00:00+09:00' })];
+  const today = '2026-08-10';
+
+  it('끝점 뒤에 시작하는 기간 예산은 양쪽 모두에서 빠진다', () => {
+    // 한도의 끝은 급여 전날(08-24). 9월 생활비는 그 뒤에 시작한다.
+    const septemberLiving = money('living', 900_000, '2026-09-01', { endDate: '2026-09-30' });
+    const raw = [salary, septemberLiving];
+
+    const h = horizonOf(raw, today);
+    expect(h.end).toBe('2026-08-24');
+
+    const listed = upcomingInHorizon(raw, today, h);
+    expect(listed.some((o) => o.entry.id === septemberLiving.id)).toBe(false);
+    // 목록에 없으니 한도도 건드리지 않아야 한다.
+    expect(headlineLimit(acc, raw, today)).toBe(1_000_000);
+  });
+
+  it('끝점에 걸치는 기간 예산은 양쪽 모두에 남은 몫 전체가 들어간다', () => {
+    const living = money('living', 900_000, '2026-08-01', { endDate: '2026-08-30' });
+    const raw = [salary, living];
+    const h = horizonOf(raw, today);
+
+    const listed = upcomingInHorizon(raw, today, h)
+      .filter((o) => o.entry.id === living.id);
+    const listedTotal = listed.reduce((t, o) => t + o.amountMinor, 0);
+
+    // 목록의 합과 머리 숫자가 맞는다.
+    expect(headlineLimit(acc, raw, today)).toBe(1_000_000 - listedTotal);
   });
 });

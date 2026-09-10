@@ -191,3 +191,112 @@ describe('계산용 자료를 아직 못 받았을 때', () => {
     expect(card.textContent).not.toContain('₩ 0');
   });
 });
+
+describe('계좌가 여럿일 때', () => {
+  const two = () => [
+    account({ id: 'a1', name: '주계좌', balanceMinor: 600_000, asOf: '2026-09-01',
+      checkedAt: '2026-09-01T09:00:00+09:00' }),
+    account({ id: 'a2', name: '비상금', balanceMinor: 400_000, asOf: '2026-09-01',
+      checkedAt: '2026-09-01T10:00:00+09:00' }),
+  ];
+
+  it('어느 계좌를 고치는지 고르게 한다', () => {
+    mount({ todayISO: '2026-09-10', accounts: two(), entries: [], tideFrom: '2026-09-01',
+      onSaveAccount: () => {} });
+
+    fireEvent.click(screen.getByLabelText('잔고 고치기'));
+    const pick = screen.getByLabelText('고칠 계좌') as HTMLSelectElement;
+    expect([...pick.options].map((o) => o.textContent)).toEqual(['주계좌', '비상금']);
+    // 처음에는 첫 계좌, 금액칸도 그 계좌의 값이다.
+    expect(pick.value).toBe('a1');
+    expect((screen.getByLabelText('잔고 금액') as HTMLInputElement).value).toBe('600000');
+
+    fireEvent.change(pick, { target: { value: 'a2' } });
+    expect((screen.getByLabelText('잔고 금액') as HTMLInputElement).value).toBe('400000');
+  });
+
+  it('고른 계좌의 잔고만 바뀐다 — 합계를 그 계좌에 몰아 넣지 않는다', async () => {
+    const saved: Account[] = [];
+    mount({ todayISO: '2026-09-10', accounts: two(), entries: [expense(100_000, '2026-09-05', '월세')],
+      tideFrom: '2026-09-01', onSaveAccount: (a) => saved.push(a) });
+
+    fireEvent.click(screen.getByLabelText('잔고 고치기'));
+    fireEvent.change(screen.getByLabelText('고칠 계좌'), { target: { value: 'a2' } });
+    const input = screen.getByLabelText('잔고 금액');
+    fireEvent.change(input, { target: { value: '250000' } });
+    fireEvent.keyDown(input, { key: 'Enter' });
+
+    // 총액 1,000,000 − 월세 100,000 = 900,000 이 예정. 새 총액은 600,000 + 250,000.
+    await screen.findByText('잔고 정산');
+    const dlg = document.querySelector('.dlg')!;
+    expect(dlg.textContent).toContain('900,000');
+    expect(dlg.textContent).toContain('850,000');
+    expect(dlg.textContent).toContain('−50,000');
+
+    fireEvent.click(screen.getByRole('button', { name: '이 금액으로 정산' }));
+    await waitFor(() => expect(saved).toHaveLength(1));
+    expect(saved[0]?.id).toBe('a2');
+    expect(saved[0]?.name).toBe('비상금');
+    expect(saved[0]?.balanceMinor).toBe(250_000);
+  });
+
+  it('기준일이 다르면 확정 차액 대신 왜인지 말한다', async () => {
+    const saved: Account[] = [];
+    const mixed = [
+      account({ id: 'a1', name: '주계좌', balanceMinor: 600_000, asOf: '2026-09-01',
+        checkedAt: '2026-09-01T09:00:00+09:00' }),
+      account({ id: 'a2', name: '비상금', balanceMinor: 400_000, asOf: '2026-09-07',
+        checkedAt: '2026-09-07T09:00:00+09:00' }),
+    ];
+    mount({ todayISO: '2026-09-10', accounts: mixed, entries: [], tideFrom: '2026-09-01',
+      onSaveAccount: (a) => saved.push(a) });
+
+    editBalance('700000');
+    await screen.findByText('정산 금액을 확정할 수 없습니다');
+    const dlg = document.querySelector('.dlg')!;
+    expect(dlg.textContent).toContain('마지막으로 적은 날이 다릅니다');
+    expect(dlg.textContent).toContain('같은 날 함께');
+    expect(dlg.textContent).not.toContain('차이');
+
+    fireEvent.click(screen.getByRole('button', { name: '잔고만 바꾸기' }));
+    await waitFor(() => expect(saved).toHaveLength(1));
+    expect(saved[0]?.id).toBe('a1');
+    expect(saved[0]?.balanceMinor).toBe(700_000);
+  });
+});
+
+describe('통화가 섞였을 때', () => {
+  it('한도를 지어내지 않고 왜인지 적는다', () => {
+    mount({
+      todayISO: '2026-09-10',
+      accounts: [
+        account({ id: 'a1', name: '원화', balanceMinor: 1_000_000, currency: 'KRW' }),
+        account({ id: 'a2', name: '달러', balanceMinor: 50_000, currency: 'USD' }),
+      ],
+      entries: [],
+      tideFrom: '2026-09-01',
+      onSaveAccount: () => {},
+    });
+
+    const card = screen.getByLabelText('며칠 버티나');
+    expect(card.textContent).toContain('통화가 섞여 있습니다');
+    expect(card.textContent).toContain('KRW · USD');
+    expect(card.textContent).toContain('환율 변환을 하지 않으므로');
+    // 최소 단위가 달라 더할 수 없다 — 합계를 그리지 않는다.
+    expect(card.textContent).not.toContain('1,050,000');
+  });
+
+  it('그래도 잔고는 고칠 수 있다 — 막으면 빠져나올 수가 없다', () => {
+    mount({
+      todayISO: '2026-09-10',
+      accounts: [
+        account({ id: 'a1', name: '원화', currency: 'KRW' }),
+        account({ id: 'a2', name: '달러', currency: 'USD' }),
+      ],
+      entries: [],
+      tideFrom: '2026-09-01',
+      onSaveAccount: () => {},
+    });
+    expect(screen.getByText(/원화 2026-09-01 기준/)).toBeTruthy();
+  });
+});

@@ -20,3 +20,10 @@ export function calcNotice(state: Exclude<CalcState, 'ready'>): string {
     ? '예정 입출금을 불러오지 못했습니다. 지어낸 숫자를 보여 주지 않기 위해 한도를 비워 둡니다.'
     : '예정 입출금을 불러오는 중입니다.';
 }
+
+/** 통화가 섞여 있어 계산 자체가 성립하지 않을 때. */
+export function mixedCurrencyNotice(currencies: readonly string[]): string {
+  return `통화가 섞여 있습니다 (${currencies.join(' · ')}). `
+    + '이 앱은 한 번에 한 통화만 다룹니다 — 환율 변환을 하지 않으므로 '
+    + '서로 다른 통화의 금액을 더하지 않습니다.';
+}
