@@ -3,7 +3,7 @@ import { colorHex, MONEY_TYPE_BY_ID } from '../domain/constants';
 import { isWeekend, monthGrid, normalizeDate, toISO, weekdayLabels, ymOf } from '../domain/date';
 import { displayTitle, effectiveEndDate, isDone } from '../domain/entry';
 import { compactAmount } from '../domain/money';
-import { limitOn } from '../domain/tide';
+import { currencyScopeOf, limitOn } from '../domain/tide';
 import type { Account, Entry, LensId, WeekStart, YearMonth } from '../domain/types';
 import { Icon } from './Icon';
 
@@ -109,7 +109,13 @@ export function MonthCalendar({
     오늘 이전은 적지 않는다. 지나간 발생분은 이미 잔고에 반영돼 있어 한도를
     건드리지 못하므로, 과거 셀에는 잔고가 그대로 반복될 뿐이다.
   */
-  const showLimits = lens === 'money' && hasBalance;
+  /*
+    통화가 섞이면 최소 단위가 달라 애초에 더할 수 없다. 카드가 숫자를 내지 않는 상태에서
+    달력만 셀마다 금액을 적으면, 카드가 거절한 바로 그 숫자를 달력이 지어내는 꼴이 된다.
+  */
+  const scope = useMemo(() => currencyScopeOf(accounts, tideEntries), [accounts, tideEntries]);
+
+  const showLimits = lens === 'money' && hasBalance && scope.ok;
   const limits = useMemo(() => {
     if (!showLimits) return null;
     // 계산 창은 연속된 달의 묶음이라, 양 끝이 들어 있으면 사이도 들어 있다.

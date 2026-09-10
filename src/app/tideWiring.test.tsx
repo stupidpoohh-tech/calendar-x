@@ -268,3 +268,31 @@ describe('구독 창', () => {
     expect(tideWindow(TODAY).length).toBeLessThanOrEqual(30);
   });
 });
+
+describe('달력 — 통화가 섞이면 셀에도 적지 않는다', () => {
+  it('카드가 거절한 숫자를 달력이 지어내지 않는다', () => {
+    const mixed: Account[] = [
+      ACCOUNTS[0]!,
+      { id: 'a2', name: '달러', balanceMinor: 50_000, currency: 'USD',
+        asOf: TODAY, checkedAt: `${TODAY}T00:00:00.000Z`, order: 1, createdAt: '', updatedAt: '' },
+    ];
+    wrap(
+      <MonthCalendar
+        cursor={SEPTEMBER}
+        onCursorChange={() => {}}
+        entries={applyFilters(shownFor(SEPTEMBER), 'money', emptyFilters())}
+        tideEntries={RAW}
+        tideMonths={tideWindow(TODAY)}
+        accounts={mixed}
+        hasBalance
+        lens="money"
+        weekStart="mon"
+        todayISO={TODAY}
+        onEntryClick={() => {}}
+        onDayOpen={() => {}}
+        onDayCreate={() => {}}
+      />,
+    );
+    expect(screen.queryByLabelText('2026-09-15 한도')).toBeNull();
+  });
+});

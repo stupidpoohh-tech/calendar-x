@@ -19,6 +19,13 @@ import { useDialog } from '../ui/Dialog';
 
 export type Commit = (label: string, run: () => Promise<unknown>) => void;
 
+/** 받침에 따라 을/를 을 고른다. '항목을' · '잔고를' 처럼 읽히게 한다. */
+function objectParticle(word: string): string {
+  const code = word.charCodeAt(word.length - 1);
+  if (!Number.isFinite(code) || code < 0xac00 || code > 0xd7a3) return '을';
+  return (code - 0xac00) % 28 === 0 ? '를' : '을';
+}
+
 export function useCommit(): Commit {
   const dialog = useDialog();
 
@@ -28,7 +35,7 @@ export function useCommit(): Commit {
         console.error(`[write:${label}]`, err);
         void (async () => {
           const again = await dialog.confirm({
-            title: `${label}을(를) 서버에 저장하지 못했습니다`,
+            title: `${label}${objectParticle(label)} 서버에 저장하지 못했습니다`,
             body: (
               <div className="settle">
                 <p>

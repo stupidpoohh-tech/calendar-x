@@ -21,6 +21,18 @@ const mount = (run: () => Promise<unknown>) =>
   render(<DialogHost><Harness run={run} /></DialogHost>);
 
 describe('useCommit', () => {
+  it('받침에 따라 을·를 을 고른다', async () => {
+    const boom = vi.spyOn(console, 'error').mockImplementation(() => {});
+    function Two() {
+      const commit = useCommit();
+      return <button onClick={() => commit('항목', () => Promise.reject(new Error('x')))}>항목</button>;
+    }
+    render(<DialogHost><Two /></DialogHost>);
+    fireEvent.click(screen.getByText('항목'));
+    await screen.findByText('항목을 서버에 저장하지 못했습니다');
+    boom.mockRestore();
+  });
+
   it('성공하면 아무 말도 하지 않는다', async () => {
     const run = vi.fn(() => Promise.resolve());
     mount(run);
@@ -35,7 +47,7 @@ describe('useCommit', () => {
     mount(() => Promise.reject(new Error('permission-denied')));
     fireEvent.click(screen.getByText('보내기'));
 
-    await screen.findByText('잔고을(를) 서버에 저장하지 못했습니다');
+    await screen.findByText('잔고를 서버에 저장하지 못했습니다');
     expect(document.querySelector('.dlg')!.textContent).toContain('이 기기에서만');
     boom.mockRestore();
   });
@@ -50,7 +62,7 @@ describe('useCommit', () => {
     mount(run);
     fireEvent.click(screen.getByText('보내기'));
 
-    await screen.findByText('잔고을(를) 서버에 저장하지 못했습니다');
+    await screen.findByText('잔고를 서버에 저장하지 못했습니다');
     fireEvent.click(screen.getByRole('button', { name: '다시 보내기' }));
 
     await waitFor(() => expect(run).toHaveBeenCalledTimes(2));
@@ -65,7 +77,7 @@ describe('useCommit', () => {
     mount(run);
     fireEvent.click(screen.getByText('보내기'));
 
-    await screen.findByText('잔고을(를) 서버에 저장하지 못했습니다');
+    await screen.findByText('잔고를 서버에 저장하지 못했습니다');
     fireEvent.click(screen.getByRole('button', { name: '나중에' }));
 
     await waitFor(() => expect(document.querySelector('.dlg')).toBeNull());
