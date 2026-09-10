@@ -1,21 +1,19 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
-  backupFilename, buildBackup, countBackup, downloadJSON,
-  parseBackup, type BackupData,
+  backupFilename, buildBackup, countBackup, downloadJSON, type BackupData,
 } from '../data/backup';
+import { describeFileProblem, readBackupFile } from '../data/backupFile';
 import {
   describeFirestoreError, isPermissionDenied, RULES_CONSOLE_PATH, RULES_DEPLOY_COMMAND,
 } from '../data/errors';
 import { getFirebase } from '../data/firebase';
 import { convertLegacyItems, readLegacyItems, summarize } from '../data/migrate';
 import {
-  deleteDebt, deleteEntry, deleteMany, deletePin, fetchAll, markMigrated,
-  readMigrationMark, saveAccount, saveDebt, saveEntry, savePin, saveTaskOrder,
-  writeMany, type WriteManyResult,
+  createManyIfAbsent, deleteDebt, deleteEntry, deletePin, fetchAll, markMigrated,
+  readMigrationMark, saveAccount, saveDebt, saveEntry, savePin, saveTaskOrder, writeMany,
 } from '../data/repo';
 import {
-  countDocs, describeProblem, safeMerge, safeReplace, validateBackup,
-  type BackupProblem, type RestoreIO, type RestoreOutcome,
+  REPLACE_DISABLED_REASON, safeMerge, type RestoreIO,
 } from '../data/restore';
 import { LENSES, LENS_BY_ID } from '../domain/constants';
 import {
@@ -166,6 +164,8 @@ function Workspace({ uid, user, onSignOut }: WorkspaceProps) {
   );
 
   const hasBalance = store.accounts.length > 0;
+  /** 계산 목록이 덮는 가장 이른 날. 정산이 "자료가 모자라다" 를 판정하는 기준이다. */
+  const tideFrom = store.tideMonths[0] ? `${store.tideMonths[0]}-01` : null;
 
   // 이관 전 컬렉션이 남아 있는지, 이미 옮겼는지 한 번만 확인한다.
   const checkedLegacy = useRef(false);
@@ -314,155 +314,178 @@ function Workspace({ uid, user, onSignOut }: WorkspaceProps) {
   /**
    * 백업 가져오기.
    *
-   * 순서가 곧 안전장치다 — 검증 → 쓰기 → 결과 확인 → (교체일 때만) 지우기.
-   * 지우는 일은 언제나 맨 마지막이고, 쓰기가 한 건이라도 실패하면 거기서 멈춘다.
-   * 중간에 끊겨도 "지웠는데 복원이 안 된" 구간이 없다.
+   * 순서: 파일 읽기·검증 → (병합만) 없는 것만 만들기 → 결과 보고.
+   * 검증은 **변환 전** 원시 JSON 을 본다. 변환기가 먼저 돌면 잘못된 날짜·금액이
+   * 기본값으로 바뀐 뒤라 검증기에 원래 오류가 닿지 않는다.
+   *
+   * 전체 교체는 꺼져 있다 — 파일로 덮어쓴 기존 항목의 원래 내용을 되돌릴 방법이 없다.
    */
+  const importing = useRef(false);
   const handleImport = useCallback(async () => {
     if (isAnon || !uid) { void promptLogin(); return; }
+    // 같은 가져오기가 두 번 겹쳐 돌면 서로의 중간 상태를 읽는다.
+    if (importing.current) {
+      dialog.toast('가져오기가 이미 돌고 있습니다. 끝난 뒤에 다시 시도해 주세요.', 'bad');
+      return;
+    }
+
     const file = await pickFile('application/json');
     if (!file) return;
 
-    let incoming: BackupData;
+    importing.current = true;
     try {
-      incoming = parseBackup(await file.text());
-    } catch (err) {
-      dialog.toast(err instanceof Error ? err.message : '파일을 읽지 못했습니다.', 'bad');
-      return;
-    }
-
-    // 1. 파일 전체를 먼저 본다. 한 건이라도 걸리면 아무것도 건드리지 않는다 —
-    //    잘못된 값을 오늘 날짜나 기본값으로 조용히 바꿔 넣지 않는다.
-    const problems = validateBackup(incoming);
-    if (problems.length > 0) {
-      await dialog.confirm({
-        title: `이 파일은 가져올 수 없습니다 — ${problems.length.toLocaleString('ko-KR')}건이 규칙에 맞지 않습니다`,
-        body: (
-          <>
-            <ul className="dlg-skips">
-              {problems.slice(0, 8).map((p: BackupProblem, i: number) => (
-                <li key={`${p.collection}-${p.at}-${i}`}>{describeProblem(p)}</li>
-              ))}
-              {problems.length > 8 && <li>그 외 {(problems.length - 8).toLocaleString('ko-KR')}건</li>}
-            </ul>
-            <p className="dlg-note">
-              지금 데이터는 그대로입니다. 파일을 고친 뒤 다시 시도해 주세요.
-            </p>
-          </>
-        ),
-        confirmLabel: '알겠습니다',
-        cancelLabel: '닫기',
-      });
-      return;
-    }
-
-    const mode = await dialog.choose('가져온 데이터를 어떻게 할까요?', [
-      { id: 'merge', label: '기존 데이터에 더하기', hint: '같은 항목은 지금 것을 남깁니다.' },
-      { id: 'replace', label: '전체 교체', hint: '파일에 없는 일정·잔고·대출·고정 메모를 지웁니다.', danger: true },
-    ], `파일에 ${countBackup(incoming).toLocaleString('ko-KR')}건이 들어 있습니다.`);
-    if (!mode) return;
-
-    /** 쓰기·지우기 결과를 사람이 읽고 다음 행동을 알 수 있는 창으로 옮긴다. */
-    const reportFailure = async (title: string, result: WriteManyResult, note: ReactNode) => {
-      await dialog.confirm({
-        title,
-        body: (
-          <>
-            <ul className="dlg-skips">
-              {result.failed.slice(0, 6).map((f) => (
-                <li key={`${f.collection}/${f.id}`}><code>{f.collection}/{f.id}</code> — {f.reason}</li>
-              ))}
-              {result.failed.length > 6 && <li>그 외 {(result.failed.length - 6).toLocaleString('ko-KR')}건</li>}
-            </ul>
-            {note}
-          </>
-        ),
-        confirmLabel: '알겠습니다',
-        cancelLabel: '닫기',
-      });
-    };
-
-    // 저장 계층을 한 곳에 모아 둔다. 순서와 결과 판정은 restore.ts 가 맡는다 —
-    // 그래야 실패를 주입한 테스트가 같은 순서를 그대로 돌려 볼 수 있다.
-    const io: RestoreIO = {
-      fetchAll: () => fetchAll(db, uid),
-      writeMany: (payload) => writeMany(db, uid, payload),
-      deleteMany: (targets) => deleteMany(db, uid, [...targets]),
-    };
-
-    const report = async (outcome: RestoreOutcome) => {
-      if (outcome.kind === 'invalid') return; // 위에서 이미 걸러진다
-      if (outcome.kind === 'write-failed') {
-        await reportFailure(
-          `${outcome.written.written.toLocaleString('ko-KR')}건을 저장했고 `
-          + `${outcome.written.failed.length.toLocaleString('ko-KR')}건이 실패했습니다`,
-          outcome.written,
-          <p className="dlg-note">
-            <b>아무것도 지우지 않았습니다.</b> 지금 데이터는 그대로 있습니다.
-            원인을 고친 뒤 같은 파일로 다시 가져오면 이어서 끝납니다.
-          </p>,
-        );
+      const read = readBackupFile(await file.text());
+      if (!read.ok) {
+        await dialog.confirm({
+          title: `이 파일은 가져올 수 없습니다 — ${read.problems.length.toLocaleString('ko-KR')}곳이 규칙에 맞지 않습니다`,
+          body: (
+            <>
+              <ul className="dlg-skips">
+                {read.problems.slice(0, 8).map((p, i) => (
+                  <li key={`${p.where}-${i}`}>{describeFileProblem(p)}</li>
+                ))}
+                {read.problems.length > 8 && (
+                  <li>그 외 {(read.problems.length - 8).toLocaleString('ko-KR')}곳</li>
+                )}
+              </ul>
+              <p className="dlg-note">지금 데이터는 그대로입니다. 파일을 고친 뒤 다시 시도해 주세요.</p>
+            </>
+          ),
+          confirmLabel: '알겠습니다',
+          cancelLabel: '닫기',
+        });
         return;
       }
-      if (outcome.kind === 'remove-failed') {
-        await reportFailure(
-          `복원은 끝났고, 지우지 못한 것이 ${outcome.removed.failed.length.toLocaleString('ko-KR')}건 남았습니다`,
-          outcome.removed,
-          <p className="dlg-note">
-            파일의 내용은 모두 들어갔습니다. 남은 것은 파일에 없던 예전 문서입니다 —
-            다시 가져오면 지우기만 한 번 더 시도합니다.
-          </p>,
-        );
+
+      const incoming: BackupData = read.file.data;
+
+      // 예전 형식 변환에서 제외되거나 잘린 항목을 숨기지 않는다.
+      if (read.file.notes.length > 0) {
+        const go = await dialog.confirm({
+          title: `예전 형식을 옮기면서 ${read.file.notes.length.toLocaleString('ko-KR')}건이 달라집니다`,
+          body: (
+            <>
+              <ul className="dlg-skips">
+                {read.file.notes.slice(0, 8).map((n, i) => <li key={`${n.id}-${i}`}>{n.reason}</li>)}
+                {read.file.notes.length > 8 && (
+                  <li>그 외 {(read.file.notes.length - 8).toLocaleString('ko-KR')}건</li>
+                )}
+              </ul>
+              <p className="dlg-note">이대로 가져올까요? 원본 파일은 바뀌지 않습니다.</p>
+            </>
+          ),
+          confirmLabel: '이대로 가져오기',
+        });
+        if (!go) return;
+      }
+
+      const mode = await dialog.choose('가져온 데이터를 어떻게 할까요?', [
+        { id: 'merge', label: '기존 데이터에 더하기', hint: '같은 항목은 지금 것을 남깁니다. 아무것도 지우지 않습니다.' },
+        { id: 'replace', label: '전체 교체 (지금은 사용할 수 없습니다)', hint: '안전하게 되돌릴 방법이 없어 막아 두었습니다.' },
+      ], `파일에 ${countBackup(incoming).toLocaleString('ko-KR')}건이 들어 있습니다.`);
+      if (!mode) return;
+
+      if (mode === 'replace') {
+        // 저장소를 한 번도 부르지 않는다.
+        await dialog.confirm({
+          title: '전체 교체는 지금 사용할 수 없습니다',
+          body: (
+            <>
+              <p>{REPLACE_DISABLED_REASON}</p>
+              <p className="dlg-note">아무것도 저장하거나 지우지 않았습니다.</p>
+            </>
+          ),
+          confirmLabel: '알겠습니다',
+          cancelLabel: '닫기',
+        });
         return;
       }
+
+      const io: RestoreIO = {
+        fetchAll: () => fetchAll(db, uid),
+        createIfAbsent: (payload) => createManyIfAbsent(db, uid, payload),
+      };
+      const outcome = await safeMerge(incoming, io);
+
+      if (outcome.kind === 'invalid') {
+        dialog.toast('파일을 다시 확인해 주세요.', 'bad');
+        return;
+      }
+      if (outcome.kind === 'all-failed') {
+        await dialog.confirm({
+          title: '한 건도 저장하지 못했습니다',
+          body: (
+            <>
+              <ul className="dlg-skips">
+                {outcome.created.failed.slice(0, 6).map((f: { collection: string; id: string; reason: string }) => (
+                  <li key={`${f.collection}/${f.id}`}><code>{f.collection}/{f.id}</code> — {f.reason}</li>
+                ))}
+              </ul>
+              {outcome.skippedExisting > 0 && (
+                <p>같은 id 가 이미 있어 {outcome.skippedExisting.toLocaleString('ko-KR')}건은 애초에 쓰지 않았습니다.</p>
+              )}
+              <p className="dlg-note">
+                <b>기존 데이터는 하나도 바뀌지 않았습니다.</b> 연결을 확인한 뒤 같은 파일로 다시 시도해 주세요.
+              </p>
+            </>
+          ),
+          confirmLabel: '알겠습니다',
+          cancelLabel: '닫기',
+        });
+        return;
+      }
+      if (outcome.kind === 'partial') {
+        const { created, conflicts, failed } = outcome.created;
+        const alreadyThere = conflicts.length + outcome.skippedExisting;
+        await dialog.confirm({
+          title: `${created.toLocaleString('ko-KR')}건을 더했습니다`,
+          body: (
+            <>
+              {alreadyThere > 0 && (
+                <p>
+                  같은 id 가 이미 있어 <b>{alreadyThere.toLocaleString('ko-KR')}건</b>은 건너뛰었습니다 —
+                  {' '}지금 내용을 그대로 두었습니다.
+                </p>
+              )}
+              {failed.length > 0 && (
+                <>
+                  <p><b>{failed.length.toLocaleString('ko-KR')}건</b>은 저장하지 못했습니다.</p>
+                  <ul className="dlg-skips">
+                    {failed.slice(0, 6).map((f: { collection: string; id: string; reason: string }) => (
+                      <li key={`${f.collection}/${f.id}`}><code>{f.collection}/{f.id}</code> — {f.reason}</li>
+                    ))}
+                    {failed.length > 6 && <li>그 외 {(failed.length - 6).toLocaleString('ko-KR')}건</li>}
+                  </ul>
+                  <p className="dlg-note">
+                    같은 파일로 다시 가져오면 못 들어간 것만 이어서 들어갑니다. 이미 있는 항목은 건드리지 않습니다.
+                  </p>
+                </>
+              )}
+            </>
+          ),
+          confirmLabel: '알겠습니다',
+          cancelLabel: '닫기',
+        });
+        return;
+      }
+
       dialog.toast(
-        `${outcome.written.written.toLocaleString('ko-KR')}건을 ${mode === 'merge' ? '더했습니다' : '복원했습니다'}.`
-        + (outcome.removed.written > 0
-          ? ` 파일에 없던 ${outcome.removed.written.toLocaleString('ko-KR')}건은 지웠습니다.`
-          : ''),
+        outcome.created.created > 0
+          ? `${outcome.created.created.toLocaleString('ko-KR')}건을 더했습니다.`
+            + (outcome.skippedExisting > 0
+              ? ` 이미 있는 ${outcome.skippedExisting.toLocaleString('ko-KR')}건은 그대로 두었습니다.`
+              : '')
+          : '더할 것이 없습니다. 파일의 항목이 모두 이미 있습니다.',
       );
-    };
-
-    try {
-      if (mode === 'merge') {
-        await report(await safeMerge(incoming, io, recovery.rule));
-        return;
-      }
-
-      const confirmed = await dialog.confirm({
-        title: '파일에 없는 데이터를 지울까요?',
-        body: (
-          <>
-            <p>
-              먼저 파일의 {countDocs(incoming).toLocaleString('ko-KR')}건을 모두 저장하고,
-              <b> 저장이 전부 끝난 뒤에만 </b>
-              파일에 없는 일정·잔고·대출·고정 메모를 지웁니다.
-            </p>
-            <p className="dlg-note">
-              중간에 끊기면 지우는 단계까지 가지 않습니다 — 지금 데이터가 사라지는 구간은 없습니다.
-              그래도 먼저 <b>JSON으로 백업 내려받기</b>를 해 두는 편이 안전합니다.
-            </p>
-          </>
-        ),
-        confirmLabel: '저장하고 교체',
-        danger: true,
-      });
-      if (!confirmed) return;
-
-      const outcome = await safeReplace(incoming, io);
-      if (outcome.kind === 'ok' || outcome.kind === 'remove-failed') {
-        // 파일의 규칙을 되돌린다. 규칙이 없던 파일이면 매달린 참조만 끊는다.
-        if (incoming.recovery) recovery.saveRule(incoming.recovery);
-        else recovery.clearActive();
-      }
-      await report(outcome);
     } catch (err) {
       dialog.toast(
-        `가져오지 못했습니다. ${describeFirestoreError(err)} 지금 데이터는 지우지 않았습니다.`,
+        `가져오지 못했습니다. ${describeFirestoreError(err)} 기존 데이터는 바뀌지 않았습니다.`,
         'bad',
       );
+    } finally {
+      importing.current = false;
     }
-  }, [db, uid, isAnon, promptLogin, dialog, recovery]);
+  }, [db, uid, isAnon, promptLogin, dialog]);
 
   const handleMigrate = useCallback(async () => {
     if (isAnon || !uid) { void promptLogin(); return; }
@@ -738,6 +761,7 @@ function Workspace({ uid, user, onSignOut }: WorkspaceProps) {
             todayISO={today}
             entries={materialized}
             tideEntries={store.tideEntries}
+            tideFrom={tideFrom}
             accounts={store.accounts}
             hasBalance={hasBalance}
             collapsed={prefs.todayCollapsed}
@@ -757,6 +781,7 @@ function Workspace({ uid, user, onSignOut }: WorkspaceProps) {
           <TideBar
             accounts={store.accounts}
             entries={store.tideEntries}
+            tideFrom={tideFrom}
             hasBalance={hasBalance}
             onSaveAccount={saveBalance}
             onEntryClick={openEdit}

@@ -334,6 +334,16 @@ export function headlineLimit(
  */
 export interface Settlement {
   since: DateISO;
+  /**
+   * 정산 구간 전체를 볼 자료가 있었는가.
+   *
+   * 계산 구독은 오늘 기준 고정 구간(뒤로 1달)만 받는다. 잔고 기준일이 그보다 오래됐다면
+   * 그 사이의 **비반복** 입출금이 목록에 없다 — 반복 항목은 전량 구독하므로 빠지지 않는다.
+   * 그 상태에서 낸 diff 는 실제보다 크다. false 면 확정 금액으로 보여 주면 안 된다.
+   */
+  complete: boolean;
+  /** 자료가 있는 가장 이른 날. complete 가 false 일 때 어디부터 비는지 알려 준다. */
+  coveredFrom: DateISO | null;
   passed: Occurrence[];
   passedIn: number;
   passedOut: number;
@@ -346,6 +356,8 @@ export interface Settlement {
 export function settle(
   accounts: readonly Account[], entries: readonly Entry[],
   newAmountMinor: number, todayISO: DateISO,
+  /** `entries` 가 덮는 가장 이른 날. 주지 않으면 자료가 충분하다고 본다. */
+  coveredFrom?: DateISO | null,
 ): Settlement {
   // 정산 구간이 비면 occurrences 를 거치지 않고 끝난다. 여기서도 직접 본다.
   assertOriginals(entries);
@@ -362,8 +374,12 @@ export function settle(
   const currentBalance = accounts.reduce((s, a) => s + a.balanceMinor, 0);
   const passed = occurrences(entries, since, todayISO);
   const expected = currentBalance + netOf(passed);
+  const from = coveredFrom ? normalizeDate(coveredFrom) : null;
   return {
     since,
+    // 기준일이 자료가 있는 구간보다 앞서면 빠진 발생분이 있다.
+    complete: !from || since >= from,
+    coveredFrom: from || null,
     passed,
     passedIn: totalIn(passed),
     passedOut: totalOut(passed),

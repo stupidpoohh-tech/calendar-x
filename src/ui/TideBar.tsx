@@ -28,6 +28,8 @@ import { BalanceInput, BalanceNote, useBalanceEditor } from './balanceEditor';
 interface Props {
   accounts: readonly Account[];
   entries: readonly Entry[];
+  /** 계산 목록이 덮는 가장 이른 날. 정산이 자료 부족을 판정하는 데 쓴다. */
+  tideFrom?: string | null;
   hasBalance: boolean;
   onSaveAccount: (a: Account) => void;
   onEntryClick?: (entry: Entry) => void;
@@ -38,11 +40,11 @@ interface Props {
 }
 
 export function TideBar({
-  accounts, entries, hasBalance, onSaveAccount, onEntryClick,
+  accounts, entries, tideFrom, hasBalance, onSaveAccount, onEntryClick,
   collapsed, onToggleCollapsed, children,
 }: Props) {
   const today = useMemo(() => computeToday(), []);
-  const editor = useBalanceEditor(accounts, entries, onSaveAccount);
+  const editor = useBalanceEditor(accounts, entries, onSaveAccount, tideFrom);
 
   const horizon = useMemo(() => horizonOf(entries, today), [entries, today]);
   const limit = useMemo(

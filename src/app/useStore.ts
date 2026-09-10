@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { describeFirestoreError, isPermissionDenied } from '../data/errors';
 import { getFirebase } from '../data/firebase';
 import {
@@ -78,28 +78,50 @@ export function useStore(uid: string | null, cursorISO: string, todayISO: string
   });
   sinkRef.current = { setError, setBlocked: setRulesBlocked };
 
+  /** 오류 처리는 세 effect 가 같이 쓴다. */
+  const onError = useCallback((scope: string, err: unknown) => {
+    // 조용히 삼키면 "저장은 되는데 안 보이는" 상태의 원인을 찾을 수 없다.
+    console.error(`[${scope}]`, err);
+    if (isPermissionDenied(err)) { sinkRef.current.setBlocked(true); return; }
+    sinkRef.current.setError(`${scope} 를 불러오지 못했습니다. ${describeFirestoreError(err)}`);
+  }, []);
+
+  /*
+    ── effect 를 셋으로 나눈 이유 ────────────────────────────────
+
+    하나로 묶으면 달을 넘길 때마다(monthKey 변경) 계산 구독과 잔고·대출·고정 메모까지
+    전부 끊고 다시 붙는다. 계산 창은 오늘 기준이라 커서와 무관한데도 재구독이 돌고,
+    그때마다 잠깐 빈 목록이 흘러 머리 숫자가 깜빡인다.
+
+    이제 커서를 옮기면 화면용 구독만 다시 붙는다.
+  */
+
+  // 1. 화면용 — 커서를 따라 움직인다.
   useEffect(() => {
-    if (!uid) {
-      setMonthEntries([]); setTideRaw([]); setRecurring([]);
-      setAccounts([]); setDebts([]); setPins([]);
-      setReady(false);
-      return;
-    }
-
+    if (!uid) { setMonthEntries([]); setReady(false); return; }
     const { db } = getFirebase();
-    const onError = (scope: string, err: unknown) => {
-      // 조용히 삼키면 "저장은 되는데 안 보이는" 상태의 원인을 찾을 수 없다.
-      console.error(`[${scope}]`, err);
-      if (isPermissionDenied(err)) {
-        sinkRef.current.setBlocked(true);
-        return;
-      }
-      sinkRef.current.setError(`${scope} 를 불러오지 못했습니다. ${describeFirestoreError(err)}`);
-    };
+    return subscribeEntriesForMonths(
+      db, uid, monthKey.split(','),
+      (e) => { setMonthEntries(e); setReady(true); },
+      onError,
+    );
+  }, [uid, monthKey, onError]);
 
+  // 2. 계산용 — 오늘 기준. 커서를 옮겨도 다시 붙지 않는다.
+  useEffect(() => {
+    if (!uid) { setTideRaw([]); return; }
+    const { db } = getFirebase();
+    return subscribeEntriesForMonths(
+      db, uid, tideKey.split(','), setTideRaw,
+      (scope, err) => onError(`${scope} (계산)`, err),
+    );
+  }, [uid, tideKey, onError]);
+
+  // 3. 나머지 — uid 가 바뀔 때만.
+  useEffect(() => {
+    if (!uid) { setRecurring([]); setAccounts([]); setDebts([]); setPins([]); return; }
+    const { db } = getFirebase();
     const unsubs = [
-      subscribeEntriesForMonths(db, uid, monthKey.split(','), (e) => { setMonthEntries(e); setReady(true); }, onError),
-      subscribeEntriesForMonths(db, uid, tideKey.split(','), setTideRaw, (s, e) => onError(`${s} (계산)`, e)),
       subscribeRecurringEntries(db, uid, setRecurring, onError),
       subscribeAccounts(db, uid, setAccounts, onError),
       subscribeDebts(db, uid, setDebts, onError),
@@ -107,11 +129,10 @@ export function useStore(uid: string | null, cursorISO: string, todayISO: string
     ];
     return () => {
       unsubs.forEach((u) => u());
-      // 달을 옮길 때마다 지난 오류가 남아 있으면 안 된다.
       setRulesBlocked(false);
       setError(null);
     };
-  }, [uid, monthKey, tideKey]);
+  }, [uid, onError]);
 
   // 반복 항목은 첫 발생 달의 ymSpan 을 갖고 있어 월 조회에도 걸린다.
   // 두 번 들어가지 않도록 id 로 합친다.

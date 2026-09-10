@@ -29,6 +29,8 @@ interface Props {
    * 펼친 목록을 넣으면 tide 가 한 번 더 전개해 같은 입출금을 여러 번 센다.
    */
   tideEntries: readonly Entry[];
+  /** 계산 목록이 덮는 가장 이른 날. 정산이 자료 부족을 판정하는 데 쓴다. */
+  tideFrom?: string | null;
   accounts: readonly Account[];
   /** 잔고를 한 번도 입력하지 않았으면 tide 값을 0으로 단정하지 않는다. */
   hasBalance: boolean;
@@ -48,13 +50,13 @@ function occursOnDay(e: Entry, iso: string): boolean {
 }
 
 export function TodayPanel({
-  todayISO, entries, tideEntries, accounts, hasBalance,
+  todayISO, entries, tideEntries, tideFrom, accounts, hasBalance,
   collapsed, onToggleCollapsed, moneyCollapsed, onToggleMoneyCollapsed,
   onEntryClick, onStatusChange, onPromote, onQuickIdea, onSaveAccount,
 }: Props) {
   const [idea, setIdea] = useState('');
   // 정산은 계산이다. 원본을 넘긴다.
-  const editor = useBalanceEditor(accounts, tideEntries, onSaveAccount);
+  const editor = useBalanceEditor(accounts, tideEntries, onSaveAccount, tideFrom);
 
   const weekEndISO = addDaysISO(todayISO, 6);
 

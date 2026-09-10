@@ -11,10 +11,10 @@ import { newEntry } from '../domain/entry';
 import { defaultRecoveryRule } from '../domain/recovery';
 import type { Account, BackupCollection, Debt, Entry, Pin } from '../domain/types';
 import type { BackupData } from './backup';
-import { parseBackup } from './backup';
-import type { WriteManyResult } from './repo';
+import { readBackupFile } from './backupFile';
+import type { CreateManyResult } from './repo';
 import {
-  countDocs, describeProblem, planMerge, planReplace, safeMerge, safeReplace,
+  countDocs, describeProblem, planMerge, REPLACE_DISABLED_REASON, safeMerge, safeReplace,
   validateBackup, type RestoreIO,
 } from './restore';
 
@@ -47,17 +47,20 @@ describe('검증 — 온전한 파일은 통과한다', () => {
     expect(countDocs(ok)).toBe(5);
   });
 
-  it('예전 형식(version 1, items 배열)도 그대로 받는다', () => {
+  it('예전 형식(items 배열)을 옮긴 결과도 검증을 통과한다', () => {
     const legacy = {
       items: [{
-        id: 'old-1', type: 'todo', title: '예전 할 일',
+        id: 'old-1', tab: 'todo', title: '예전 할 일',
         startISO: '2026-09-01T09:00:00.000Z', status: 'planned',
       }],
     };
-    const parsed = parseBackup(JSON.stringify(legacy));
-    expect(parsed.entries).toHaveLength(1);
-    // 이관 변환기가 이미 한도에 맞춰 다듬으므로 검증을 통과해야 한다.
-    expect(validateBackup(parsed)).toEqual([]);
+    const r = readBackupFile(JSON.stringify(legacy));
+    expect(r.ok).toBe(true);
+    if (r.ok) {
+      expect(r.file.data.entries).toHaveLength(1);
+      // 이관 변환기가 이미 한도에 맞춰 다듬으므로 도메인 검증도 통과해야 한다.
+      expect(validateBackup(r.file.data)).toEqual([]);
+    }
   });
 });
 
@@ -177,53 +180,6 @@ describe('검증 — 잘못된 값은 조용히 바뀌지 않고 보고된다', 
   });
 });
 
-describe('전체 교체 계획 — 네 컬렉션 모두', () => {
-  const current = data({
-    entries: [newEntry('task', { id: 'keep' }), newEntry('task', { id: 'drop' })],
-    accounts: [account({ id: 'a-keep' }), account({ id: 'a-drop' })],
-    debts: [debt({ id: 'd-drop' })],
-    pins: [pin({ id: 'p-drop' })],
-  });
-  const incoming = data({
-    entries: [newEntry('task', { id: 'keep' }), newEntry('task', { id: 'new' })],
-    accounts: [account({ id: 'a-keep' })],
-  });
-
-  it('쓸 것은 백업 전체다 — 지우기 전에 전부 쓴다', () => {
-    expect(planReplace(current, incoming).write).toBe(incoming);
-  });
-
-  it('지울 것은 지금 있는데 파일에 없는 것뿐이다', () => {
-    const ids = planReplace(current, incoming).remove.map((r) => `${r.collection}/${r.id}`);
-    expect(ids.sort()).toEqual([
-      'accounts/a-drop', 'debts/d-drop', 'entries/drop', 'pins/p-drop',
-    ]);
-  });
-
-  it('예전에는 일정만 지웠다 — 잔고·대출·고정 메모가 남았다', () => {
-    const removed = planReplace(current, incoming).remove;
-    // 이 세 줄이 그 구멍을 막는다.
-    expect(removed.some((r) => r.collection === 'accounts')).toBe(true);
-    expect(removed.some((r) => r.collection === 'debts')).toBe(true);
-    expect(removed.some((r) => r.collection === 'pins')).toBe(true);
-  });
-
-  it('두 번 돌려도 같은 결과가 나온다', () => {
-    const first = planReplace(current, incoming);
-    // 한 번 끝난 뒤의 상태(= 파일 그대로)에서 다시 계획하면 지울 것이 없다.
-    const after = planReplace(incoming, incoming);
-    expect(first.remove.length).toBeGreaterThan(0);
-    expect(after.remove).toEqual([]);
-  });
-
-  it('복원 도중 다른 탭에서 생긴 문서도 지울 목록에 잡힌다', () => {
-    const meanwhile = data({ ...current, pins: [...current.pins, pin({ id: 'p-new-elsewhere' })] });
-    const ids = planReplace(meanwhile, incoming).remove.map((r) => r.id);
-    // "파일에 없는 것은 남기지 않는다" 가 전체 교체의 뜻이다.
-    expect(ids).toContain('p-new-elsewhere');
-  });
-});
-
 describe('병합 계획', () => {
   const current = data({
     entries: [newEntry('task', { id: 'mine', title: '원본' })],
@@ -262,16 +218,15 @@ describe('무결성 — Entry 가 아닌 값', () => {
   });
 });
 
-// ---------- 순서 — 실패를 주입해서 확인한다 ----------
+// ---------- 실행 — 무엇이 보존되는가 ----------
 
 /**
  * 가짜 저장소.
  *
- * 실제 Firestore 없이 "쓰기가 실패하면 지우지 않는다" 를 시험한다.
- * 에뮬레이터로 도는 통합 테스트(`src/test/restore.emulator.test.ts`)가 같은 순서를
- * 진짜 저장소에서 한 번 더 확인한다.
+ * `createIfAbsent` 는 실제 구현과 같은 약속을 지킨다 — 이미 있으면 **건드리지 않고**
+ * 충돌로 남긴다. 그래야 "덮어쓰지 않는다" 를 값으로 확인할 수 있다.
  */
-function fakeStore(seed: BackupData, opts: { failWrites?: Set<string>; failDeletes?: Set<string> } = {}) {
+function fakeStore(seed: BackupData, opts: { failWrites?: Set<string> } = {}) {
   const state: BackupData = {
     entries: [...seed.entries], accounts: [...seed.accounts],
     debts: [...seed.debts], pins: [...seed.pins], recovery: seed.recovery,
@@ -282,11 +237,14 @@ function fakeStore(seed: BackupData, opts: { failWrites?: Set<string>; failDelet
   const io: RestoreIO = {
     fetchAll: async () => {
       log.push('fetchAll');
-      return { entries: [...state.entries], accounts: [...state.accounts], debts: [...state.debts], pins: [...state.pins] };
+      return {
+        entries: [...state.entries], accounts: [...state.accounts],
+        debts: [...state.debts], pins: [...state.pins],
+      };
     },
-    writeMany: async (payload) => {
-      log.push('write');
-      const result: WriteManyResult = { written: 0, failed: [], allFailed: false };
+    createIfAbsent: async (payload) => {
+      log.push('create');
+      const result: CreateManyResult = { created: 0, conflicts: [], failed: [], allFailed: false };
       let total = 0;
       for (const key of keys) {
         for (const item of payload[key] ?? []) {
@@ -296,29 +254,16 @@ function fakeStore(seed: BackupData, opts: { failWrites?: Set<string>; failDelet
             continue;
           }
           const list = state[key] as { id: string }[];
-          const at = list.findIndex((x) => x.id === item.id);
-          if (at >= 0) list[at] = item; else list.push(item);
-          result.written += 1;
+          if (list.some((x) => x.id === item.id)) {
+            // 이미 있다. 덮어쓰지 않는다.
+            result.conflicts.push({ collection: key, id: item.id });
+            continue;
+          }
+          list.push(item);
+          result.created += 1;
         }
       }
-      result.allFailed = total > 0 && result.written === 0;
-      return result;
-    },
-    deleteMany: async (targets) => {
-      log.push('delete');
-      const result: WriteManyResult = { written: 0, failed: [], allFailed: false };
-      for (const t of targets) {
-        if (opts.failDeletes?.has(t.id)) {
-          result.failed.push({ collection: t.collection, id: t.id, reason: '주입한 실패' });
-          continue;
-        }
-        for (const key of keys) {
-          const list = state[key] as { id: string }[];
-          const at = list.findIndex((x) => x.id === t.id);
-          if (at >= 0) { list.splice(at, 1); result.written += 1; break; }
-        }
-      }
-      result.allFailed = targets.length > 0 && result.written === 0;
+      result.allFailed = total > 0 && result.created === 0 && result.conflicts.length === 0;
       return result;
     },
   };
@@ -326,148 +271,134 @@ function fakeStore(seed: BackupData, opts: { failWrites?: Set<string>; failDelet
 }
 
 const seeded = () => data({
-  entries: [newEntry('task', { id: 'old-1', title: '내 것' }), newEntry('task', { id: 'old-2' })],
+  entries: [newEntry('task', { id: 'A', title: '내 것' }), newEntry('task', { id: 'old-2' })],
   accounts: [account({ id: 'a-old' })],
   debts: [debt({ id: 'd-old' })],
   pins: [pin({ id: 'p-old' })],
 });
 
-const restored = () => data({
-  entries: [newEntry('task', { id: 'new-1', title: '복원' })],
-  accounts: [account({ id: 'a-new' })],
-});
-
-describe('전체 교체 — 쓰기가 먼저고 지우기는 맨 끝', () => {
-  it('정상 복원: 쓰고 나서 지운다', async () => {
-    const { io, state, log } = fakeStore(seeded());
-    const outcome = await safeReplace(restored(), io);
-
-    expect(outcome.kind).toBe('ok');
-    expect(log).toEqual(['write', 'fetchAll', 'delete']);
-    expect(state.entries.map((e) => e.id)).toEqual(['new-1']);
-    expect(state.accounts.map((a) => a.id)).toEqual(['a-new']);
-    // 전체 교체는 네 컬렉션 모두에 적용된다.
-    expect(state.debts).toEqual([]);
-    expect(state.pins).toEqual([]);
+describe('전체 교체 — 꺼져 있다', () => {
+  it('저장소를 한 번도 부르지 않는다', () => {
+    const outcome = safeReplace();
+    expect(outcome.kind).toBe('replace-disabled');
+    if (outcome.kind === 'replace-disabled') {
+      expect(outcome.reason).toBe(REPLACE_DISABLED_REASON);
+    }
   });
 
-  it('일부 쓰기 실패: 아무것도 지우지 않는다 — 기존 데이터가 그대로 남는다', async () => {
-    const { io, state, log } = fakeStore(seeded(), { failWrites: new Set(['a-new']) });
-    const outcome = await safeReplace(restored(), io);
+  it('RestoreIO 를 받지도 않는다 — 쓰기·삭제가 새어 나갈 자리가 없다', () => {
+    expect(safeReplace).toHaveLength(0);
+  });
 
-    expect(outcome.kind).toBe('write-failed');
-    expect(log).not.toContain('delete');
-    // 예전 구조라면 여기서 이미 일정이 다 지워져 있었다.
-    expect(state.entries.map((e) => e.id).sort()).toEqual(['new-1', 'old-1', 'old-2']);
+  it('이유가 사용자에게 보여 줄 문장이다', () => {
+    expect(REPLACE_DISABLED_REASON).toContain('되돌릴 방법이 없');
+    expect(REPLACE_DISABLED_REASON).toContain('기존 데이터에 더하기');
+  });
+});
+
+describe('병합 — 기존 문서를 덮어쓰지 않는다', () => {
+  it('파일에만 있는 것을 더한다', async () => {
+    const { io, state } = fakeStore(seeded());
+    const outcome = await safeMerge(data({ entries: [newEntry('task', { id: 'new-1' })] }), io);
+
+    expect(outcome.kind).toBe('ok');
+    expect(state.entries.map((e) => e.id).sort()).toEqual(['A', 'new-1', 'old-2']);
+    // 지우는 단계 자체가 없다.
     expect(state.debts.map((d) => d.id)).toEqual(['d-old']);
     expect(state.pins.map((p) => p.id)).toEqual(['p-old']);
   });
 
-  it('전체 쓰기 실패: 역시 아무것도 지우지 않는다', async () => {
-    const { io, state, log } = fakeStore(seeded(), { failWrites: new Set(['new-1', 'a-new']) });
-    const outcome = await safeReplace(restored(), io);
-
-    expect(outcome.kind).toBe('write-failed');
-    if (outcome.kind === 'write-failed') expect(outcome.written.allFailed).toBe(true);
-    expect(log).not.toContain('delete');
-    expect(state.entries.map((e) => e.id)).toEqual(['old-1', 'old-2']);
+  it('같은 id 는 지금 것을 남긴다 — 내용이 달라도 덮지 않는다', async () => {
+    const { io, state } = fakeStore(seeded());
+    await safeMerge(data({ entries: [newEntry('task', { id: 'A', title: '파일 내용' })] }), io);
+    expect(state.entries.find((e) => e.id === 'A')?.title).toBe('내 것');
   });
 
-  it('실패한 뒤 같은 파일로 다시 하면 이어서 끝난다 (재시도)', async () => {
-    const fail = fakeStore(seeded(), { failWrites: new Set(['a-new']) });
-    expect((await safeReplace(restored(), fail.io)).kind).toBe('write-failed');
-
-    // 원인을 고친 뒤 같은 상태에서 다시 — 이번에는 실패를 주입하지 않는다.
-    const retry = fakeStore(fail.state);
-    const outcome = await safeReplace(restored(), retry.io);
-    expect(outcome.kind).toBe('ok');
-    expect(retry.state.entries.map((e) => e.id)).toEqual(['new-1']);
-    expect(retry.state.accounts.map((a) => a.id)).toEqual(['a-new']);
-  });
-
-  it('두 번 연속 복원해도 같은 자리에 머문다', async () => {
+  it('조회 뒤에 다른 클라이언트가 같은 id 를 만들어도 덮어쓰지 않는다', async () => {
     const store = fakeStore(seeded());
-    await safeReplace(restored(), store.io);
-    const second = await safeReplace(restored(), store.io);
+    const real = store.io;
+    const io: RestoreIO = {
+      // 조회 시점에는 없다가...
+      fetchAll: real.fetchAll,
+      createIfAbsent: async (payload) => {
+        // ...쓰기 직전에 다른 탭이 같은 id 를 만든다.
+        store.state.entries.push(newEntry('task', { id: 'race', title: '다른 탭이 먼저' }));
+        return real.createIfAbsent(payload);
+      },
+    };
 
-    expect(second.kind).toBe('ok');
-    if (second.kind === 'ok') expect(second.removed.written).toBe(0);
-    expect(store.state.entries.map((e) => e.id)).toEqual(['new-1']);
+    const outcome = await safeMerge(data({ entries: [newEntry('task', { id: 'race', title: '파일 내용' })] }), io);
+
+    expect(outcome.kind).toBe('partial');
+    if (outcome.kind === 'partial') {
+      expect(outcome.created.conflicts.map((c) => c.id)).toEqual(['race']);
+      expect(outcome.created.created).toBe(0);
+    }
+    // 먼저 만들어진 쪽이 남는다.
+    expect(store.state.entries.find((e) => e.id === 'race')?.title).toBe('다른 탭이 먼저');
   });
 
-  it('지우기가 일부 실패하면 복원은 끝났다고 알리고 남은 것을 보고한다', async () => {
-    const { io, state } = fakeStore(seeded(), { failDeletes: new Set(['old-2']) });
-    const outcome = await safeReplace(restored(), io);
+  it('A 를 더한 뒤 B 가 실패해도 A 의 기존 내용은 그대로다', async () => {
+    // 필수 회귀 사례: 기존 A 와 백업 A 의 내용이 다른 상태에서 B 저장 실패.
+    const { io, state } = fakeStore(seeded(), { failWrites: new Set(['B']) });
+    const outcome = await safeMerge(data({
+      entries: [newEntry('task', { id: 'A', title: '파일 내용' }), newEntry('task', { id: 'B' })],
+    }), io);
 
-    expect(outcome.kind).toBe('remove-failed');
-    if (outcome.kind === 'remove-failed') {
-      expect(outcome.written.failed).toEqual([]);
-      expect(outcome.removed.failed.map((f) => f.id)).toEqual(['old-2']);
+    // A 는 조회 시점에 이미 있어 후보에서 빠졌고, B 는 실패했다 — 들어간 것이 없다.
+    expect(outcome.kind).toBe('all-failed');
+    if (outcome.kind === 'all-failed') {
+      expect(outcome.skippedExisting).toBe(1);
+      expect(outcome.created.failed.map((f) => f.id)).toEqual(['B']);
     }
-    // 파일 내용은 다 들어갔다.
-    expect(state.entries.map((e) => e.id)).toContain('new-1');
+    // A 는 쓰기를 시도하지도 않았다 — 원래 내용이 그대로다.
+    expect(state.entries.find((e) => e.id === 'A')?.title).toBe('내 것');
+    expect(state.entries.find((e) => e.id === 'B')).toBeUndefined();
+  });
+
+  it('전체 실패면 all-failed 로 알린다', async () => {
+    const { io, state } = fakeStore(seeded(), { failWrites: new Set(['new-1', 'new-2']) });
+    const outcome = await safeMerge(data({
+      entries: [newEntry('task', { id: 'new-1' }), newEntry('task', { id: 'new-2' })],
+    }), io);
+
+    expect(outcome.kind).toBe('all-failed');
+    expect(state.entries.map((e) => e.id).sort()).toEqual(['A', 'old-2']);
+  });
+
+  it('부분 성공 뒤 다시 하면 못 들어간 것만 들어간다', async () => {
+    const first = fakeStore(seeded(), { failWrites: new Set(['B']) });
+    const payload = data({ entries: [newEntry('task', { id: 'A' }), newEntry('task', { id: 'B' })] });
+    expect((await safeMerge(payload, first.io)).kind).toBe('all-failed');
+
+    const retry = fakeStore(first.state);
+    const outcome = await safeMerge(payload, retry.io);
+    expect(outcome.kind).toBe('ok');
+    expect(retry.state.entries.map((e) => e.id).sort()).toEqual(['A', 'B', 'old-2']);
+  });
+
+  it('두 번 연속 가져와도 같은 자리에 머문다', async () => {
+    const store = fakeStore(seeded());
+    const payload = data({ entries: [newEntry('task', { id: 'new-1' })] });
+    await safeMerge(payload, store.io);
+    const second = await safeMerge(payload, store.io);
+
+    // 두 번째에는 더할 것이 없다 — 저장소를 쓰지도 않는다.
+    expect(second.kind).toBe('ok');
+    if (second.kind === 'ok') expect(second.created.created).toBe(0);
+    expect(store.state.entries.filter((e) => e.id === 'new-1')).toHaveLength(1);
   });
 
   it('잘못된 파일이면 저장소를 한 번도 부르지 않는다', async () => {
-    const { io, state, log } = fakeStore(seeded());
-    const bad = data({ pins: [pin({ id: 'a/b' })] });
-    const outcome = await safeReplace(bad, io);
-
-    expect(outcome.kind).toBe('invalid');
-    expect(log).toEqual([]);
-    expect(state.entries.map((e) => e.id)).toEqual(['old-1', 'old-2']);
-  });
-
-  it('배치 경계(400건)를 넘는 데이터도 끝까지 처리한다', async () => {
-    const many = data({
-      entries: Array.from({ length: 950 }, (_, i) => newEntry('task', { id: `bulk-${i}` })),
-    });
-    const { io, state } = fakeStore(seeded());
-    const outcome = await safeReplace(many, io);
-
-    expect(outcome.kind).toBe('ok');
-    if (outcome.kind === 'ok') {
-      expect(outcome.written.written).toBe(950);
-      // 기존 5건이 전부 지워진다.
-      expect(outcome.removed.written).toBe(5);
-    }
-    expect(state.entries).toHaveLength(950);
-  });
-});
-
-describe('병합 — 지우는 단계가 없다', () => {
-  it('파일에만 있는 것을 더하고 기존은 건드리지 않는다', async () => {
-    const { io, state, log } = fakeStore(seeded());
-    const outcome = await safeMerge(restored(), io, null);
-
-    expect(outcome.kind).toBe('ok');
-    expect(log).not.toContain('delete');
-    expect(state.entries.map((e) => e.id).sort()).toEqual(['new-1', 'old-1', 'old-2']);
-    expect(state.debts.map((d) => d.id)).toEqual(['d-old']);
-  });
-
-  it('같은 id 는 지금 것을 남긴다', async () => {
-    const { io, state } = fakeStore(seeded());
-    await safeMerge(data({ entries: [newEntry('task', { id: 'old-1', title: '들어온 것' })] }), io, null);
-    expect(state.entries.find((e) => e.id === 'old-1')?.title).toBe('내 것');
-  });
-
-  it('쓰기가 실패하면 실패로 보고한다 — 조용히 성공이라 하지 않는다', async () => {
-    const { io } = fakeStore(seeded(), { failWrites: new Set(['new-1']) });
-    const outcome = await safeMerge(restored(), io, null);
-    expect(outcome.kind).toBe('write-failed');
-  });
-
-  it('잘못된 파일이면 저장소를 부르지 않는다', async () => {
     const { io, log } = fakeStore(seeded());
-    expect((await safeMerge(data({ pins: [pin({ id: '' })] }), io, null)).kind).toBe('invalid');
+    expect((await safeMerge(data({ pins: [pin({ id: 'a/b' })] }), io)).kind).toBe('invalid');
     expect(log).toEqual([]);
   });
-});
 
-describe('저장 규칙과 검증기가 같은 한도를 본다', () => {
-  it('확인 시각이 40자를 넘으면 거른다 — 규칙이 길이로 거부한다', () => {
-    const bad = data({ accounts: [account({ checkedAt: 'x'.repeat(41) })] });
-    expect(validateBackup(bad)[0]?.reason).toContain('확인 시각');
+  it('더할 것이 없으면 쓰지 않는다', async () => {
+    const { io, log } = fakeStore(seeded());
+    const outcome = await safeMerge(data({ entries: [newEntry('task', { id: 'A' })] }), io);
+    expect(outcome.kind).toBe('ok');
+    expect(log).toEqual(['fetchAll']);
   });
 });

@@ -10,7 +10,7 @@
  * 곧바로 반영된다. (F-08)
  */
 import {
-  deleteDoc, getDoc, getDocs, onSnapshot, query, setDoc, where, writeBatch,
+  deleteDoc, getDoc, getDocs, onSnapshot, query, runTransaction, setDoc, where, writeBatch,
   type Firestore, type QuerySnapshot,
 } from 'firebase/firestore';
 import { ymOf } from '../domain/date';
@@ -285,45 +285,85 @@ export async function writeMany(
 }
 
 /**
- * 다건 삭제. 어느 컬렉션이든 문서 단위로 지운다.
+ * 다건 생성 — **이미 있으면 건드리지 않는다.**
  *
- * 결과 모양을 `writeMany` 와 같게 맞춘 이유는, 부르는 쪽이 "몇 건 지웠고 몇 건이
- * 왜 남았는지" 를 쓰기와 똑같이 확인해야 하기 때문이다. 배치가 깨지면 문서 단위로
- * 다시 시도해 범인을 추린다.
+ * 병합의 약속은 "같은 id 는 지금 것을 남긴다" 인데, `fetchAll()` 로 없는 id 를 고른 뒤
+ * `setDoc` 으로 쓰면 그 사이에 다른 탭이 같은 id 를 만들었을 때 덮어쓴다. 읽는 시점과
+ * 쓰는 시점이 다르기 때문이다.
  *
- * 예전에는 `deleteAllEntries()` 하나뿐이었고 전체 교체가 그것을 **먼저** 불렀다.
- * 그래서 저장이 실패해도 이미 지운 뒤였다. 지금 이 함수는 저장이 모두 성공한 뒤에만
- * 불린다 (`restore.ts` 의 순서).
+ * 트랜잭션 안에서 존재 확인과 쓰기를 함께 해야 그 창이 닫힌다. 커밋 직전에 문서가
+ * 생기면 트랜잭션이 다시 돌고, 두 번째 읽기에서 발견해 충돌로 남긴다.
+ *
+ * 오프라인에서는 트랜잭션이 돌지 않는다 (`unavailable`). 그때는 한 건도 쓰지 않고
+ * 실패로 돌아온다 — 조용히 나중에 반영되는 것보다 낫다.
  */
-export async function deleteMany(
-  db: Firestore, uid: string,
-  targets: readonly { collection: string; id: string }[],
-  onProgress?: (done: number, total: number) => void,
-): Promise<WriteManyResult> {
-  const result: WriteManyResult = { written: 0, failed: [], allFailed: false };
-  const CHUNK = 400;
+export interface CreateManyResult {
+  created: number;
+  /** 이미 있어서 건드리지 않은 문서. **기존 내용이 그대로 남는다.** */
+  conflicts: { collection: string; id: string }[];
+  failed: { collection: string; id: string; reason: string }[];
+  allFailed: boolean;
+}
 
-  for (let i = 0; i < targets.length; i += CHUNK) {
-    const slice = targets.slice(i, i + CHUNK);
+export async function createManyIfAbsent(
+  db: Firestore, uid: string,
+  payload: { entries?: Entry[]; accounts?: Account[]; debts?: Debt[]; pins?: Pin[] },
+  onProgress?: (done: number, total: number) => void,
+): Promise<CreateManyResult> {
+  type Job = { name: string; id: string; data: Record<string, unknown> };
+  const jobs: Job[] = [
+    ...(payload.entries ?? []).map((x) => ({ name: COL.entries, id: x.id, data: entryToDoc(x) })),
+    ...(payload.accounts ?? []).map((x) => ({ name: COL.accounts, id: x.id, data: accountToDoc(x) })),
+    ...(payload.debts ?? []).map((x) => ({ name: COL.debts, id: x.id, data: debtToDoc(x) })),
+    ...(payload.pins ?? []).map((x) => ({ name: COL.pins, id: x.id, data: pinToDoc(x) })),
+  ];
+
+  const result: CreateManyResult = { created: 0, conflicts: [], failed: [], allFailed: false };
+  // 트랜잭션은 읽기를 모두 마친 뒤에 써야 한다. 한 번에 너무 많이 읽지 않도록 끊는다.
+  const CHUNK = 100;
+
+  for (let i = 0; i < jobs.length; i += CHUNK) {
+    const slice = jobs.slice(i, i + CHUNK);
     try {
-      const batch = writeBatch(db);
-      for (const t of slice) batch.delete(docIn(db, uid, t.collection, t.id));
-      await batch.commit();
-      result.written += slice.length;
+      const absent = await runTransaction(db, async (tx) => {
+        const refs = slice.map((j) => docIn(db, uid, j.name, j.id));
+        const snaps = await Promise.all(refs.map((r) => tx.get(r)));
+        const made: Job[] = [];
+        snaps.forEach((snap, at) => {
+          if (snap.exists()) return;
+          const job = slice[at]!;
+          tx.set(refs[at]!, job.data);
+          made.push(job);
+        });
+        return made;
+      });
+      result.created += absent.length;
+      const madeIt = new Set(absent.map((j) => `${j.name}/${j.id}`));
+      for (const j of slice) {
+        if (!madeIt.has(`${j.name}/${j.id}`)) result.conflicts.push({ collection: j.name, id: j.id });
+      }
     } catch {
-      for (const t of slice) {
+      // 트랜잭션은 통째로 실패한다. 어느 문서 때문인지 알 수 없으므로 하나씩 다시 본다.
+      for (const j of slice) {
         try {
-          await deleteDoc(docIn(db, uid, t.collection, t.id));
-          result.written += 1;
-        } catch (err) {
-          result.failed.push({ collection: t.collection, id: t.id, reason: describeFirestoreError(err) });
+          const made = await runTransaction(db, async (tx) => {
+            const ref = docIn(db, uid, j.name, j.id);
+            const snap = await tx.get(ref);
+            if (snap.exists()) return false;
+            tx.set(ref, j.data);
+            return true;
+          });
+          if (made) result.created += 1;
+          else result.conflicts.push({ collection: j.name, id: j.id });
+        } catch (inner) {
+          result.failed.push({ collection: j.name, id: j.id, reason: describeFirestoreError(inner) });
         }
       }
     }
-    onProgress?.(Math.min(i + CHUNK, targets.length), targets.length);
+    onProgress?.(Math.min(i + CHUNK, jobs.length), jobs.length);
   }
 
-  result.allFailed = targets.length > 0 && result.written === 0;
+  result.allFailed = jobs.length > 0 && result.created === 0 && result.conflicts.length === 0;
   return result;
 }
 

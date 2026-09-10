@@ -221,3 +221,44 @@ describe('한도·다음 입금일은 보고 있는 달과 무관하다', () => 
     }
   });
 });
+
+describe('정산 — 자료가 모자라면 확정 금액을 내지 않는다', () => {
+  const weekly = repeating(money('expense', 10_000, '2026-01-06'), {
+    freq: 'weekly', interval: 1, until: null, count: null,
+  });
+  const oneOff = money('expense', 500_000, '2026-06-15', { title: '한 번짜리' });
+  const raw = [weekly, oneOff].map(roundTrip);
+
+  it('기준일이 계산 구간 안이면 완전하다고 표시한다', () => {
+    const acc = [account(1_000_000, '2026-09-01')];
+    const r = settle(acc, raw, 900_000, '2026-09-10', '2026-08-01');
+    expect(r.complete).toBe(true);
+    expect(r.coveredFrom).toBe('2026-08-01');
+  });
+
+  it('기준일이 계산 구간보다 앞서면 불완전하다고 표시한다', () => {
+    // 계산 구독은 뒤로 1달뿐이다. 6월의 한 번짜리 지출은 목록에 없다.
+    const acc = [account(1_000_000, '2026-05-01')];
+    const r = settle(acc, raw, 900_000, '2026-09-10', '2026-08-01');
+    expect(r.complete).toBe(false);
+    expect(r.coveredFrom).toBe('2026-08-01');
+  });
+
+  it('덮는 구간을 주지 않으면 완전하다고 본다 (도메인 테스트 · 이전 호출부 호환)', () => {
+    const acc = [account(1_000_000, '2026-05-01')];
+    expect(settle(acc, raw, 900_000, '2026-09-10').complete).toBe(true);
+  });
+
+  it('불완전할 때의 diff 는 실제보다 크다 — 그래서 보여 주면 안 된다', () => {
+    const acc = [account(1_000_000, '2026-05-01')];
+    // 자료가 다 있을 때: 주간 지출 + 6월 한 번짜리 500,000 이 지나갔다.
+    const full = settle(acc, raw, 900_000, '2026-09-10');
+    // 계산 구독 구간만 있을 때: 6월 한 번짜리가 빠진다.
+    const partial = settle(acc, [roundTrip(weekly)], 900_000, '2026-09-10', '2026-08-01');
+
+    expect(partial.complete).toBe(false);
+    // 빠진 지출만큼 "예정대로면 남아 있어야 할 금액" 이 더 크게 나온다.
+    expect(partial.expected).toBeGreaterThan(full.expected);
+    expect(partial.expected - full.expected).toBe(500_000);
+  });
+});

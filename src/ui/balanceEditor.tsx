@@ -33,6 +33,8 @@ export function useBalanceEditor(
   accounts: readonly Account[],
   entries: readonly Entry[],
   onSave: (a: Account) => void,
+  /** `entries` 가 덮는 가장 이른 날. 기준일이 이보다 앞서면 정산 금액을 확정할 수 없다. */
+  coveredFrom?: string | null,
 ): BalanceEditor {
   const primary = accounts[0] ?? null;
   const [editing, setEditing] = useState(false);
@@ -72,11 +74,40 @@ export function useBalanceEditor(
     // 이전 잔고가 없으면 정산할 것도 없다 — 첫 입력.
     if (!primary) { onSave(build()); return; }
 
-    const r = settle(accounts, entries, minor, computeToday());
+    const r = settle(accounts, entries, minor, computeToday(), coveredFrom);
     const items = summarize(r.passed);
 
     // 정산할 예정도 없고 diff 도 0 이면 조용히 저장.
-    if (r.passed.length === 0 && r.diff === 0) { onSave(build()); return; }
+    if (r.complete && r.passed.length === 0 && r.diff === 0) { onSave(build()); return; }
+
+    /*
+      자료가 모자라면 차액을 확정 금액으로 내지 않는다.
+      기준일이 계산 구독 구간보다 앞서면 그 사이의 비반복 입출금이 목록에 없어서,
+      "예정대로면 얼마" 가 실제보다 크게 나온다. 그럴듯하게 틀린 숫자를 내느니
+      무엇이 빠졌는지 말하고 잔고만 갱신하는 편이 낫다.
+    */
+    if (!r.complete) {
+      void (async () => {
+        const ok = await dialog.confirm({
+          title: '정산 금액을 확정할 수 없습니다',
+          body: (
+            <div className="settle">
+              <p>
+                잔고 기준일이 <b>{fmtDayShort(r.since)}</b>로,
+                지금 불러와 둔 구간(<b>{fmtDayShort(r.coveredFrom ?? r.since)}</b> 이후)보다 앞섭니다.
+              </p>
+              <p className="dlg-note">
+                그 사이의 <b>한 번짜리</b> 입출금이 목록에 없어 차액을 정확히 낼 수 없습니다.
+                (반복 항목은 전부 들어 있습니다.) 잔고만 새 금액으로 바꿔 둘까요?
+              </p>
+            </div>
+          ),
+          confirmLabel: '잔고만 바꾸기',
+        });
+        if (ok) onSave(build());
+      })();
+      return;
+    }
 
     void (async () => {
       const ok = await dialog.confirm({

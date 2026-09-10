@@ -1,32 +1,31 @@
 /**
- * 백업 복원 — 검증과 순서.
+ * 백업 복원 — 검증과 실행 순서.
  *
- * ## 무엇이 잘못됐었나
+ * ## 전체 교체는 지금 꺼져 있다
  *
- * 전체 교체가 `deleteAllEntries()` 로 **먼저 지우고** 그다음 저장했다. 저장은
- * `writeMany()` 인데 이건 실패를 던지지 않고 `{ written, failed, allFailed }` 로
- * 돌려준다. 그 결과를 아무도 읽지 않아, 한 건도 저장되지 않아도 "가져왔습니다" 가 떴다.
- * 지운 뒤 저장에 실패하면 남는 것이 없었고, 되돌릴 방법도 없었다.
- * 게다가 "전체 교체" 라면서 잔고·대출·고정 메모는 지우지 않아 파일에 없는 데이터가 남았다.
+ * 앞선 수정은 "먼저 쓰고 나중에 지운다" 순서로 바꾸면 안전하다고 봤다. **틀렸다.**
+ * 백업은 기존 id 위에 그대로 쓴다(upsert). 문서 A 를 파일 내용으로 덮어쓴 뒤 문서 B
+ * 쓰기가 실패하면, 삭제를 한 번도 부르지 않았어도 **A 의 원래 내용은 이미 사라졌다.**
+ * 따라서 "파괴 없음" · "최악이 합집합" · "중간에 끊겨도 잃는 것이 없다" 는 성립하지 않는다.
  *
- * ## 지금의 순서
+ * 여러 배치는 원자적이지 않고, 클라이언트 SDK 에는 컬렉션을 가로지르는 트랜잭션이
+ * 없다. 메모리에 들고 있던 원본으로 되돌리는 것도 안전장치가 못 된다 — 탭이 닫히면
+ * 그 원본도 사라진다. 그래서 지금 구조에서는 안전한 교체를 보장할 수 없다.
  *
- *   1. 파일 전체를 검증한다. 한 건이라도 문제가 있으면 **아무것도 건드리지 않는다**
- *   2. 백업의 모든 문서를 먼저 **쓴다** (upsert). 이 단계에는 파괴가 없다
- *   3. 쓰기 결과를 확인한다. 한 건이라도 실패하면 여기서 멈춘다 — 지우지 않는다
- *   4. 그러고 나서야 백업에 없는 기존 문서를 지운다 (네 컬렉션 모두)
+ * **불완전한 파괴적 기능을 남기지 않는다.** 교체는 `REPLACE_DISABLED` 로 막아 두고,
+ * 부르더라도 쓰기도 삭제도 일어나지 않는다. 안전한 교체(별도 스냅샷 컬렉션에 원본을
+ * 먼저 굳히고, 그것이 확인된 뒤에만 교체하는 방식)는 후속 작업으로 남긴다.
  *
- * 중간에 끊겨도 "지웠는데 복원이 안 된" 구간이 없다. 2~3 사이에서 끊기면 기존 데이터와
- * 복원 데이터가 **둘 다** 남고(합집합), 같은 파일로 다시 가져오면 이어서 끝난다.
- * 메모리에 들고 있던 원본으로 되돌리는 식이 아니라 순서 자체가 안전하다.
+ * ## 병합은 유지한다
  *
- * 여러 번 실행해도 결과가 같다 — 같은 id 를 다시 쓰고 같은 여분을 다시 지운다.
+ * 병합은 지우지 않고 **없는 것만 만든다.** 다만 `fetchAll` 로 고른 뒤 `setDoc` 으로 쓰면
+ * 그 사이 다른 탭이 같은 id 를 만들었을 때 덮어쓴다. 그래서 실제 쓰기도 트랜잭션 안에서
+ * 존재를 확인한다 (`createManyIfAbsent`). 이미 있는 문서는 충돌로 남기고 건드리지 않는다.
  */
 import { isValidDate, normalizeDate } from '../domain/date';
 import type { Account, BackupCollection, Debt, Entry, Pin } from '../domain/types';
 import type { BackupData } from './backup';
-import { COL } from './paths';
-import type { WriteManyResult } from './repo';
+import type { CreateManyResult } from './repo';
 
 /** 파일 한 건이 왜 들어갈 수 없는지. */
 export interface BackupProblem {
@@ -199,48 +198,6 @@ export function describeProblem(p: BackupProblem): string {
 
 // ---------- 교체 계획 ----------
 
-export interface DocRef {
-  collection: string;
-  id: string;
-}
-
-export interface ReplacePlan {
-  /** 먼저 쓸 것. 백업 전체를 그대로 upsert 한다. */
-  write: BackupData;
-  /**
-   * 쓰기가 **모두** 성공한 뒤에 지울 것 — 지금 있는데 백업에는 없는 문서.
-   * "전체 교체" 이므로 네 컬렉션 모두를 대상으로 한다.
-   */
-  remove: DocRef[];
-}
-
-const COLLECTION_OF: Record<BackupCollection, string> = {
-  entries: COL.entries,
-  accounts: COL.accounts,
-  debts: COL.debts,
-  pins: COL.pins,
-};
-
-/**
- * 전체 교체 계획.
- *
- * 지우는 목록은 **지금 저장된 것**에서 뽑는다. 복원 도중 다른 탭에서 추가된 문서도
- * 여기에 잡히는데, 그것이 "전체 교체" 의 뜻이다 — 파일에 없는 것은 남기지 않는다.
- * 대신 지우기 직전에 다시 읽어서 목록을 만들어야 이미 사라진 문서를 지우려다
- * 실패로 세는 일이 없다.
- */
-export function planReplace(current: BackupData, incoming: BackupData): ReplacePlan {
-  const remove: DocRef[] = [];
-  const keys: BackupCollection[] = ['entries', 'accounts', 'debts', 'pins'];
-  for (const key of keys) {
-    const keep = new Set(incoming[key].map((x) => x.id));
-    for (const item of current[key]) {
-      if (!keep.has(item.id)) remove.push({ collection: COLLECTION_OF[key], id: item.id });
-    }
-  }
-  return { write: incoming, remove };
-}
-
 /**
  * 병합 계획 — 파일에만 있는 것을 더한다.
  * 같은 id 는 지금 것을 남긴다 (`mergeBackup` 과 같은 규칙).
@@ -269,66 +226,82 @@ export function countDocs(d: BackupData): number {
  * 저장 계층을 갈아끼울 수 있게 뽑아 둔 입구.
  *
  * 실패 주입을 위해서다. 실제 Firestore 로도, 일부러 실패하는 가짜로도 같은 순서를
- * 돌려 봐야 "쓰기가 실패하면 지우지 않는다" 를 시험할 수 있다.
+ * 돌려 봐야 "무엇이 보존되는가" 를 시험할 수 있다.
  */
 export interface RestoreIO {
   fetchAll: () => Promise<Omit<BackupData, 'recovery'>>;
-  writeMany: (payload: Partial<BackupData>) => Promise<WriteManyResult>;
-  deleteMany: (targets: readonly DocRef[]) => Promise<WriteManyResult>;
+  /** 없는 것만 만든다. 이미 있으면 충돌로 남기고 건드리지 않는다. */
+  createIfAbsent: (payload: Partial<BackupData>) => Promise<CreateManyResult>;
 }
 
-export const NO_WRITES: WriteManyResult = { written: 0, failed: [], allFailed: false };
+export const NO_CREATES: CreateManyResult = { created: 0, conflicts: [], failed: [], allFailed: false };
+
+/**
+ * 전체 교체가 꺼져 있는 이유. 화면에도 이 문장을 그대로 보여 준다.
+ */
+export const REPLACE_DISABLED_REASON =
+  '전체 교체는 지금 꺼져 있습니다. 복원 도중 끊기면 파일로 덮어쓴 기존 항목의 원래 내용을 '
+  + '되돌릴 방법이 없기 때문입니다. 안전한 교체 방식을 갖출 때까지 막아 둡니다. '
+  + '그때까지는 “기존 데이터에 더하기”를 쓰거나, 지울 항목을 직접 지운 뒤 더해 주세요.';
+
+/**
+ * 파일의 몇 건이 어떻게 됐는지.
+ *
+ * 건수가 파일 총계와 맞아떨어져야 사용자가 읽고 다음 행동을 정할 수 있다.
+ *   파일 총계 = created + skippedExisting + conflicts + failed
+ */
+export interface MergeCounts {
+  created: CreateManyResult;
+  /**
+   * 조회 시점에 이미 있어서 후보에서 빠진 것.
+   * 쓰기를 시도하지도 않았으므로 기존 내용이 그대로다.
+   */
+  skippedExisting: number;
+}
 
 export type RestoreOutcome =
   /** 파일이 규칙에 맞지 않는다. 저장소를 건드리지 않았다. */
   | { kind: 'invalid'; problems: BackupProblem[] }
-  /** 쓰기에서 멈췄다. **아무것도 지우지 않았다.** */
-  | { kind: 'write-failed'; written: WriteManyResult }
-  /** 복원은 끝났고 지우기에서 일부가 남았다. */
-  | { kind: 'remove-failed'; written: WriteManyResult; removed: WriteManyResult }
-  | { kind: 'ok'; written: WriteManyResult; removed: WriteManyResult };
+  /** 전체 교체는 막혀 있다. 쓰기도 삭제도 일어나지 않았다. */
+  | { kind: 'replace-disabled'; reason: string }
+  /** 쓰려던 것이 한 건도 들어가지 않았다. 기존 문서는 그대로다. */
+  | ({ kind: 'all-failed' } & MergeCounts)
+  /** 일부만 들어갔다. 못 들어간 것과 이미 있던 것을 구분해 알린다. */
+  | ({ kind: 'partial' } & MergeCounts)
+  | ({ kind: 'ok' } & MergeCounts);
 
 /**
- * 전체 교체.
+ * 전체 교체 — **꺼져 있다.**
  *
- *   1. 검증 — 걸리면 저장소를 건드리지 않는다
- *   2. 백업 전체를 쓴다 (파괴 없음)
- *   3. 한 건이라도 실패하면 **여기서 멈춘다**. 기존 데이터와 복원 데이터가 둘 다 남는다
- *   4. 지우기 직전에 다시 읽어 지금 상태에서 여분을 뽑고 지운다
- *
- * 중간에 끊겨도 잃는 것이 없다. 같은 파일로 다시 부르면 같은 자리로 수렴한다.
+ * 부르더라도 저장소를 한 번도 건드리지 않는다. `RestoreIO` 를 아예 쓰지 않으므로
+ * 실수로 쓰기·삭제가 새어 나갈 자리가 없다.
  */
-export async function safeReplace(incoming: BackupData, io: RestoreIO): Promise<RestoreOutcome> {
-  const problems = validateBackup(incoming);
-  if (problems.length > 0) return { kind: 'invalid', problems };
-
-  const written = await io.writeMany(incoming);
-  if (written.failed.length > 0) return { kind: 'write-failed', written };
-
-  // 지우기 직전에 다시 읽는다 — 복원 도중 다른 탭에서 바뀐 것까지 지금 상태로 판정하고,
-  // 이미 사라진 문서를 지우려다 실패로 세지 않는다.
-  const current = await io.fetchAll();
-  const plan = planReplace({ ...current, recovery: incoming.recovery }, incoming);
-  const removed = plan.remove.length > 0 ? await io.deleteMany(plan.remove) : NO_WRITES;
-
-  if (removed.failed.length > 0) return { kind: 'remove-failed', written, removed };
-  return { kind: 'ok', written, removed };
+export function safeReplace(): RestoreOutcome {
+  return { kind: 'replace-disabled', reason: REPLACE_DISABLED_REASON };
 }
 
 /**
- * 병합 — 파일에만 있는 것을 더한다. 지우는 단계가 아예 없다.
- * 쓰기 결과는 교체와 똑같이 확인한다.
+ * 병합 — 파일에만 있는 것을 더한다. 지우는 단계가 없다.
+ *
+ * `fetchAll` 로 후보를 좁히는 것은 읽기·쓰기를 줄이기 위한 것일 뿐이고, "이미 있으면
+ * 건드리지 않는다" 는 약속은 실제 쓰기 시점(`createIfAbsent`)에서 지켜진다.
  */
-export async function safeMerge(
-  incoming: BackupData, io: RestoreIO, keepRecovery: BackupData['recovery'],
-): Promise<RestoreOutcome> {
+export type MergeOutcome = Exclude<RestoreOutcome, { kind: 'replace-disabled' }>;
+
+export async function safeMerge(incoming: BackupData, io: RestoreIO): Promise<MergeOutcome> {
   const problems = validateBackup(incoming);
   if (problems.length > 0) return { kind: 'invalid', problems };
 
   const current = await io.fetchAll();
-  const toAdd = planMerge({ ...current, recovery: keepRecovery }, incoming);
-  const written = await io.writeMany(toAdd);
+  const candidates = planMerge({ ...current, recovery: null }, incoming);
+  const skippedExisting = countDocs(incoming) - countDocs(candidates);
 
-  if (written.failed.length > 0) return { kind: 'write-failed', written };
-  return { kind: 'ok', written, removed: NO_WRITES };
+  if (countDocs(candidates) === 0) return { kind: 'ok', created: NO_CREATES, skippedExisting };
+
+  const created = await io.createIfAbsent(candidates);
+  if (created.allFailed) return { kind: 'all-failed', created, skippedExisting };
+  if (created.failed.length > 0 || created.conflicts.length > 0) {
+    return { kind: 'partial', created, skippedExisting };
+  }
+  return { kind: 'ok', created, skippedExisting };
 }
