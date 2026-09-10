@@ -18,7 +18,7 @@ import { displayTitle, effectiveEndDate, isDone, newEntry } from '../domain/entr
 import { formatAmount } from '../domain/money';
 import type { Entry, TaskStatus } from '../domain/types';
 import { BalanceInput, BalanceNote, useBalanceEditor } from './balanceEditor';
-import { calcNotice, mixedCurrencyNotice, type CalcState } from './calcState';
+import { CALC_READY, calcCaveat, calcNotice, mixedCurrencyNotice, type CalcState } from './calcState';
 import { Icon } from './Icon';
 
 interface Props {
@@ -53,7 +53,7 @@ function occursOnDay(e: Entry, iso: string): boolean {
 }
 
 export function TodayPanel({
-  todayISO, entries, tideEntries, tideFrom, calcState = 'ready', accounts, hasBalance,
+  todayISO, entries, tideEntries, tideFrom, calcState = CALC_READY, accounts, hasBalance,
   collapsed, onToggleCollapsed, moneyCollapsed, onToggleMoneyCollapsed,
   onEntryClick, onStatusChange, onPromote, onQuickIdea, onSaveAccount,
 }: Props) {
@@ -82,11 +82,13 @@ export function TodayPanel({
   const scope = useMemo(() => currencyScopeOf(accounts, tideEntries), [accounts, tideEntries]);
 
   const tideLimit = useMemo(
-    () => hasBalance && calcState === 'ready' && scope.ok
+    () => hasBalance && calcState.kind === 'ready' && scope.ok
       ? headlineLimit(accounts, tideEntries, todayISO)
       : null,
-    [hasBalance, calcState, scope.ok, accounts, tideEntries, todayISO],
+    [hasBalance, calcState.kind, scope.ok, accounts, tideEntries, todayISO],
   );
+
+  const caveat = calcCaveat(calcState);
 
   const submitIdea = () => {
     const text = idea.trim();
@@ -209,7 +211,7 @@ export function TodayPanel({
                       </span>
                       <strong className="num">₩ {formatAmount(tideLimit)}</strong>
                     </button>
-                  ) : calcState !== 'ready' ? (
+                  ) : calcState.kind !== 'ready' ? (
                     <p className="tp-empty">{calcNotice(calcState)}</p>
                   ) : !scope.ok ? (
                     <p className="tp-empty">{mixedCurrencyNotice(scope.currencies)}</p>
@@ -218,7 +220,8 @@ export function TodayPanel({
                   )}
                   {/* 자료가 없는 동안에는 잔고 편집도 열지 않는다 — 정산이 어긋난다.
                       통화가 섞인 상태는 반대다. 고칠 길을 막으면 빠져나올 수가 없다. */}
-                  {!editor.editing && calcState === 'ready' && <BalanceNote editor={editor} />}
+                  {!editor.editing && calcState.kind === 'ready' && <BalanceNote editor={editor} />}
+                  {caveat && <p className="tp-caveat">{caveat}</p>}
                   <ul className="tp-ul">
                     {money.map((e) => {
                       const type = e.money ? MONEY_TYPE_BY_ID[e.money.type] : null;

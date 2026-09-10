@@ -24,7 +24,9 @@ import {
 import type { Account, Entry } from '../domain/types';
 import { Icon } from './Icon';
 import { BalanceInput, BalanceNote, useBalanceEditor } from './balanceEditor';
-import { calcHeadline, calcNotice, mixedCurrencyNotice, type CalcState } from './calcState';
+import {
+  CALC_READY, calcCaveat, calcHeadline, calcNotice, mixedCurrencyNotice, type CalcState,
+} from './calcState';
 
 interface Props {
   /** 오늘. 자정을 넘기면 바뀌므로 화면이 스스로 재지 않고 위에서 받는다. */
@@ -34,8 +36,8 @@ interface Props {
   /** 계산 목록이 덮는 가장 이른 날. 정산이 자료 부족을 판정하는 데 쓴다. */
   tideFrom?: string | null;
   /**
-   * 계산용 자료를 받았는가. 'ready' 가 아니면 숫자를 지어내지 않는다.
-   * 기본값은 'ready' — 목록을 손으로 넘기는 자리(테스트 등)에서는 기다릴 것이 없다.
+   * 계산용 자료를 받았는가. `ready` 가 아니면 숫자를 지어내지 않는다.
+   * 기본값은 확정 상태 — 목록을 손으로 넘기는 자리(테스트 등)에서는 기다릴 것이 없다.
    */
   calcState?: CalcState;
   hasBalance: boolean;
@@ -48,7 +50,7 @@ interface Props {
 }
 
 export function TideBar({
-  todayISO, accounts, entries, tideFrom, calcState = 'ready',
+  todayISO, accounts, entries, tideFrom, calcState = CALC_READY,
   hasBalance, onSaveAccount, onEntryClick,
   collapsed, onToggleCollapsed, children,
 }: Props) {
@@ -84,7 +86,7 @@ export function TideBar({
     </button>
   );
 
-  if (calcState !== 'ready') {
+  if (calcState.kind !== 'ready') {
     return (
       <section className={'tide' + (collapsed ? ' collapsed' : '')} aria-label="며칠 버티나">
         {head(calcHeadline(calcState))}
@@ -97,6 +99,9 @@ export function TideBar({
       </section>
     );
   }
+
+  /* 숫자는 내되 완전하지 않을 수 있으면 그 사실을 한 줄로 덧붙인다. */
+  const caveat = calcCaveat(calcState);
 
   if (!scope.ok) {
     return (
@@ -165,6 +170,7 @@ export function TideBar({
           {daysLeft > 1 && <> · 하루 <b>{formatAmount(perDay)}원</b></>}
         </p>
         <BalanceNote editor={editor} />
+        {caveat && <p className="tide-caveat">{caveat}</p>}
       </div>
 
       {upcoming.length > 0 ? (

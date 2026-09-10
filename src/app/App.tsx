@@ -25,7 +25,7 @@ import type { Account, Entry, Filters, LensId, TaskStatus, ViewId, YearMonth } f
 import { Auth } from '../ui/Auth';
 import { BrandFooter } from '../ui/BrandFooter';
 import { DaySheet } from '../ui/DaySheet';
-import type { CalcState } from '../ui/calcState';
+import { calcStateOf, type CalcState } from '../ui/calcState';
 import { TideBar } from '../ui/TideBar';
 import { EntryModal } from '../ui/EntryModal';
 import { FilterPanel } from '../ui/FilterPanel';
@@ -177,14 +177,11 @@ function Workspace({ uid, user, onSignOut }: WorkspaceProps) {
   /*
     계산용 자료가 손에 들어왔는가. 화면용(`loading`)과 따로 본다.
 
-    첫 스냅샷은 대개 로컬 캐시에서 오고, 캐시가 비어 있으면 빈 목록이 온다. 그것을
-    "예정된 입출금이 없다" 로 읽으면 한도가 잔고 그대로 떴다가 잠시 뒤 값이 튄다.
-    조회가 실패했을 때는 0원이 오류를 감춘다. 둘 다 숫자를 비워 두고 이유를 적는다.
+    `store.calc` 는 세 구독(계산용 월 항목 · 반복 항목 · 잔고)을 종합한 값이다. 그것을
+    `ready` 하나로 눌러 담지 않는다 — 캐시에서 온 값과 서버가 확인한 값은 다르고,
+    캐시가 비어 있는 것은 자료 없음이 아니다. `calcStateOf` 가 네 갈래로 나눈다.
   */
-  const calcState: CalcState =
-    store.calc.status === 'error' ? 'error'
-      : store.calc.ready ? 'ready'
-        : 'loading';
+  const calcState: CalcState = calcStateOf(store.calc);
 
   // 이관 전 컬렉션이 남아 있는지, 이미 옮겼는지 한 번만 확인한다.
   const checkedLegacy = useRef(false);
@@ -864,7 +861,7 @@ function Workspace({ uid, user, onSignOut }: WorkspaceProps) {
             entries={visible}
             tideEntries={store.tideEntries}
             // 계산 자료를 못 받았으면 덮는 달이 없는 것과 같다 — 셀에 숫자를 적지 않는다.
-            tideMonths={calcState === 'ready' ? store.tideMonths : EMPTY_MONTHS}
+            tideMonths={calcState.kind === 'ready' ? store.tideMonths : EMPTY_MONTHS}
             accounts={store.accounts}
             hasBalance={hasBalance}
             lens={lens}

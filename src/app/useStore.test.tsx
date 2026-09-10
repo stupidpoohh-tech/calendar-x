@@ -1,13 +1,14 @@
 /**
  * 구독 계층 회귀 테스트.
  *
- * 지키려는 것 셋.
+ * 지키려는 것 넷.
  *   1. 달력을 넘겨도 **계산 구독**은 다시 붙지 않는다 (화면용만 갈아탄다)
  *   2. 계정이 바뀌면 앞 계정의 자료가 한 렌더도 남지 않는다
  *   3. "아직 못 받았다" 와 "비어 있다" 와 "실패했다" 를 다른 상태로 내놓는다
+ *   4. 계산 상태는 **세 구독**(계산용 월 항목 · 반복 항목 · 잔고)을 종합한다
  *
- * effect 를 하나로 묶어 두었을 때는 1번이 깨졌고, 그때 화면은 달을 넘길 때마다
- * 잠깐 빈 목록으로 계산해 머리 숫자가 깜빡였다.
+ * 4번이 없던 동안에는 월 자료만 도착하면 "다 받았다" 로 굴었다. 2025년에 시작한 반복
+ * 지출이 아직 오지 않은 사이에 그 지출이 빠진 한도가 확정값처럼 떴다.
  */
 import { act, renderHook } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
@@ -15,7 +16,7 @@ import type { Entry } from '../domain/types';
 import { newEntry } from '../domain/entry';
 import type { SnapMeta } from '../data/repo';
 
-type Kind = 'display-or-calc' | 'recurring' | 'accounts' | 'debts' | 'pins';
+type Kind = 'entries' | 'recurring' | 'accounts' | 'debts' | 'pins';
 
 interface Sub {
   kind: Kind;
@@ -46,7 +47,7 @@ vi.mock('../data/repo', async (importOriginal) => {
   return {
     ...actual,
     subscribeEntriesForMonths: (_db: unknown, uid: string, months: string[], cb: unknown, onError: unknown) =>
-      record('display-or-calc', uid, months, cb, onError),
+      record('entries', uid, months, cb, onError),
     subscribeRecurringEntries: (_db: unknown, uid: string, cb: unknown, onError: unknown) =>
       record('recurring', uid, [], cb, onError),
     subscribeAccounts: (_db: unknown, uid: string, cb: unknown, onError: unknown) =>
@@ -64,13 +65,15 @@ const { monthWindow, tideWindow } = await import('../data/repo');
 const TODAY = '2026-09-10';
 const LIVE: SnapMeta = { fromCache: false, hasPendingWrites: false };
 const CACHE: SnapMeta = { fromCache: true, hasPendingWrites: false };
+const PENDING: SnapMeta = { fromCache: false, hasPendingWrites: true };
 
 const entryAt = (id: string, startDate: string): Entry => newEntry('task', { id, title: id, startDate });
 
-/** 월 창과 계산 창은 값이 다르다. 그것으로 두 구독을 가려낸다. */
+/** 월 창과 계산 창은 값이 다르다. 그것으로 두 항목 구독을 가려낸다. */
 const isCalc = (s: Sub) => s.months.join(',') === tideWindow(TODAY).join(',');
-const displaySubs = () => subs.filter((s) => s.kind === 'display-or-calc' && !isCalc(s));
-const calcSubs = () => subs.filter((s) => s.kind === 'display-or-calc' && isCalc(s));
+const displaySubs = () => subs.filter((s) => s.kind === 'entries' && !isCalc(s));
+const calcSubs = () => subs.filter((s) => s.kind === 'entries' && isCalc(s));
+const one = (kind: Kind) => subs.filter((s) => s.kind === kind && s.alive)[0]!;
 
 beforeEach(() => { subs.length = 0; });
 
@@ -112,6 +115,24 @@ describe('달력을 넘길 때', () => {
     }
   });
 
+  it('앞 달의 목록과 준비 상태를 새 달에 물려주지 않는다', () => {
+    const { result, rerender } = renderHook(
+      ({ cursor }: { cursor: string }) => useStore('u1', cursor, TODAY),
+      { initialProps: { cursor: '2026-09-15' } },
+    );
+    act(() => { displaySubs()[0]!.push([entryAt('a', '2026-09-15')], LIVE); });
+    expect(result.current.display.ready).toBe(true);
+    expect(result.current.entries.map((e) => e.id)).toEqual(['a']);
+
+    rerender({ cursor: '2026-12-15' });
+
+    // 새 구독은 아직 한 건도 못 받았다. 9월 목록으로 12월을 그리면 안 된다.
+    expect(result.current.display.status).toBe('loading');
+    expect(result.current.entries).toEqual([]);
+  });
+});
+
+describe('월 경계 — 계산 창이 바뀔 때', () => {
   it('오늘이 바뀌면 계산 구독은 새 창으로 갈아탄다', () => {
     const { rerender } = renderHook(
       ({ today }: { today: string }) => useStore('u1', '2026-09-15', today),
@@ -119,13 +140,34 @@ describe('달력을 넘길 때', () => {
     );
     const first = calcSubs()[0]!;
 
-    // 자정을 넘겼다. 계산 창은 오늘 기준이므로 따라 움직여야 한다.
+    // 자정을 넘겨 달이 바뀌었다. 계산 창은 오늘 기준이므로 따라 움직여야 한다.
     rerender({ today: '2026-10-01' });
 
     expect(first.alive).toBe(false);
-    const live = subs.filter((s) => s.kind === 'display-or-calc' && s.alive
+    const live = subs.filter((s) => s.kind === 'entries' && s.alive
       && s.months.join(',') === tideWindow('2026-10-01').join(','));
     expect(live).toHaveLength(1);
+  });
+
+  it('앞 창의 준비 상태를 새 창에 물려주지 않는다', () => {
+    const { result, rerender } = renderHook(
+      ({ today }: { today: string }) => useStore('u1', '2026-09-15', today),
+      { initialProps: { today: TODAY } },
+    );
+    act(() => {
+      calcSubs()[0]!.push([entryAt('m', '2026-09-20')], LIVE);
+      one('recurring').push([], LIVE);
+      one('accounts').push([{ id: 'a1' }], LIVE);
+    });
+    expect(result.current.calc.status).toBe('live');
+
+    rerender({ today: '2026-10-01' });
+
+    // 새 계산 창은 아직 비어 있다. 9월 목록으로 10월 한도를 내면 안 된다.
+    expect(result.current.calc.status).toBe('loading');
+    expect(result.current.calc.ready).toBe(false);
+    expect(result.current.tideEntries).toEqual([]);
+    expect(result.current.tideMonths).toEqual(tideWindow('2026-10-01'));
   });
 });
 
@@ -138,7 +180,7 @@ describe('계정이 바뀔 때', () => {
 
     act(() => {
       for (const s of subs.filter((x) => x.uid === 'u1')) {
-        s.push(s.kind === 'display-or-calc' ? [entryAt('a', '2026-09-15')] : [], LIVE);
+        s.push(s.kind === 'entries' ? [entryAt('a', '2026-09-15')] : [], LIVE);
       }
     });
     expect(result.current.entries.map((e) => e.id)).toEqual(['a']);
@@ -168,17 +210,43 @@ describe('계정이 바뀔 때', () => {
       ({ uid }: { uid: string }) => useStore(uid, '2026-09-15', TODAY),
       { initialProps: { uid: 'u1' } },
     );
-    const stale = subs.filter((s) => s.uid === 'u1' && s.kind === 'display-or-calc');
+    const stale = subs.filter((s) => s.uid === 'u1' && s.kind === 'entries');
 
     rerender({ uid: 'u2' });
     act(() => { for (const s of stale) s.push([entryAt('a', '2026-09-15')], LIVE); });
 
     expect(result.current.entries).toEqual([]);
+    expect(result.current.calc.ready).toBe(false);
+  });
+
+  it('앞 계정의 늦은 오류도 새 계정 상태를 건드리지 않는다', () => {
+    const boom = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const { result, rerender } = renderHook(
+      ({ uid }: { uid: string }) => useStore(uid, '2026-09-15', TODAY),
+      { initialProps: { uid: 'u1' } },
+    );
+    const stale = subs.filter((s) => s.uid === 'u1' && s.kind === 'recurring')[0]!;
+
+    rerender({ uid: 'u2' });
+    act(() => { stale.fail('recurring', new Error('늦게 온 실패')); });
+
+    expect(result.current.calc.status).toBe('loading');
+    expect(result.current.error).toBeNull();
+    boom.mockRestore();
   });
 });
 
-describe('자료 상태', () => {
+describe('계산 상태는 세 구독을 종합한다', () => {
   const mount = () => renderHook(() => useStore('u1', '2026-09-15', TODAY));
+
+  /** 계산에 필요한 세 갈래를 원하는 만큼만 채운다. */
+  const deliver = (which: { month?: boolean; recurring?: boolean; accounts?: boolean }, meta = LIVE) => {
+    act(() => {
+      if (which.month) calcSubs()[0]!.push([entryAt('m', '2026-09-20')], meta);
+      if (which.recurring) one('recurring').push([entryAt('r', '2025-01-01')], meta);
+      if (which.accounts) one('accounts').push([{ id: 'a1' }], meta);
+    });
+  };
 
   it('처음에는 화면용도 계산용도 loading 이다', () => {
     const { result } = mount();
@@ -187,30 +255,36 @@ describe('자료 상태', () => {
     expect(result.current.loading).toBe(true);
   });
 
-  it('캐시에서 온 빈 목록은 "비어 있다" 가 아니라 "캐시" 다', () => {
+  it('잔고와 월 자료만 왔고 반복 구독이 아직이면 준비되지 않았다', () => {
+    // 2025년에 시작한 반복 지출이 빠진 한도를 확정값처럼 내보내던 자리다.
     const { result } = mount();
-    act(() => { calcSubs()[0]!.push([], CACHE); });
+    deliver({ month: true, accounts: true });
 
-    expect(result.current.calc.status).toBe('cache');
-    expect(result.current.calc.fromCache).toBe(true);
-    // 받기는 받았고, 받은 것이 비어 있다 — 두 사실을 따로 알린다.
+    expect(result.current.calc.ready).toBe(false);
+    expect(result.current.calc.status).toBe('loading');
+  });
+
+  it('반복 자료까지 와야 준비된다', () => {
+    const { result } = mount();
+    deliver({ month: true, accounts: true });
+    deliver({ recurring: true });
+
     expect(result.current.calc.ready).toBe(true);
-    expect(result.current.calc.empty).toBe(true);
-  });
-
-  it('서버가 확인한 값은 live 다', () => {
-    const { result } = mount();
-    act(() => { calcSubs()[0]!.push([entryAt('a', '2026-09-15')], LIVE); });
-
     expect(result.current.calc.status).toBe('live');
-    expect(result.current.calc.empty).toBe(false);
-    expect(result.current.calc.fromCache).toBe(false);
+    expect(result.current.tideEntries.map((e) => e.id).sort()).toEqual(['m', 'r']);
   });
 
-  it('조회가 실패하면 loading 으로 두지 않는다', () => {
+  it('잔고 구독이 아직이면 준비되지 않았다', () => {
+    const { result } = mount();
+    deliver({ month: true, recurring: true });
+    expect(result.current.calc.ready).toBe(false);
+  });
+
+  it('반복 구독만 실패해도 계산은 error 다', () => {
     const boom = vi.spyOn(console, 'error').mockImplementation(() => {});
     const { result } = mount();
-    act(() => { calcSubs()[0]!.fail('entries', new Error('네트워크')); });
+    deliver({ month: true, accounts: true });
+    act(() => { one('recurring').fail('recurring', new Error('네트워크')); });
 
     expect(result.current.calc.status).toBe('error');
     expect(result.current.calc.ready).toBe(false);
@@ -218,15 +292,107 @@ describe('자료 상태', () => {
     boom.mockRestore();
   });
 
+  it('잔고 구독만 실패해도 계산은 error 다', () => {
+    const boom = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const { result } = mount();
+    deliver({ month: true, recurring: true });
+    act(() => { one('accounts').fail('accounts', new Error('네트워크')); });
+
+    expect(result.current.calc.status).toBe('error');
+    boom.mockRestore();
+  });
+
+  it('계산용 월 구독만 실패해도 계산은 error 다', () => {
+    const boom = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const { result } = mount();
+    deliver({ recurring: true, accounts: true });
+    act(() => { calcSubs()[0]!.fail('entries', new Error('네트워크')); });
+
+    expect(result.current.calc.status).toBe('error');
+    boom.mockRestore();
+  });
+
   it('화면용 실패가 계산용 상태를 건드리지 않는다', () => {
     const boom = vi.spyOn(console, 'error').mockImplementation(() => {});
     const { result } = mount();
-    act(() => { calcSubs()[0]!.push([entryAt('a', '2026-09-15')], LIVE); });
+    deliver({ month: true, recurring: true, accounts: true });
     act(() => { displaySubs()[0]!.fail('entries', new Error('네트워크')); });
 
     expect(result.current.display.status).toBe('error');
     expect(result.current.calc.status).toBe('live');
     boom.mockRestore();
+  });
+
+  it('한 갈래라도 캐시에서 왔으면 전체가 cache 다', () => {
+    const { result } = mount();
+    deliver({ month: true, accounts: true });
+    act(() => { one('recurring').push([], CACHE); });
+
+    expect(result.current.calc.status).toBe('cache');
+    expect(result.current.calc.fromCache).toBe(true);
+    expect(result.current.calc.ready).toBe(true);
+  });
+
+  it('전부 비어 있을 때만 empty 다', () => {
+    const { result } = mount();
+    act(() => {
+      calcSubs()[0]!.push([], CACHE);
+      one('recurring').push([], CACHE);
+      one('accounts').push([], CACHE);
+    });
+    expect(result.current.calc.empty).toBe(true);
+
+    act(() => { one('accounts').push([{ id: 'a1' }], CACHE); });
+    expect(result.current.calc.empty).toBe(false);
+  });
+
+  it('빈 캐시 뒤에 서버 자료가 오면 live 로 바뀐다', () => {
+    const { result } = mount();
+    act(() => {
+      calcSubs()[0]!.push([], CACHE);
+      one('recurring').push([], CACHE);
+      one('accounts').push([], CACHE);
+    });
+    expect(result.current.calc.status).toBe('cache');
+    expect(result.current.calc.empty).toBe(true);
+
+    act(() => {
+      calcSubs()[0]!.push([entryAt('m', '2026-09-20')], LIVE);
+      one('recurring').push([entryAt('r', '2025-01-01')], LIVE);
+      one('accounts').push([{ id: 'a1' }], LIVE);
+    });
+    expect(result.current.calc.status).toBe('live');
+    expect(result.current.calc.empty).toBe(false);
+    expect(result.current.tideEntries.map((e) => e.id).sort()).toEqual(['m', 'r']);
+  });
+
+  it('자료가 그대로인 채 fromCache 만 꺼져도 상태가 따라온다', () => {
+    // includeMetadataChanges 가 없으면 이 전환이 아예 오지 않아 영영 cache 로 남는다.
+    const { result } = mount();
+    const same = [entryAt('m', '2026-09-20')];
+    act(() => {
+      calcSubs()[0]!.push(same, CACHE);
+      one('recurring').push([], CACHE);
+      one('accounts').push([{ id: 'a1' }], CACHE);
+    });
+    expect(result.current.calc.status).toBe('cache');
+
+    act(() => {
+      calcSubs()[0]!.push(same, LIVE);
+      one('recurring').push([], LIVE);
+      one('accounts').push([{ id: 'a1' }], LIVE);
+    });
+    expect(result.current.calc.status).toBe('live');
+    expect(result.current.calc.fromCache).toBe(false);
+  });
+
+  it('아직 서버가 확인하지 않은 쓰기가 섞이면 pending 이 선다', () => {
+    const { result } = mount();
+    deliver({ month: true, accounts: true });
+    act(() => { one('recurring').push([], PENDING); });
+
+    expect(result.current.calc.pending).toBe(true);
+    expect(result.current.calc.status).toBe('live');
   });
 
   it('로그아웃 상태에서는 구독하지 않는다', () => {

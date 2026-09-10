@@ -56,6 +56,44 @@ function mapSnap<T>(snap: QuerySnapshot, make: (id: string, raw: Record<string, 
 }
 
 /**
+ * 메타데이터 변경까지 받는 리스너의 손잡이.
+ *
+ * `fromCache` 는 자료가 그대로인 채로 true → false 로 바뀐다 (캐시로 먼저 그리고, 잠시 뒤
+ * 서버가 같은 값을 확인해 준다). 기본 리스너는 **문서가 바뀔 때만** 발화하므로 그 전환을
+ * 받지 못한다 — 화면은 영원히 "캐시 기준" 으로 남는다. 그래서 `includeMetadataChanges`
+ * 를 켠다.
+ *
+ * 대신 문서가 하나도 안 바뀐 발화가 늘어난다. 그때마다 새 배열을 만들면 위쪽 useMemo 가
+ * 전부 다시 돌므로, 문서 변경이 없으면 **앞서 만든 배열을 그대로** 돌려준다. 그러면
+ * React 가 상태 변경을 걸러 내고 리렌더는 메타데이터 때문에 실제로 달라진 값에서만 난다.
+ */
+function keepingIdentity<T>(
+  make: (id: string, raw: Record<string, unknown>) => T, cb: SnapSink<T>,
+): (snap: QuerySnapshot) => void {
+  let last: T[] | null = null;
+  return (snap) => {
+    // docChanges() 는 메타데이터 변경을 세지 않는다 — 비어 있으면 문서는 그대로다.
+    if (last === null || snap.docChanges().length > 0) last = mapSnap(snap, make);
+    cb(last, metaOf(snap));
+  };
+}
+
+/** 정렬이 필요한 컬렉션용. 같은 이유로 배열 동일성을 지킨다. */
+function keepingSorted<T>(
+  make: (id: string, raw: Record<string, unknown>) => T,
+  sort: (a: T, b: T) => number, cb: SnapSink<T>,
+): (snap: QuerySnapshot) => void {
+  let last: T[] | null = null;
+  return (snap) => {
+    if (last === null || snap.docChanges().length > 0) last = mapSnap(snap, make).sort(sort);
+    cb(last, metaOf(snap));
+  };
+}
+
+/** 메타데이터 변경까지 받는다. 이 옵션이 없으면 캐시 → 서버 전환을 알 수 없다. */
+const WITH_META = { includeMetadataChanges: true } as const;
+
+/**
  * 보고 있는 달과 앞뒤 한 달을 함께 구독한다.
  * 월을 넘길 때마다 새로 받아오면 화면이 비었다가 채워지므로, 이웃 달을 미리 들고 있는다.
  * array-contains-any 는 값 30개까지 허용하므로 3개는 여유가 있다.
@@ -69,8 +107,8 @@ export function subscribeEntriesForMonths(
   if (months.length === 0) { cb([], { fromCache: true, hasPendingWrites: false }); return () => {}; }
   const q = query(col(db, uid, COL.entries), where('ymSpan', 'array-contains-any', months.slice(0, 30)));
   return onSnapshot(
-    q,
-    (snap) => cb(mapSnap(snap, entryFromDoc), metaOf(snap)),
+    q, WITH_META,
+    keepingIdentity(entryFromDoc, cb),
     (err) => onError('entries', err),
   );
 }
@@ -85,8 +123,8 @@ export function subscribeRecurringEntries(
 ): Unsubscribe {
   const q = query(col(db, uid, COL.entries), where('isRecurring', '==', true));
   return onSnapshot(
-    q,
-    (snap) => cb(mapSnap(snap, entryFromDoc), metaOf(snap)),
+    q, WITH_META,
+    keepingIdentity(entryFromDoc, cb),
     (err) => onError('recurring', err),
   );
 }
@@ -95,8 +133,8 @@ export function subscribeAccounts(
   db: Firestore, uid: string, cb: SnapSink<Account>, onError: ErrorSink,
 ): Unsubscribe {
   return onSnapshot(
-    col(db, uid, COL.accounts),
-    (snap) => cb(mapSnap(snap, accountFromDoc).sort((a, b) => a.order - b.order), metaOf(snap)),
+    col(db, uid, COL.accounts), WITH_META,
+    keepingSorted(accountFromDoc, (a, b) => a.order - b.order, cb),
     (err) => onError('accounts', err),
   );
 }

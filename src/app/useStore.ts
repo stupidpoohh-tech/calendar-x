@@ -73,19 +73,64 @@ export interface FeedState {
   empty: boolean;
   /** 로컬 캐시에서 온 값인가. */
   fromCache: boolean;
+  /** 아직 서버가 확인하지 않은 로컬 쓰기가 섞여 있는가. */
+  pending: boolean;
 }
 
-const FEED_LOADING: FeedState = { status: 'loading', ready: false, empty: false, fromCache: false };
+const FEED_LOADING: FeedState =
+  { status: 'loading', ready: false, empty: false, fromCache: false, pending: false };
 /** 메모리에서 만든 자료 (데모). 기다릴 것도 실패할 것도 없다. */
-export const FEED_DEMO: FeedState = { status: 'live', ready: true, empty: false, fromCache: false };
-const FEED_ERROR: FeedState = { status: 'error', ready: false, empty: false, fromCache: false };
+export const FEED_DEMO: FeedState =
+  { status: 'live', ready: true, empty: false, fromCache: false, pending: false };
+const FEED_ERROR: FeedState =
+  { status: 'error', ready: false, empty: false, fromCache: false, pending: false };
 
 const feedFrom = (count: number, meta: SnapMeta): FeedState => ({
   status: meta.fromCache ? 'cache' : 'live',
   ready: true,
   empty: count === 0,
   fromCache: meta.fromCache,
+  pending: meta.hasPendingWrites,
 });
+
+/**
+ * 여러 구독을 하나의 상태로 합친다.
+ *
+ * 금액 계산에 필요한 자료는 **셋**이다 — 계산용 월 항목, 반복 항목, 잔고. 셋 중 하나만
+ * 늦어도 숫자는 틀린다. 예전에는 월 구독 하나만 보고 있어서, 2025년에 시작한 반복 지출이
+ * 아직 도착하지 않은 사이에 그 지출이 빠진 한도를 확정값처럼 보여 줬다.
+ *
+ * 규칙은 가장 나쁜 갈래를 따른다.
+ *   - 하나라도 실패했으면 error
+ *   - 하나라도 못 받았으면 loading
+ *   - 하나라도 캐시에서 왔으면 cache (완전하다고 말할 수 없다)
+ *   - `empty` 는 **전부** 비어 있을 때만 true
+ */
+export function combineFeeds(feeds: readonly FeedState[]): FeedState {
+  if (feeds.length === 0) return FEED_LOADING;
+  if (feeds.some((f) => f.status === 'error')) return FEED_ERROR;
+  if (feeds.some((f) => !f.ready)) return FEED_LOADING;
+  const fromCache = feeds.some((f) => f.fromCache);
+  return {
+    status: fromCache ? 'cache' : 'live',
+    ready: true,
+    empty: feeds.every((f) => f.empty),
+    fromCache,
+    pending: feeds.some((f) => f.pending),
+  };
+}
+
+/**
+ * 범위가 딸린 값.
+ *
+ * 조회 범위(보고 있는 달·계산 창)가 바뀌면 앞 범위의 준비 상태를 그대로 쓰면 안 된다.
+ * 새 구독은 아직 한 건도 받지 않았는데 "다 받았다" 로 굴면, 새 범위의 자료가 도착하기
+ * 전에 옛 범위의 목록으로 계산한 숫자가 확정값처럼 뜬다. 값에 범위를 붙여 두고
+ * 렌더에서 키가 어긋나면 버린다 — effect 로 비우면 한 번은 어긋난 채로 그려진다.
+ */
+interface Keyed<T> { key: string; value: T }
+
+const NO_ENTRIES: Entry[] = [];
 
 const EMPTY: StoreState = {
   entries: [], tideEntries: [], tideMonths: [],
@@ -113,16 +158,20 @@ export function useStore(uid: string | null, cursorISO: string, todayISO: string
   const tideMonths = useMemo(() => tideWindow(todayISO), [todayISO]);
   const tideKey = tideMonths.join(',');
 
-  const [monthEntries, setMonthEntries] = useState<Entry[]>([]);
-  const [tideRaw, setTideRaw] = useState<Entry[]>([]);
-  const [recurring, setRecurring] = useState<Entry[]>([]);
+  // 범위가 딸린 둘은 키와 함께 든다. 키가 어긋나면 렌더에서 버린다.
+  const [monthFeed, setMonthFeed] = useState<Keyed<{ items: Entry[]; feed: FeedState }>>(
+    { key: '', value: { items: NO_ENTRIES, feed: FEED_LOADING } });
+  const [tideFeed, setTideFeed] = useState<Keyed<{ items: Entry[]; feed: FeedState }>>(
+    { key: '', value: { items: NO_ENTRIES, feed: FEED_LOADING } });
+
+  const [recurring, setRecurring] = useState<Entry[]>(NO_ENTRIES);
+  const [recurringFeed, setRecurringFeed] = useState<FeedState>(FEED_LOADING);
   const [accounts, setAccounts] = useState<Account[]>([]);
+  const [accountsFeed, setAccountsFeed] = useState<FeedState>(FEED_LOADING);
   const [debts, setDebts] = useState<Debt[]>([]);
   const [pins, setPins] = useState<Pin[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [rulesBlocked, setRulesBlocked] = useState(false);
-  const [display, setDisplay] = useState<FeedState>(FEED_LOADING);
-  const [calc, setCalc] = useState<FeedState>(FEED_LOADING);
 
   /*
     ── 계정이 바뀌면 앞 계정의 자료를 화면에 남기지 않는다 ──────────────
@@ -137,9 +186,11 @@ export function useStore(uid: string | null, cursorISO: string, todayISO: string
   const [dataUid, setDataUid] = useState<string | null>(uid);
   if (dataUid !== uid) {
     setDataUid(uid);
-    setMonthEntries([]); setTideRaw([]); setRecurring([]);
-    setAccounts([]); setDebts([]); setPins([]);
-    setDisplay(FEED_LOADING); setCalc(FEED_LOADING);
+    setMonthFeed({ key: '', value: { items: NO_ENTRIES, feed: FEED_LOADING } });
+    setTideFeed({ key: '', value: { items: NO_ENTRIES, feed: FEED_LOADING } });
+    setRecurring(NO_ENTRIES); setRecurringFeed(FEED_LOADING);
+    setAccounts([]); setAccountsFeed(FEED_LOADING);
+    setDebts([]); setPins([]);
     setError(null); setRulesBlocked(false);
   }
 
@@ -169,16 +220,16 @@ export function useStore(uid: string | null, cursorISO: string, todayISO: string
     sinkRef.current.setError(`${scope} 를 불러오지 못했습니다. ${describeFirestoreError(err)}`);
   }, []);
 
-  // 실패한 갈래는 로딩으로 두지 않는다. 영원히 도는 스피너는 오류를 감추는 것과 같다.
-  const onDisplayError = useCallback((scope: string, err: unknown) => {
-    setDisplay(FEED_ERROR);
-    onError(scope, err);
-  }, [onError]);
+  /*
+    실패한 갈래는 로딩으로 두지 않는다. 영원히 도는 스피너는 오류를 감추는 것과 같다.
 
-  const onCalcError = useCallback((scope: string, err: unknown) => {
-    setCalc(FEED_ERROR);
-    onError(`${scope} (계산)`, err);
-  }, [onError]);
+    갈래마다 따로 표시한다 — 반복 구독만 실패했는데 계산이 "다 받았다" 로 굴면,
+    반복 지출이 통째로 빠진 한도가 확정값처럼 뜬다.
+  */
+  const failWith = useCallback(
+    (set: (f: FeedState) => void, scope: string, err: unknown) => { set(FEED_ERROR); onError(scope, err); },
+    [onError],
+  );
 
   /*
     ── effect 를 셋으로 나눈 이유 ────────────────────────────────
@@ -192,33 +243,47 @@ export function useStore(uid: string | null, cursorISO: string, todayISO: string
 
   // 1. 화면용 — 커서를 따라 움직인다.
   useEffect(() => {
-    if (!uid) { setMonthEntries([]); setDisplay(FEED_LOADING); return; }
+    if (!uid) return;
     const { db } = getFirebase();
     return subscribeEntriesForMonths(
       db, uid, monthKey.split(','),
-      own(uid, (e, meta) => { setMonthEntries(e); setDisplay(feedFrom(e.length, meta)); }),
-      own(uid, onDisplayError),
+      own(uid, (items, meta) => setMonthFeed({
+        key: monthKey, value: { items, feed: feedFrom(items.length, meta) },
+      })),
+      own(uid, (scope, err) => failWith(
+        (f) => setMonthFeed({ key: monthKey, value: { items: NO_ENTRIES, feed: f } }), scope, err)),
     );
-  }, [uid, monthKey, onDisplayError, own]);
+  }, [uid, monthKey, failWith, own]);
 
   // 2. 계산용 — 오늘 기준. 커서를 옮겨도 다시 붙지 않는다.
   useEffect(() => {
-    if (!uid) { setTideRaw([]); setCalc(FEED_LOADING); return; }
+    if (!uid) return;
     const { db } = getFirebase();
     return subscribeEntriesForMonths(
       db, uid, tideKey.split(','),
-      own(uid, (e, meta) => { setTideRaw(e); setCalc(feedFrom(e.length, meta)); }),
-      own(uid, onCalcError),
+      own(uid, (items, meta) => setTideFeed({
+        key: tideKey, value: { items, feed: feedFrom(items.length, meta) },
+      })),
+      own(uid, (scope, err) => failWith(
+        (f) => setTideFeed({ key: tideKey, value: { items: NO_ENTRIES, feed: f } }), `${scope} (계산)`, err)),
     );
-  }, [uid, tideKey, onCalcError, own]);
+  }, [uid, tideKey, failWith, own]);
 
   // 3. 나머지 — uid 가 바뀔 때만.
   useEffect(() => {
-    if (!uid) { setRecurring([]); setAccounts([]); setDebts([]); setPins([]); return; }
+    if (!uid) return;
     const { db } = getFirebase();
     const unsubs = [
-      subscribeRecurringEntries(db, uid, own(uid, setRecurring), own(uid, onError)),
-      subscribeAccounts(db, uid, own(uid, setAccounts), own(uid, onError)),
+      subscribeRecurringEntries(
+        db, uid,
+        own(uid, (items, meta) => { setRecurring(items); setRecurringFeed(feedFrom(items.length, meta)); }),
+        own(uid, (scope, err) => failWith(setRecurringFeed, `${scope} (반복)`, err)),
+      ),
+      subscribeAccounts(
+        db, uid,
+        own(uid, (items, meta) => { setAccounts(items); setAccountsFeed(feedFrom(items.length, meta)); }),
+        own(uid, (scope, err) => failWith(setAccountsFeed, scope, err)),
+      ),
       subscribeDebts(db, uid, own(uid, setDebts), own(uid, onError)),
       subscribePins(db, uid, own(uid, setPins), own(uid, onError)),
     ];
@@ -227,12 +292,31 @@ export function useStore(uid: string | null, cursorISO: string, todayISO: string
       setRulesBlocked(false);
       setError(null);
     };
-  }, [uid, onError, own]);
+  }, [uid, onError, failWith, own]);
+
+  /*
+    범위가 어긋난 값은 버린다. 커서를 옮긴 직후·자정을 넘긴 직후의 첫 렌더에서
+    앞 범위의 목록과 준비 상태가 새 범위의 것으로 읽히지 않게 한다.
+  */
+  const monthNow = monthFeed.key === monthKey ? monthFeed.value : null;
+  const tideNow = tideFeed.key === tideKey ? tideFeed.value : null;
+  const monthEntries = monthNow?.items ?? NO_ENTRIES;
+  const tideRaw = tideNow?.items ?? NO_ENTRIES;
+  const display = monthNow?.feed ?? FEED_LOADING;
 
   // 반복 항목은 첫 발생 달의 ymSpan 을 갖고 있어 월 조회에도 걸린다.
   // 두 번 들어가지 않도록 id 로 합친다.
   const entries = useMemo(() => mergeById(monthEntries, recurring), [monthEntries, recurring]);
   const tideEntries = useMemo(() => mergeById(tideRaw, recurring), [tideRaw, recurring]);
+
+  /*
+    계산 상태는 세 구독을 종합한다. 월 항목만 도착해도 반복 지출과 잔고가 없으면
+    한도는 틀린다 — 그 상태를 "준비됨" 으로 내보내지 않는다.
+  */
+  const calc = useMemo(
+    () => combineFeeds([tideNow?.feed ?? FEED_LOADING, recurringFeed, accountsFeed]),
+    [tideNow?.feed, recurringFeed, accountsFeed],
+  );
 
   // 계정이 막 바뀐 렌더에서는 아직 앞 계정의 값이 상태에 남아 있다. 내보내지 않는다.
   if (!uid || dataUid !== uid) return EMPTY;

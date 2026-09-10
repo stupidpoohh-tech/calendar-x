@@ -6,10 +6,11 @@
  * 적은 잔고에 어느 날짜가 박히는지는 알 수 없다. 여기서는 카드를 그대로 렌더링해
  * 사람이 누르는 순서대로 누른다.
  */
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { newEntry } from '../domain/entry';
 import type { Account, Entry } from '../domain/types';
+import { CALC_ERROR, CALC_LOADING, CALC_READY, CALC_UNCONFIRMED, type CalcState } from './calcState';
 import { DialogHost } from './Dialog';
 import { TideBar } from './TideBar';
 
@@ -161,8 +162,8 @@ describe('기준일', () => {
   });
 });
 
-describe('계산용 자료를 아직 못 받았을 때', () => {
-  const render0 = (calcState: 'loading' | 'error') => render(
+describe('계산용 자료의 상태에 따라', () => {
+  const render0 = (calcState: CalcState) => render(
     <DialogHost>
       <TideBar
         todayISO="2026-09-10"
@@ -178,17 +179,45 @@ describe('계산용 자료를 아직 못 받았을 때', () => {
     </DialogHost>,
   );
 
-  it('0원을 그리지 않고 무엇을 기다리는지 적는다', () => {
-    render0('loading');
+  it('아직 못 받았으면 0원을 그리지 않고 무엇을 기다리는지 적는다', () => {
+    render0(CALC_LOADING);
     expect(screen.queryByLabelText('잔고 고치기')).toBeNull();
     expect(screen.getByLabelText('며칠 버티나').textContent).toContain('불러오는 중');
   });
 
   it('조회가 실패하면 그 사실을 적는다 — 0원으로 감추지 않는다', () => {
-    render0('error');
+    render0(CALC_ERROR);
     const card = screen.getByLabelText('며칠 버티나');
     expect(card.textContent).toContain('불러오지 못했습니다');
     expect(card.textContent).not.toContain('₩ 0');
+  });
+
+  it('캐시가 비어 있으면 "예정 없음" 으로 확정하지 않는다', () => {
+    render0(CALC_UNCONFIRMED);
+    const card = screen.getByLabelText('며칠 버티나');
+    expect(card.textContent).toContain('가릴 수 없습니다');
+    expect(screen.queryByLabelText('잔고 고치기')).toBeNull();
+  });
+
+  it('캐시에 자료가 있으면 숫자는 내되 완전성 한계를 적는다', () => {
+    // 오프라인에서 앱을 통째로 막지 않는다. 대신 무엇을 못 봤는지 말한다.
+    render0({ kind: 'ready', fromCache: true, pending: false });
+    const card = screen.getByLabelText('며칠 버티나');
+    expect(within(card).getByLabelText('잔고 고치기')).toHaveTextContent('1,000,000');
+    expect(card.textContent).toContain('이 기기에 저장된 자료 기준입니다');
+  });
+
+  it('서버가 아직 확인하지 않은 변경이 섞이면 그 사실을 적는다', () => {
+    render0({ kind: 'ready', fromCache: false, pending: true });
+    expect(screen.getByLabelText('며칠 버티나').textContent)
+      .toContain('아직 서버가 확인하지 않은 변경');
+  });
+
+  it('확정 상태에서는 아무 말도 덧붙이지 않는다', () => {
+    render0(CALC_READY);
+    const card = screen.getByLabelText('며칠 버티나');
+    expect(card.textContent).not.toContain('기기에 저장된 자료 기준');
+    expect(card.textContent).not.toContain('아직 서버가 확인하지 않은');
   });
 });
 

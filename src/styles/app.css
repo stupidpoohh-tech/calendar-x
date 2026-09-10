@@ -1237,6 +1237,12 @@
 .rec-manage .set-row-s { line-height: 1.55; }
 .rec-state { padding: 2px 4px; line-height: 1.55; }
 
+/* 숫자는 내되 완전하지 않을 수 있을 때 덧붙이는 줄. 숫자를 지우지 않고 옆에 세운다. */
+.tide-caveat, .tp-caveat {
+  font-size: 0.6875rem; line-height: 1.5; color: var(--ink-4);
+  margin-top: 4px;
+}
+
 /* ---------- 렌더 오류 ---------- */
 .crash {
   max-width: 30rem; margin: 12vh auto; padding: 0 20px;
