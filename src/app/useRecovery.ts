@@ -12,16 +12,15 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { describeFirestoreError } from '../data/errors';
 import { getFirebase } from '../data/firebase';
-import {
-  commitRecovery, patchRecoveryRule, saveEntry, saveRecoveryRule, subscribeRecoveryRule,
-} from '../data/repo';
+import { subscribeRecoveryRule } from '../data/repo';
+import { displayTitle } from '../domain/entry';
 import {
   completeRecovery, defaultRecoveryRule, generateRecovery, moveRecovery,
   primeRule, scheduleDebtRecovery, skipRecovery,
   type RecoveryTransition,
 } from '../domain/recovery';
 import type { Entry, RecoveryRule, TimeHM } from '../domain/types';
-import type { Commit } from './useCommit';
+import type { Commit } from './useWriteQueue';
 
 export interface RecoveryApi {
   rule: RecoveryRule;
@@ -76,12 +75,12 @@ export function useRecovery({ uid, todayISO, onError, commit }: Options): Recove
    */
   const push = useCallback((t: RecoveryTransition, removeEntryId?: string) => {
     if (!uid) return;
-    commit('회복', () => commitRecovery(db, uid, {
-      rule: t.rule,
-      entry: t.entry,
-      removeEntryId: removeEntryId ?? null,
-    }));
-  }, [db, uid, commit]);
+    commit({
+      kind: 'recoveryCommit', label: '회복',
+      summary: t.entry ? `${t.entry.startDate} 회차` : '회복 상태',
+      payload: { rule: t.rule, entry: t.entry, removeEntryId: removeEntryId ?? null },
+    });
+  }, [uid, commit]);
 
   /**
    * 예정 채우기 + 실제 항목 생성.
@@ -97,7 +96,11 @@ export function useRecovery({ uid, todayISO, onError, commit }: Options): Recove
     const primed = primeRule(rule, todayISO);
     if (primed !== rule) {
       // 계산한 필드만 쓴다. 규칙 전체를 쓰면 같은 순간 설정 화면에서 적고 있던 값을 덮는다.
-      commit('회복 예정일', () => patchRecoveryRule(db, uid, { nextDueAt: primed.nextDueAt }));
+      commit({
+        kind: 'recoveryPatch', label: '회복 예정일',
+        summary: primed.nextDueAt ?? '예정 없음',
+        payload: { nextDueAt: primed.nextDueAt },
+      });
       return;
     }
 
@@ -106,19 +109,22 @@ export function useRecovery({ uid, todayISO, onError, commit }: Options): Recove
     if (generatedFor.current === rule.nextDueAt) return;
     generatedFor.current = rule.nextDueAt;
     push(t);
-  }, [db, uid, rule, todayISO, push, commit]);
+  }, [uid, rule, todayISO, push, commit]);
 
   return useMemo<RecoveryApi>(() => ({
     rule,
 
     saveRule: (next) => {
       if (!uid) return;
-      commit('회복 설정', () => saveRecoveryRule(db, uid, next));
+      commit({
+        kind: 'recoveryRule', label: '회복 설정',
+        summary: `${next.intervalDays}일 간격`, payload: next,
+      });
     },
 
     saveEntryOnly: (entry) => {
       if (!uid) return;
-      commit('회복 항목', () => saveEntry(db, uid, entry));
+      commit({ kind: 'entry', label: '회복 항목', summary: displayTitle(entry), payload: entry });
     },
 
     complete: (entry, onISO) => push(completeRecovery(rule, entry, onISO)),
@@ -137,7 +143,10 @@ export function useRecovery({ uid, todayISO, onError, commit }: Options): Recove
     clearActive: () => {
       if (!uid || !rule.activeEntryId) return;
       generatedFor.current = null;
-      commit('회복 참조 정리', () => patchRecoveryRule(db, uid, { activeEntryId: null }));
+      commit({
+        kind: 'recoveryPatch', label: '회복 참조 정리',
+        summary: '진행 중 회차 지우기', payload: { activeEntryId: null },
+      });
     },
-  }), [db, uid, rule, push, commit]);
+  }), [uid, rule, push, commit]);
 }

@@ -1169,6 +1169,41 @@
 .rdebt-f .mod-input.time { flex: 0 0 110px; }
 .rdebt-note { margin: 0; font-size: 0.71875rem; color: var(--ink-3); line-height: 1.5; }
 
+/* ---- 저장하지 못한 것 ---- */
+
+.fw {
+  border: 1px solid color-mix(in oklab, var(--bad) 38%, var(--line));
+  background: color-mix(in oklab, var(--bad) 7%, var(--bg-soft));
+  border-radius: var(--radius);
+  overflow: hidden;
+}
+.fw-head {
+  display: flex; align-items: center; gap: 8px;
+  padding: 9px 12px; font-size: 0.8125rem; color: var(--ink);
+}
+.fw-t { font-weight: 600; flex: 1; }
+.fw-a {
+  appearance: none; border: none; background: transparent; cursor: pointer;
+  font: inherit; font-size: 0.75rem; font-weight: 600; color: var(--bad);
+  padding: 3px 6px; border-radius: var(--radius-sm); flex-shrink: 0;
+}
+.fw-a:hover { background: color-mix(in oklab, var(--bad) 12%, transparent); }
+.fw-a.danger { color: var(--ink-3); }
+.fw-ul {
+  list-style: none; margin: 0; padding: 0 12px 4px;
+  display: flex; flex-direction: column; gap: 6px;
+  border-top: 1px solid color-mix(in oklab, var(--bad) 22%, var(--line));
+  padding-top: 9px;
+}
+.fw-i { display: flex; align-items: center; gap: 6px; }
+.fw-i-main { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 1px; }
+.fw-i-t {
+  font-size: 0.78125rem; color: var(--ink); font-weight: 600;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.fw-i-r { font-size: 0.6875rem; color: var(--ink-3); line-height: 1.4; }
+.fw-note { margin: 0; padding: 6px 12px 10px; font-size: 0.6875rem; color: var(--ink-3); line-height: 1.5; }
+
 /* ---- 회복 상세 ---- */
 
 .rec-mod { max-width: 460px; }

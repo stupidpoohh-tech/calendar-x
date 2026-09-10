@@ -9,15 +9,15 @@ import {
 import { getFirebase } from '../data/firebase';
 import { convertLegacyItems, readLegacyItems, summarize } from '../data/migrate';
 import {
-  createManyIfAbsent, deleteDebt, deleteEntry, deletePin, fetchAll, markMigrated,
-  readMigrationMark, saveAccount, saveDebt, saveEntry, savePin, saveTaskOrder, writeMany,
+  createManyIfAbsent, fetchAll, markMigrated, readMigrationMark, writeMany,
 } from '../data/repo';
 import {
   MERGE_SKIPS_RECOVERY, REPLACE_DISABLED_REASON, safeMerge, type RestoreIO,
 } from '../data/restore';
 import { LENSES, LENS_BY_ID } from '../domain/constants';
 import { endOfMonth, fmtMonthTitle, startOfMonth, toISO } from '../domain/date';
-import { convertKind, newEntry, withDerived } from '../domain/entry';
+import { convertKind, displayTitle, newEntry, withDerived } from '../domain/entry';
+import { formatAmount } from '../domain/money';
 import { applyFilters, collectTags, emptyFilters, hasActiveFilter } from '../domain/filters';
 import { baseIdOf, materialize } from '../domain/recurrence';
 import { isRecoveryEntry } from '../domain/recovery';
@@ -34,6 +34,7 @@ import { ListView } from '../ui/ListView';
 import { MonthCalendar } from '../ui/MonthCalendar';
 import { MonthPicker } from '../ui/MonthPicker';
 import { MoneyPanel } from '../ui/MoneyPanel';
+import { FailedWrites } from '../ui/FailedWrites';
 import { PinnedSection } from '../ui/PinnedSection';
 import { RecoveryDebtBar } from '../ui/RecoveryDebtBar';
 import { RecoverySheet } from '../ui/RecoverySheet';
@@ -44,7 +45,7 @@ import { useAuth } from './useAuth';
 import { usePrefs } from './usePrefs';
 import { useDemoStore } from './useDemoStore';
 import { useRecovery } from './useRecovery';
-import { useCommit } from './useCommit';
+import { useWriteQueue } from './useWriteQueue';
 import { useStore } from './useStore';
 import { useToday } from './useToday';
 
@@ -102,8 +103,12 @@ function Workspace({ uid, user, onSignOut }: WorkspaceProps) {
 
   // 자정을 넘기거나 백그라운드에서 돌아오면 다시 잰다. 이 값이 계산 창·한도·정산 기준을 정한다.
   const today = useToday();
-  /* 서버 쓰기의 실패를 알린다. 로컬 반영과 서버 확정은 다른 사건이다 — `useCommit` 참고. */
-  const commit = useCommit();
+  /*
+    서버 쓰기. 거절당하면 적은 값을 붙잡아 계정별 목록에 남긴다 —
+    Firestore 는 거절된 쓰기를 로컬 캐시에서도 되돌린다 (`useWriteQueue` 참고).
+  */
+  const writes = useWriteQueue(uid);
+  const commit = writes.commit;
   const cursorISO = toISO(cursor);
   const isAnon = uid === null;
   // 훅은 조건부 호출이 안 된다. 둘 다 부르고 로그인 상태에 따라 결과를 고른다.
@@ -213,8 +218,8 @@ function Workspace({ uid, user, onSignOut }: WorkspaceProps) {
 
   const persist = useCallback((e: Entry) => {
     if (isAnon || !uid) { void promptLogin(); return; }
-    commit('항목', () => saveEntry(db, uid, e));
-  }, [db, uid, isAnon, promptLogin, commit]);
+    commit({ kind: 'entry', label: '항목', summary: displayTitle(e), payload: e });
+  }, [uid, isAnon, promptLogin, commit]);
 
   const handleSave = useCallback((e: Entry) => {
     persist(e);
@@ -224,8 +229,12 @@ function Workspace({ uid, user, onSignOut }: WorkspaceProps) {
   /** 잔고 저장. 전체 렌즈(오늘 카드)와 가계부 렌즈(며칠 버티나 카드)가 같이 쓴다. */
   const saveBalance = useCallback((a: Account) => {
     if (isAnon || !uid) { void promptLogin(); return; }
-    commit('잔고', () => saveAccount(db, uid, a));
-  }, [db, uid, isAnon, promptLogin, commit]);
+    commit({
+      kind: 'account', label: '잔고',
+      summary: `${a.name} ${formatAmount(a.balanceMinor, a.currency)}`,
+      payload: a,
+    });
+  }, [uid, isAnon, promptLogin, commit]);
 
   const handleDelete = useCallback(async (e: Entry) => {
     if (isAnon || !uid) { void promptLogin(); return; }
@@ -255,13 +264,22 @@ function Workspace({ uid, user, onSignOut }: WorkspaceProps) {
     });
     if (!ok) return;
     closeModal();
-    try {
-      await deleteEntry(db, uid, baseIdOf(e.id));
-      dialog.toast('삭제했습니다.');
-    } catch (err) {
-      dialog.toast(`삭제하지 못했습니다. ${describeFirestoreError(err)}`, 'bad');
-    }
-  }, [db, uid, isAnon, promptLogin, dialog, closeModal, recovery]);
+    /*
+      삭제도 다른 쓰기와 같은 길로 보낸다.
+
+      예전에는 여기서 `await deleteEntry` 를 했다. 오프라인에서는 그 promise 가 영영
+      resolve 하지 않아 아무 반응도 없었고, 서버가 거절하면 토스트 한 줄로 끝나 무엇을
+      지우려 했는지가 사라졌다. 지금은 실패하면 "저장하지 못한 것" 목록에 남는다.
+
+      아래 토스트는 **이 기기에 반영됐다**는 뜻이다. 서버 확정은 다른 사건이라,
+      거절당하면 그 목록이 뜬다.
+    */
+    commit({
+      kind: 'entryDelete', label: '항목 삭제',
+      summary: displayTitle(e), payload: { id: baseIdOf(e.id) },
+    });
+    dialog.toast('삭제했습니다.');
+  }, [uid, isAnon, promptLogin, dialog, closeModal, recovery, commit]);
 
   const handleStatus = useCallback((e: Entry, status: TaskStatus) => {
     const base = store.entries.find((x) => x.id === baseIdOf(e.id)) ?? e;
@@ -306,8 +324,12 @@ function Workspace({ uid, user, onSignOut }: WorkspaceProps) {
       : to + (from < to ? 0 : 1);
     next.splice(Math.max(0, insertAt), 0, moved);
 
-    commit('순서', () => saveTaskOrder(db, uid, next.map((e, i) => ({ id: baseIdOf(e.id), order: i }))));
-  }, [materialized, db, uid, isAnon, promptLogin, commit]);
+    commit({
+      kind: 'taskOrder', label: '순서',
+      summary: `할 일 ${next.length.toLocaleString('ko-KR')}건의 순서`,
+      payload: { ordered: next.map((e, i) => ({ id: baseIdOf(e.id), order: i })) },
+    });
+  }, [materialized, uid, isAnon, promptLogin, commit]);
 
   // ---------- 백업 / 복원 / 이관 ----------
 
@@ -644,11 +666,14 @@ function Workspace({ uid, user, onSignOut }: WorkspaceProps) {
       onToggleCollapsed={() => set('pinCollapsed', { ...prefs.pinCollapsed, [lens]: !prefs.pinCollapsed[lens] })}
       onSave={(p) => {
         if (isAnon || !uid) { void promptLogin(); return; }
-        commit('고정 메모', () => savePin(db, uid, p));
+        commit({ kind: 'pin', label: '고정 메모', summary: p.text.slice(0, 40) || '(빈 메모)', payload: p });
       }}
       onDelete={(p) => {
         if (isAnon || !uid) { void promptLogin(); return; }
-        commit('고정 메모 삭제', () => deletePin(db, uid, p.id));
+        commit({
+          kind: 'pinDelete', label: '고정 메모 삭제',
+          summary: p.text.slice(0, 40) || '(빈 메모)', payload: { id: p.id },
+        });
       }}
     />
   );
@@ -781,6 +806,19 @@ function Workspace({ uid, user, onSignOut }: WorkspaceProps) {
       */}
       <div className="side">
         {/*
+          저장하지 못한 것이 있으면 렌즈와 무관하게 늘 여기 뜬다. 확인창으로 한 번 알리고
+          말면, 두 건이 동시에 실패했을 때 뒤엣것이 앞엣것을 밀어내고 밀려난 값은 다시
+          찾을 길이 없다. 남은 것이 없으면 이 줄도 화면에 없다.
+        */}
+        <FailedWrites
+          failed={writes.failed}
+          durable={writes.durable}
+          onRetry={writes.retry}
+          onRetryAll={writes.retryAll}
+          onDiscard={writes.discard}
+        />
+
+        {/*
           빚이 0이면 아무것도 렌더링하지 않는다. 정상 상태에서 회복은 화면에 없어야 한다.
           렌즈와 무관하게 같은 자리에 두는 이유는, 밀렸다는 사실이 가계부를 보는 동안에도
           사라지면 안 되기 때문이다.
@@ -837,12 +875,12 @@ function Workspace({ uid, user, onSignOut }: WorkspaceProps) {
               onToggleCollapsed={() => set('debtsCollapsed', !prefs.debtsCollapsed)}
               onSaveDebt={(d) => {
                 if (isAnon || !uid) { void promptLogin(); return; }
-                commit('대출', () => saveDebt(db, uid, d));
+                commit({ kind: 'debt', label: '대출', summary: d.name, payload: d });
               }}
               onDeleteDebt={async (d) => {
                 if (isAnon || !uid) { void promptLogin(); return; }
                 const ok = await dialog.confirm({ title: `'${d.name}'을(를) 삭제할까요?`, danger: true, confirmLabel: '삭제' });
-                if (ok) commit('대출 삭제', () => deleteDebt(db, uid, d.id));
+                if (ok) commit({ kind: 'debtDelete', label: '대출 삭제', summary: d.name, payload: { id: d.id } });
               }}
             />
             {pinnedSection}
