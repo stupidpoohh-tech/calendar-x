@@ -67,8 +67,8 @@ export function TideBar({
   );
   const daysLeft = useMemo(() => Math.max(1, daysBetween(today, horizon.end) + 1), [today, horizon.end]);
   const upcoming = useMemo(
-    () => summarize(upcomingInHorizon(entries, today, horizon)),
-    [entries, today, horizon],
+    () => summarize(upcomingInHorizon(accounts, entries, today, horizon)),
+    [accounts, entries, today, horizon],
   );
 
   const head = (summary: string) => (

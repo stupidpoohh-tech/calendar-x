@@ -91,7 +91,7 @@ describe('tide 의 모든 입구가 원본만 받는다', () => {
     ['horizonOf', () => horizonOf(shown, '2026-09-01')],
     ['limitOn', () => limitOn(acc, shown, '2026-09-30', '2026-09-01')],
     ['headlineLimit', () => headlineLimit(acc, shown, '2026-09-01')],
-    ['upcomingInHorizon', () => upcomingInHorizon(shown, '2026-09-01')],
+    ['upcomingInHorizon', () => upcomingInHorizon([], shown, '2026-09-01')],
     ['settle', () => settle(acc, shown, 900_000, '2026-09-30')],
   ])('%s 는 화면용 목록을 거절한다', (_name, run) => {
     expect(run).toThrow(TideInputError);
@@ -191,7 +191,10 @@ describe('한도·다음 입금일은 보고 있는 달과 무관하다', () => 
       freq: 'weekly', interval: 1, until: null, count: null,
     }),
   ].map(roundTrip);
-  // 잔고를 09-01 에 적었고 오늘은 09-10 — 그 사이 주간 지출 09-08 한 번이 지나갔다.
+  /*
+    잔고를 09-01 에 적었고 오늘은 09-10 이다. 그 사이 주간 지출 09-08 한 번이 지나갔는데,
+    그것은 09-01 에 적은 숫자에 들어 있지 않다 — 그래서 한도에서 함께 빠진다.
+  */
   const acc = [account(1_000_000, '2026-09-01')];
   const today = '2026-09-10';
 
@@ -199,8 +202,8 @@ describe('한도·다음 입금일은 보고 있는 달과 무관하다', () => 
     const h = horizonOf(raw, today);
     expect(h.nextIncome).toBe('2026-09-25');
     expect(h.end).toBe('2026-09-24');
-    // 잔고 1,000,000 − 주간 지출 09-15 · 09-22 두 번.
-    expect(headlineLimit(acc, raw, today)).toBe(980_000);
+    // 잔고 1,000,000 − 주간 지출 09-08 · 09-15 · 09-22 세 번.
+    expect(headlineLimit(acc, raw, today)).toBe(970_000);
   });
 
   it('달력을 아무리 넘겨도 같은 값을 낸다', () => {
@@ -216,7 +219,7 @@ describe('한도·다음 입금일은 보고 있는 달과 무관하다', () => 
       // 화면용 목록은 구간마다 길이가 다르다.
       // 계산은 그것과 무관하게 원본만 본다 — 그래서 값이 고정이다.
       expect(horizonOf(raw, today).nextIncome).toBe('2026-09-25');
-      expect(headlineLimit(acc, raw, today)).toBe(980_000);
+      expect(headlineLimit(acc, raw, today)).toBe(970_000);
       expect(settle(acc, raw, 900_000, today).diff).toBe(-90_000);
     }
   });
@@ -285,8 +288,8 @@ describe('오래된 반복 — 화면과 계산이 같은 발생분을 본다', 
 
   it('한도는 화면에 보이는 그 발생분만큼만 깎인다', () => {
     const acc = [account(1_000_000, '2026-09-01')];
-    // (09-10, 09-24] 사이 주간 지출은 09-15 · 09-22 두 번.
-    expect(headlineLimit(acc, raw, today)).toBe(980_000);
+    // 잔고 기준일(09-01) 다음부터 09-24 까지 주간 지출은 09-08 · 09-15 · 09-22 세 번.
+    expect(headlineLimit(acc, raw, today)).toBe(970_000);
     expect(horizonOf(raw, today).nextIncome).toBe('2026-09-25');
   });
 

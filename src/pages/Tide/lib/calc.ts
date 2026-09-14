@@ -140,10 +140,26 @@ export function horizonOf(entries: Entry[], today: ISODate): Horizon {
 }
 
 /**
- * limit(d) = 현재 잔고 + (오늘 이후 ~ d일까지의 예정 입금 − 예정 출금)
+ * 한도가 세기 시작하는 경계. 이 날 **다음**부터 센다.
+ *
+ * 예전에는 오늘 다음부터 셌다(`(오늘, d]`). 그래서 **오늘 날짜로 적은 입출금이 어디에도
+ * 반영되지 않았다** — 내일로 적으면 바로 반영되는데 오늘만 사라졌다.
+ *
+ * 경계는 오늘이 아니라 **잔고를 적은 날**이다. 잔고는 그 날의 사실이고, 그 다음에 잡힌
+ * 예정은 아직 그 숫자에 들어 있지 않다. 다만 오늘은 넘지 않는다 — 적어 둔 항목은 아직
+ * 일어나지 않은 계획이라 오늘 것도 앞에 있다. 정산(`settle`)은 어제까지만 흡수한다.
+ */
+export function unsettledAfter(state: State, today: ISODate): ISODate {
+  const since = dateOfInstant(state.balance.checkedAt);
+  const yesterday = addDays(today, -1);
+  return compareDate(since, yesterday) < 0 ? since : yesterday;
+}
+
+/**
+ * limit(d) = 현재 잔고 + (잔고 기준일 이후 ~ d일까지의 예정 입금 − 예정 출금)
  *
  * "예상 잔고"가 아니라 "이 날까지 쓸 수 있는 한도"다.
- * 오늘 이전은 잔고가 이미 말해주므로 계산에 들어가지 않는다.
+ * 잔고 기준일 이전은 잔고가 이미 말해주므로 계산에 들어가지 않는다.
  *
  * 기간 예산(생활비)만 규칙이 다르다: d가 기간에 들어서는 순간
  * **남은 몫 전체**를 예약한다. 일할로 깎으면 기간 안의 날들이 매일
@@ -154,15 +170,16 @@ export function horizonOf(entries: Entry[], today: ISODate): Horizon {
  * 이 한도가 흔들리지 않는다.)
  */
 export function limitOn(state: State, date: ISODate, today: ISODate): number {
+  const from = unsettledAfter(state, today);
   let total = state.balance.amount;
   for (const entry of state.entries) {
     const s = entry.schedule;
     if (s.type === 'span') {
       if (compareDate(s.start, date) <= 0) {
-        total += netBetween([entry], today, s.end);
+        total += netBetween([entry], from, s.end);
       }
     } else {
-      total += netBetween([entry], today, date);
+      total += netBetween([entry], from, date);
     }
   }
   return total;
@@ -194,7 +211,9 @@ export type Settlement = {
 export function settle(state: State, newAmount: number, now: Date = new Date()): Settlement {
   const since = dateOfInstant(state.balance.checkedAt);
   const today = toISODate(now);
-  const passed = occurrences(state.entries, since, today);
+  // 흡수하는 구간은 어제까지다. 오늘 적어 둔 예정은 아직 일어나지 않은 계획이고,
+  // 한도가 그것을 세므로 여기서 흡수하면 같은 돈이 두 번 빠진다.
+  const passed = occurrences(state.entries, since, addDays(today, -1));
   const expected = state.balance.amount + netOf(passed);
   return {
     since,
@@ -207,21 +226,22 @@ export function settle(state: State, newAmount: number, now: Date = new Date()):
 }
 
 /**
- * 오늘 이후 ~ 머리 숫자 끝점까지 남은 예정.
+ * 잔고 기준일 이후 ~ 머리 숫자 끝점까지 남은 예정.
  * 기간 예산은 끝점에 걸치기만 하면 남은 몫 전체가 담긴다 —
  * 머리 숫자(limitOn)와 같은 규칙이어야 내역 합과 머리 숫자가 맞는다.
  */
 export function upcomingInHorizon(state: State, today: ISODate): Occurrence[] {
   const h = horizonOf(state.entries, today);
+  const from = unsettledAfter(state, today);
   const out: Occurrence[] = [];
   for (const entry of state.entries) {
     const s = entry.schedule;
     if (s.type === 'span') {
       if (compareDate(s.start, h.end) <= 0) {
-        out.push(...occurrences([entry], today, s.end));
+        out.push(...occurrences([entry], from, s.end));
       }
     } else {
-      out.push(...occurrences([entry], today, h.end));
+      out.push(...occurrences([entry], from, h.end));
     }
   }
   out.sort((a, b) => compareDate(a.date, b.date) || a.entry.name.localeCompare(b.entry.name));
