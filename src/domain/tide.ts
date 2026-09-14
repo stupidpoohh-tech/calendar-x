@@ -319,7 +319,52 @@ export function horizonOf(entries: readonly Entry[], today: DateISO): Horizon {
 }
 
 /**
- * limit(d) = 현재 잔고 + (오늘 이후 ~ d일까지의 예정 입금 − 예정 출금)
+ * 잔고가 말해 주는 마지막 날 — 가장 최근에 적은 잔고의 기준일.
+ *
+ * 고르는 순서는 `checkedAt`(순간)으로 정하고 — 하루에 두 번 갈아엎어도 순서가 잡힌다 —
+ * 날짜는 그 기록의 `asOf`(벽시계 날짜)로 잡는다.
+ */
+export function balanceAsOf(accounts: readonly Account[], todayISO: DateISO): DateISO {
+  let since = todayISO;
+  let sinceTime = -Infinity;
+  for (const a of accounts) {
+    const t = a.checkedAt ? Date.parse(a.checkedAt) : Date.parse(`${a.asOf}T00:00:00`);
+    if (!Number.isFinite(t) || t < sinceTime) continue;
+    sinceTime = t;
+    // asOf 는 이미 벽시계 날짜다. 없거나 깨졌으면 순간에서 기기 날짜를 뽑는다.
+    since = normalizeDate(a.asOf) || localDateOf(a.checkedAt ?? '') || todayISO;
+  }
+  return since;
+}
+
+/**
+ * 한도가 세기 시작하는 경계. 이 날 **다음**부터 센다.
+ *
+ * ── 왜 오늘이 아닌가 ────────────────────────────────────────────
+ *
+ * 예전에는 오늘 다음부터 셌다(`(오늘, d]`). 그래서 **오늘 날짜로 적은 입출금이 어디에도
+ * 반영되지 않았다** — 머리 숫자도, 오늘 셀도, 남은 예정 목록도 그대로였다. 내일 날짜로
+ * 적으면 바로 반영되는데 오늘만 사라지니, 적어 둔 사람 입장에서는 저장이 안 된 것처럼 보인다.
+ *
+ * 경계는 오늘이 아니라 **잔고를 적은 날**이다. 잔고는 그 날의 사실이고, 그 다음에 잡힌
+ * 예정은 아직 그 숫자에 들어 있지 않다. 잔고 기준일이 사흘 전이면 그 사흘 사이의 예정도
+ * 아직 잔고 밖이므로 함께 세야 한다.
+ *
+ * 다만 **오늘은 넘지 않는다.** 이 앱은 "과거 지출은 입력하지 않는다" 를 전제로 하므로,
+ * 적어 둔 항목은 아직 일어나지 않은 계획이다. 오늘 적은 계획도 아직 앞에 있다.
+ * 그래서 잔고를 오늘 적었더라도 오늘 것은 한도에서 뺀다.
+ *
+ * 정산(`settle`)은 이 경계의 반대쪽 — **어제까지** 를 잔고에 흡수된 것으로 본다.
+ * 둘이 겹치지도, 사이가 비지도 않는다.
+ */
+export function unsettledAfter(accounts: readonly Account[], todayISO: DateISO): DateISO {
+  const since = balanceAsOf(accounts, todayISO);
+  const yesterday = addDaysISO(todayISO, -1);
+  return since < yesterday ? since : yesterday;
+}
+
+/**
+ * limit(d) = 현재 잔고 + (잔고 기준일 이후 ~ d일까지의 예정 입금 − 예정 출금)
  *
  * "예상 잔고"가 아니라 "이 날까지 쓸 수 있는 한도"다.
  * 기간 예산(span) 규칙: d 가 기간에 들어서는 순간 남은 몫 전체를 예약한다.
@@ -332,6 +377,8 @@ export function limitOn(
   date: DateISO, today: DateISO,
 ): number {
   assertOriginals(entries);
+  // 오늘이 아니라 잔고 기준일 다음부터 센다. 오늘 적은 예정도 아직 잔고 밖이다.
+  const from = unsettledAfter(accounts, today);
   const balance = accounts.reduce((s, a) => s + a.balanceMinor, 0);
   let total = balance;
   for (const entry of entries) {
@@ -340,10 +387,10 @@ export function limitOn(
       const end = normalizeDate(effectiveEndDate(entry));
       const start = normalizeDate(entry.startDate);
       if (start && end && start <= date) {
-        total += netBetween([entry], today, end);
+        total += netBetween([entry], from, end);
       }
     } else {
-      total += netBetween([entry], today, date);
+      total += netBetween([entry], from, date);
     }
   }
   return total;
@@ -420,17 +467,16 @@ export function settle(
     잔고가 전날로 읽혔다. 그러면 (전날, 오늘] 이 되어 오늘 예정분이 이미 지나간 것으로
     잡힌다.
   */
-  let since = todayISO;
-  let sinceTime = -Infinity;
-  for (const a of accounts) {
-    const t = a.checkedAt ? Date.parse(a.checkedAt) : Date.parse(`${a.asOf}T00:00:00`);
-    if (!Number.isFinite(t) || t < sinceTime) continue;
-    sinceTime = t;
-    // asOf 는 이미 벽시계 날짜다. 없거나 깨졌으면 순간에서 기기 날짜를 뽑는다.
-    since = normalizeDate(a.asOf) || localDateOf(a.checkedAt ?? '') || todayISO;
-  }
+  const since = balanceAsOf(accounts, todayISO);
   const currentBalance = accounts.reduce((s, a) => s + a.balanceMinor, 0);
-  const passed = occurrences(entries, since, todayISO);
+  /*
+    흡수하는 구간은 **어제까지**다.
+
+    오늘 적어 둔 예정은 아직 일어나지 않은 계획이라 잔고에 흡수됐다고 볼 수 없다.
+    한도(`unsettledAfter`)가 오늘 것을 세는 것과 짝이다 — 한쪽이 흡수하고 다른 쪽도 세면
+    같은 돈이 두 번 빠진다.
+  */
+  const passed = occurrences(entries, since, addDaysISO(todayISO, -1));
   const expected = currentBalance + netOf(passed);
   const from = coveredFrom ? normalizeDate(coveredFrom) : null;
 
@@ -469,15 +515,17 @@ export function settle(
 }
 
 /**
- * 오늘 이후 ~ 머리 숫자 끝점까지 남은 예정.
+ * 잔고 기준일 이후 ~ 머리 숫자 끝점까지 남은 예정.
  * 기간 예산은 끝점에 걸치면 남은 몫 전체가 담긴다 — limitOn 과 같은 규칙이라야
  * 내역 합과 머리 숫자가 맞는다.
  */
 export function upcomingInHorizon(
-  entries: readonly Entry[], today: DateISO, horizon?: Horizon,
+  accounts: readonly Account[], entries: readonly Entry[], today: DateISO, horizon?: Horizon,
 ): Occurrence[] {
   assertOriginals(entries);
   const h = horizon ?? horizonOf(entries, today);
+  // 머리 숫자와 같은 경계에서 세야 목록의 합과 숫자가 맞는다.
+  const from = unsettledAfter(accounts, today);
   const out: Occurrence[] = [];
   for (const entry of entries) {
     if (!participates(entry)) continue;
@@ -486,9 +534,9 @@ export function upcomingInHorizon(
       const end = normalizeDate(effectiveEndDate(entry));
       // `limitOn` 과 같은 조건이라야 목록의 합과 머리 숫자가 맞는다.
       // 끝점 뒤에 시작하는 기간 예산은 한도를 건드리지 않으므로 목록에도 넣지 않는다.
-      if (start && end && start <= h.end) out.push(...occurrences([entry], today, end));
+      if (start && end && start <= h.end) out.push(...occurrences([entry], from, end));
     } else {
-      out.push(...occurrences([entry], today, h.end));
+      out.push(...occurrences([entry], from, h.end));
     }
   }
   out.sort((a, b) => a.date.localeCompare(b.date) || a.entry.title.localeCompare(b.entry.title));

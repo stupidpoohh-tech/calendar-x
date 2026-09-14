@@ -139,25 +139,87 @@ describe('limitOn — "이 날까지 쓸 수 있는 한도"', () => {
   });
 });
 
-describe('불변식 4 — 오늘 이전 지나간 발생분은 한도를 못 건드린다', () => {
-  it('과거의 반복 발생분은 무시된다', () => {
-    // 매월 5일 지출인데, 오늘이 8/10 이면 8/5 분은 이미 잔고에 반영됐다.
-    // 그래서 오늘 기준 한도에는 안 들어간다.
+describe('불변식 4 — 잔고 기준일 이전 발생분은 한도를 못 건드린다', () => {
+  it('잔고를 적은 날 이전의 발생분은 무시된다', () => {
+    // 매월 5일 지출. 잔고를 8/7 에 적었으니 8/5 분은 그 숫자에 이미 들어 있다.
     const rent = monthly('expense', 700_000, '2026-01-05');
-    const today = '2026-08-10';
-    const r = limitOn([account()], [rent], '2026-08-31', today);
-    // 8/10 이후 잡히는 발생: 9/5. 반영 안 됨(8/31 이 끝점).
+    const acc = account({ checkedAt: '2026-08-07T09:00:00+09:00' });
+    const r = limitOn([acc], [rent], '2026-08-31', '2026-08-10');
+    // (8/7, 8/31] 에 잡히는 발생은 없다. 다음은 9/5 이고 끝점 밖이다.
     expect(r).toBe(1_000_000);
   });
-  it('과거에 시작했어도 아직 안 끝난 기간은 남은 몫이 한도에 잡힌다', () => {
-    // 8/1 시작 8/31 종료, 오늘 8/11. 앞 10일은 잔고에 반영됐고 남은 21일 몫만 한도에.
+
+  it('잔고를 적은 뒤에 지나간 발생분은 아직 잔고 밖이라 한도에 잡힌다', () => {
+    // 잔고는 8/1 의 사실이다. 8/5 월세는 그 뒤에 나갔으니 그 숫자에 없다.
+    const rent = monthly('expense', 700_000, '2026-01-05');
+    const acc = account({ checkedAt: '2026-08-01T09:00:00+09:00' });
+    expect(limitOn([acc], [rent], '2026-08-31', '2026-08-10')).toBe(300_000);
+  });
+
+  it('과거에 시작했어도 아직 안 끝난 기간은 잔고 기준일 다음 몫이 한도에 잡힌다', () => {
+    // 8/1 시작 8/31 종료. 잔고도 8/1 에 적었으니 8/2 부터의 몫이 남은 돈에서 빠진다.
     const rent = money('living', 310_000, '2026-08-01', { endDate: '2026-08-31' });
-    const today = '2026-08-11';
-    const r = limitOn([account()], [rent], '2026-08-31', today);
-    // 남은 몫 계산: 31일 총액 310,000, 하루 10,000 (마지막 날 10,000).
-    // 8/12 ~ 8/31 = 20일 × 10,000 = 200,000 (마지막 날 몫 포함).
-    expect(1_000_000 - r).toBeGreaterThan(150_000);
-    expect(1_000_000 - r).toBeLessThan(220_000);
+    const acc = account({ checkedAt: '2026-08-01T09:00:00+09:00' });
+    const r = limitOn([acc], [rent], '2026-08-31', '2026-08-11');
+    // 31일 총액 310,000, 하루 10,000. 8/2 ~ 8/31 = 30일 몫.
+    expect(1_000_000 - r).toBe(300_000);
+  });
+});
+
+describe('오늘 날짜로 적은 입출금', () => {
+  /*
+    사용자가 "가계부에 오늘 날짜로 금액을 적어도 잔고에 반영되지 않는다" 고 알린 자리다.
+    예전 경계는 `(오늘, d]` 라 오늘 것이 통째로 빠졌다 — 머리 숫자도, 오늘 셀도,
+    남은 예정 목록도 그대로였다. 내일로 적으면 바로 반영되는데 오늘만 사라졌다.
+  */
+  const 오늘 = '2026-08-10';
+  const 지출 = money('expense', 300_000, 오늘, { title: '오늘 지출' });
+
+  it('잔고를 오늘 적었어도 오늘 지출은 한도에서 빠진다', () => {
+    const acc = account({ checkedAt: `${오늘}T09:00:00+09:00` });
+    expect(limitOn([acc], [지출], 오늘, 오늘)).toBe(700_000);
+    expect(limitOn([acc], [지출], '2026-08-31', 오늘)).toBe(700_000);
+  });
+
+  it('잔고 기준일이 며칠 전이어도 마찬가지다', () => {
+    const acc = account({ checkedAt: '2026-08-07T09:00:00+09:00' });
+    expect(limitOn([acc], [지출], 오늘, 오늘)).toBe(700_000);
+  });
+
+  it('오늘 입금도 같은 규칙으로 더해진다', () => {
+    const 입금 = money('income', 500_000, 오늘, { title: '오늘 입금' });
+    const acc = account({ checkedAt: `${오늘}T09:00:00+09:00` });
+    expect(limitOn([acc], [입금], 오늘, 오늘)).toBe(1_500_000);
+  });
+
+  it('남은 예정 목록에도 오늘 것이 뜬다 — 머리 숫자와 합이 맞아야 한다', () => {
+    const acc = account({ checkedAt: `${오늘}T09:00:00+09:00` });
+    const salary = monthly('income', 3_000_000, '2026-08-25');
+    const raw = [지출, salary];
+    const h = horizonOf(raw, 오늘);
+
+    const listed = upcomingInHorizon([acc], raw, 오늘, h);
+    expect(listed.map((o) => o.date)).toContain(오늘);
+
+    // 머리 숫자 = 잔고 + 목록의 순액.
+    const net = listed.reduce(
+      (t, o) => t + (o.entry.money?.type === 'income' ? 1 : -1) * o.amountMinor, 0);
+    expect(headlineLimit([acc], raw, 오늘)).toBe(1_000_000 + net);
+  });
+
+  it('어제 것은 잔고를 오늘 적었으면 흡수된 것으로 본다', () => {
+    const 어제지출 = money('expense', 300_000, '2026-08-09');
+    const acc = account({ checkedAt: `${오늘}T09:00:00+09:00` });
+    expect(limitOn([acc], [어제지출], '2026-08-31', 오늘)).toBe(1_000_000);
+  });
+
+  it('정산은 오늘 것을 흡수하지 않는다 — 한도가 세는 것과 짝이다', () => {
+    const acc = account({ checkedAt: '2026-08-07T09:00:00+09:00' });
+    const r = settle([acc], [지출], 1_000_000, 오늘);
+    // 오늘 300,000 은 아직 나가지 않은 계획이다. 예정대로면 잔고는 그대로 100만.
+    expect(r.expected).toBe(1_000_000);
+    expect(r.diff).toBe(0);
+    expect(r.passed).toHaveLength(0);
   });
 });
 
@@ -193,11 +255,12 @@ describe('settle — 정산 diff', () => {
     const before = limitOn([acc0], [rent, save], '2026-08-24', '2026-08-07');
 
     // 8/12 에 예정대로 맞아떨어지는 잔고를 적는다.
-    // (8/7, 8/12] 사이 지나간 것: 8/10 월세, 8/12 적금(8/5+7일). 8/5 는 구간 밖.
-    const r = settle([acc0], [rent, save], 1_000_000 - 600_000 - 30_000, '2026-08-12');
+    // (8/7, 8/11] 사이 지나간 것: 8/10 월세뿐이다. 8/12 적금은 오늘 것이라
+    // 아직 나가지 않은 계획으로 보고 흡수하지 않는다 — 한도가 그것을 세기 때문이다.
+    const r = settle([acc0], [rent, save], 1_000_000 - 600_000, '2026-08-12');
     expect(r.diff).toBe(0);
 
-    const acc1 = account({ balanceMinor: 370_000, checkedAt: '2026-08-12T09:00:00.000Z' });
+    const acc1 = account({ balanceMinor: 400_000, checkedAt: '2026-08-12T09:00:00.000Z' });
     expect(limitOn([acc1], [rent, save], '2026-08-24', '2026-08-12')).toBe(before);
   });
 });
@@ -226,7 +289,7 @@ describe('upcomingInHorizon — 남은 예정 목록', () => {
   it('오늘 이후 ~ 끝점까지', () => {
     const salary = money('income', 3_000_000, '2026-08-25');
     const util = money('expense', 300_000, '2026-08-15');
-    const list = upcomingInHorizon([salary, util], '2026-08-10');
+    const list = upcomingInHorizon([account()], [salary, util], '2026-08-10');
     // 끝점은 8/24 (다음 입금 8/25 전날). 8/15 만 남은 예정.
     expect(list.map((o) => o.entry.title)).toEqual(['']);
     expect(list[0]?.date).toBe('2026-08-15');
@@ -379,7 +442,7 @@ describe('머리 숫자와 목록이 같은 기간 예산을 본다', () => {
     const h = horizonOf(raw, today);
     expect(h.end).toBe('2026-08-24');
 
-    const listed = upcomingInHorizon(raw, today, h);
+    const listed = upcomingInHorizon(acc, raw, today, h);
     expect(listed.some((o) => o.entry.id === septemberLiving.id)).toBe(false);
     // 목록에 없으니 한도도 건드리지 않아야 한다.
     expect(headlineLimit(acc, raw, today)).toBe(1_000_000);
@@ -390,7 +453,7 @@ describe('머리 숫자와 목록이 같은 기간 예산을 본다', () => {
     const raw = [salary, living];
     const h = horizonOf(raw, today);
 
-    const listed = upcomingInHorizon(raw, today, h)
+    const listed = upcomingInHorizon(acc, raw, today, h)
       .filter((o) => o.entry.id === living.id);
     const listedTotal = listed.reduce((t, o) => t + o.amountMinor, 0);
 
