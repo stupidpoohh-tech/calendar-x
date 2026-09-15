@@ -330,6 +330,31 @@ describe('생활비 · 세이브 배선', () => {
     expect(within(card).getByLabelText('잔고 고치기')).toHaveTextContent('680,000');
   });
 
+  it('오늘 카드도 같은 숫자를 낸다 — 두 카드가 어긋나지 않는다', () => {
+    wrap(
+      <TodayPanel
+        todayISO={TODAY}
+        entries={materialize([...RAW, LUNCH], '2026-09-01', '2026-09-30')}
+        tideEntries={[...RAW, LUNCH]}
+        budgets={[BUDGET]}
+        reserves={[RESERVE]}
+        accounts={ACCOUNTS}
+        hasBalance
+        collapsed={false}
+        onToggleCollapsed={() => {}}
+        moneyCollapsed={false}
+        onToggleMoneyCollapsed={() => {}}
+        onEntryClick={() => {}}
+        onStatusChange={() => {}}
+        onPromote={() => {}}
+        onQuickIdea={() => {}}
+        onSaveAccount={() => {}}
+      />,
+    );
+    const panel = screen.getByLabelText('오늘');
+    expect(within(panel).getByLabelText('잔고 고치기')).toHaveTextContent('680,000');
+  });
+
   it('달력 셀도 카드와 같은 예약을 본다', () => {
     wrap(
       <MonthCalendar

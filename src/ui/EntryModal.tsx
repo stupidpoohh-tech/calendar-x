@@ -259,6 +259,8 @@ export function EntryModal({
                 </div>
               </div>
 
+              {moneyDef && <p className="mod-hint">{moneyDef.hint}</p>}
+
               {isOutflow && (
                 <div className="mod-row">
                   <span className="mod-lbl">사용처</span>
@@ -346,7 +348,6 @@ export function EntryModal({
                 </div>
               )}
 
-              {moneyDef && <p className="mod-hint">{moneyDef.hint}</p>}
 
               <div className="mod-row">
                 <label className="mod-lbl" htmlFor="mtitle">라벨</label>
