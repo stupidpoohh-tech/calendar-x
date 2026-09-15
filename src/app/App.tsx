@@ -34,6 +34,7 @@ import { ListView } from '../ui/ListView';
 import { MonthCalendar } from '../ui/MonthCalendar';
 import { MonthPicker } from '../ui/MonthPicker';
 import { MoneyPanel } from '../ui/MoneyPanel';
+import { BudgetPanel } from '../ui/BudgetPanel';
 import { FailedWrites } from '../ui/FailedWrites';
 import { PinnedSection } from '../ui/PinnedSection';
 import { RecoveryDebtBar } from '../ui/RecoveryDebtBar';
@@ -842,6 +843,8 @@ function Workspace({ uid, user, onSignOut }: WorkspaceProps) {
             tideFrom={tideFrom}
             calcState={calcState}
             accounts={store.accounts}
+            budgets={store.budgets}
+            reserves={store.reserves}
             hasBalance={hasBalance}
             collapsed={prefs.todayCollapsed}
             onToggleCollapsed={() => set('todayCollapsed', !prefs.todayCollapsed)}
@@ -861,6 +864,8 @@ function Workspace({ uid, user, onSignOut }: WorkspaceProps) {
             todayISO={today}
             accounts={store.accounts}
             entries={store.tideEntries}
+            budgets={store.budgets}
+            reserves={store.reserves}
             tideFrom={tideFrom}
             calcState={calcState}
             hasBalance={hasBalance}
@@ -869,6 +874,38 @@ function Workspace({ uid, user, onSignOut }: WorkspaceProps) {
             collapsed={prefs.moneyCardCollapsed}
             onToggleCollapsed={() => set('moneyCardCollapsed', !prefs.moneyCardCollapsed)}
           >
+            <BudgetPanel
+              budgets={store.budgets}
+              reserves={store.reserves}
+              entries={store.tideEntries}
+              collapsed={prefs.budgetsCollapsed}
+              onToggleCollapsed={() => set('budgetsCollapsed', !prefs.budgetsCollapsed)}
+              onSaveBudget={(b) => {
+                if (isAnon || !uid) { void promptLogin(); return; }
+                commit({ kind: 'budget', label: '생활비', summary: b.name, payload: b });
+              }}
+              onDeleteBudget={async (b) => {
+                if (isAnon || !uid) { void promptLogin(); return; }
+                const ok = await dialog.confirm({
+                  title: `'${b.name}'을(를) 삭제할까요?`,
+                  // 연결된 지출은 남는다. 예산이 사라지면 그 돈들은 일반 지출로 돌아간다 —
+                  // 사라지지 않고 계산 자리만 바뀐다는 사실을 미리 말해 둔다.
+                  body: '이 생활비에서 쓴 지출은 지워지지 않고 별도 지출로 남습니다.',
+                  danger: true, confirmLabel: '삭제',
+                });
+                if (ok) commit({ kind: 'budgetDelete', label: '생활비 삭제', summary: b.name, payload: { id: b.id } });
+              }}
+              onSaveReserve={(r) => {
+                if (isAnon || !uid) { void promptLogin(); return; }
+                commit({ kind: 'reserve', label: '세이브', summary: r.name, payload: r });
+              }}
+              onDeleteReserve={async (r) => {
+                if (isAnon || !uid) { void promptLogin(); return; }
+                const ok = await dialog.confirm({ title: `'${r.name}'을(를) 삭제할까요?`, danger: true, confirmLabel: '삭제' });
+                if (ok) commit({ kind: 'reserveDelete', label: '세이브 삭제', summary: r.name, payload: { id: r.id } });
+              }}
+              onEntryClick={openEdit}
+            />
             <MoneyPanel
               debts={store.debts}
               collapsed={prefs.debtsCollapsed}
@@ -898,6 +935,8 @@ function Workspace({ uid, user, onSignOut }: WorkspaceProps) {
             onCursorChange={setCursor}
             entries={visible}
             tideEntries={store.tideEntries}
+            budgets={store.budgets}
+            reserves={store.reserves}
             // 계산 자료를 못 받았으면 덮는 달이 없는 것과 같다 — 셀에 숫자를 적지 않는다.
             tideMonths={calcState.kind === 'ready' ? store.tideMonths : EMPTY_MONTHS}
             accounts={store.accounts}
@@ -971,6 +1010,8 @@ function Workspace({ uid, user, onSignOut }: WorkspaceProps) {
         initial={modal.entry}
         allTags={allTags}
         linkableTasks={linkableTasks}
+        budgets={store.budgets}
+        debts={store.debts}
         onSave={handleSave}
         onDelete={(e) => void handleDelete(e)}
         onClose={closeModal}

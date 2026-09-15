@@ -21,7 +21,7 @@ import {
   currencyScopeOf, headlineLimit, horizonOf, summarize, upcomingInHorizon,
   type Summary,
 } from '../domain/tide';
-import type { Account, Entry } from '../domain/types';
+import type { Account, Budget, Entry, Reserve } from '../domain/types';
 import { Icon } from './Icon';
 import { BalanceInput, BalanceNote, useBalanceEditor } from './balanceEditor';
 import {
@@ -33,6 +33,14 @@ interface Props {
   todayISO: string;
   accounts: readonly Account[];
   entries: readonly Entry[];
+  /**
+   * 한도에서 미리 빠져 있는 돈 — 생활비 예산과 세이브.
+   *
+   * 기본값이 빈 목록인 이유는, 이 카드를 목록만 손으로 넘겨 띄우는 자리(테스트)가
+   * 예약 개념 없이도 예전과 같은 숫자를 봐야 하기 때문이다.
+   */
+  budgets?: readonly Budget[];
+  reserves?: readonly Reserve[];
   /** 계산 목록이 덮는 가장 이른 날. 정산이 자료 부족을 판정하는 데 쓴다. */
   tideFrom?: string | null;
   /**
@@ -49,8 +57,12 @@ interface Props {
   children?: ReactNode;
 }
 
+const NO_BUDGETS: readonly Budget[] = [];
+const NO_RESERVES: readonly Reserve[] = [];
+
 export function TideBar({
-  todayISO, accounts, entries, tideFrom, calcState = CALC_READY,
+  todayISO, accounts, entries, budgets = NO_BUDGETS, reserves = NO_RESERVES,
+  tideFrom, calcState = CALC_READY,
   hasBalance, onSaveAccount, onEntryClick,
   collapsed, onToggleCollapsed, children,
 }: Props) {
@@ -60,15 +72,17 @@ export function TideBar({
   // 통화가 섞이면 최소 단위가 달라 애초에 더할 수 없다. 숫자를 내지 않는다.
   const scope = useMemo(() => currencyScopeOf(accounts, entries), [accounts, entries]);
 
+  const res = useMemo(() => ({ budgets, reserves }), [budgets, reserves]);
+
   const horizon = useMemo(() => horizonOf(entries, today), [entries, today]);
   const limit = useMemo(
-    () => headlineLimit(accounts, entries, today),
-    [accounts, entries, today],
+    () => headlineLimit(accounts, entries, today, res),
+    [accounts, entries, today, res],
   );
   const daysLeft = useMemo(() => Math.max(1, daysBetween(today, horizon.end) + 1), [today, horizon.end]);
   const upcoming = useMemo(
-    () => summarize(upcomingInHorizon(accounts, entries, today, horizon)),
-    [accounts, entries, today, horizon],
+    () => summarize(upcomingInHorizon(accounts, entries, today, horizon, res)),
+    [accounts, entries, today, horizon, res],
   );
 
   const head = (summary: string) => (

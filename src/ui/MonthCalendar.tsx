@@ -4,7 +4,7 @@ import { isWeekend, monthGrid, normalizeDate, toISO, weekdayLabels, ymOf } from 
 import { displayTitle, effectiveEndDate, isDone } from '../domain/entry';
 import { compactAmount } from '../domain/money';
 import { currencyScopeOf, limitOn } from '../domain/tide';
-import type { Account, Entry, LensId, WeekStart, YearMonth } from '../domain/types';
+import type { Account, Budget, Entry, LensId, Reserve, WeekStart, YearMonth } from '../domain/types';
 import { Icon } from './Icon';
 
 interface Props {
@@ -17,6 +17,9 @@ interface Props {
    * 전개해 같은 입출금을 여러 번 센다.
    */
   tideEntries: readonly Entry[];
+  /** 한도에서 미리 빠져 있는 돈. 카드와 같은 값을 봐야 셀과 머리 숫자가 어긋나지 않는다. */
+  budgets?: readonly Budget[];
+  reserves?: readonly Reserve[];
   /**
    * `tideEntries` 가 실제로 덮는 달.
    *
@@ -86,6 +89,9 @@ function placeWeek(entries: readonly Entry[], weekISO: readonly string[]): { pla
  * 항목을 숨기지 않는다. "+N개 더" 대신 개수에 따라 바 높이를 압축해 전부 보여 준다.
  * 이 프로젝트의 설계 원칙이라 그대로 지킨다.
  */
+const NO_BUDGETS: readonly Budget[] = [];
+const NO_RESERVES: readonly Reserve[] = [];
+
 function barMetrics(laneCount: number) {
   if (laneCount <= 4) return { height: 21, gap: 23, showText: true };
   if (laneCount <= 7) return { height: 14, gap: 16, showText: true };
@@ -93,7 +99,8 @@ function barMetrics(laneCount: number) {
 }
 
 export function MonthCalendar({
-  cursor, onCursorChange, entries, tideEntries, tideMonths, accounts, hasBalance, lens, weekStart, todayISO,
+  cursor, onCursorChange, entries, tideEntries, budgets = NO_BUDGETS, reserves = NO_RESERVES,
+  tideMonths, accounts, hasBalance, lens, weekStart, todayISO,
   onEntryClick, onDayOpen, onDayCreate,
 }: Props) {
   const grid = useMemo(() => monthGrid(cursor, weekStart), [cursor, weekStart]);
@@ -114,6 +121,9 @@ export function MonthCalendar({
     달력만 셀마다 금액을 적으면, 카드가 거절한 바로 그 숫자를 달력이 지어내는 꼴이 된다.
   */
   const scope = useMemo(() => currencyScopeOf(accounts, tideEntries), [accounts, tideEntries]);
+  // 셀의 한도도 카드와 같은 예약(생활비 · 세이브)을 본다. 한쪽만 빼면 달력이 카드보다
+  // 큰 숫자를 적어, 카드가 거절한 돈을 달력이 쓸 수 있는 것처럼 보여 준다.
+  const res = useMemo(() => ({ budgets, reserves }), [budgets, reserves]);
 
   const showLimits = lens === 'money' && hasBalance && scope.ok;
   const limits = useMemo(() => {
@@ -125,10 +135,10 @@ export function MonthCalendar({
       const iso = toISO(d);
       if (iso < todayISO) continue;
       if (!covered.has(ymOf(iso))) continue;
-      map.set(iso, limitOn(accounts, tideEntries, iso, todayISO));
+      map.set(iso, limitOn(accounts, tideEntries, iso, todayISO, res));
     }
     return map;
-  }, [showLimits, grid, accounts, tideEntries, tideMonths, todayISO]);
+  }, [showLimits, grid, accounts, tideEntries, tideMonths, todayISO, res]);
 
   const touch = useRef({ x: 0, y: 0 });
   const onTouchStart = (e: React.TouchEvent) => {

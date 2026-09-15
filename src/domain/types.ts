@@ -22,9 +22,35 @@ export type ColorId =
 
 export type TaskStatus = 'planned' | 'in-progress' | 'done';
 
-export type MoneyType =
-  | 'income' | 'expense' | 'repay' | 'priority'
-  | 'living' | 'save' | 'free';
+/**
+ * 가계부 항목의 유형.
+ *
+ * ── 새로 만들 때 고르는 것은 둘뿐이다 ──────────────────────────
+ *
+ * `income`(들어올 돈) · `expense`(나갈 돈). 나머지는 **읽기 전용 legacy** 다.
+ *
+ * 예전에는 일곱 가지가 한 목록에 섞여 있었는데 서로 다른 개념이었다 — 돈의 방향
+ * (income · expense), 지출의 목적(repay), 목적+우선순위(priority), 기간 예산(living),
+ * 떼어 둔 돈(save), 그리고 **앱이 계산해야 할 결과**(free). 사용자가 "이건 생활비인가
+ * 나갈 돈인가 세이브인가" 를 고민해야 했고, 가용은 계산값과 입력값이라는 두 개의
+ * 진실을 만들었다.
+ *
+ * 지금은 역할이 나뉘어 있다.
+ *   흐름   income · expense          (이 타입)
+ *   예산   Budget                    (`budgets` 컬렉션)
+ *   확보   Reserve                   (`reserves` 컬렉션)
+ *   결과   가용 한도                  (`limitOn` 이 계산한다. 입력할 수 없다)
+ *
+ * legacy 값은 **지우지 않는다.** 이미 저장된 데이터가 그대로 읽히고 지금까지와 똑같이
+ * 계산돼야 하기 때문이다. 새 입력 화면에만 뜨지 않는다 (`NEW_MONEY_TYPES`).
+ */
+export type MoneyType = NewMoneyType | LegacyMoneyType;
+
+/** 새로 만들 때 고를 수 있는 유형. */
+export type NewMoneyType = 'income' | 'expense';
+
+/** 읽기 전용. 이미 저장된 데이터에만 남아 있다. */
+export type LegacyMoneyType = 'repay' | 'priority' | 'living' | 'save' | 'free';
 
 export type RepeatFreq = 'daily' | 'weekly' | 'monthly';
 
@@ -58,6 +84,29 @@ export interface MoneyFields {
   currency: string;
   /** 이 지출/입금을 발생시킨 할 일. 축 간 연결의 핵심 필드. */
   linkedEntryId: string | null;
+  /**
+   * 이 지출이 어느 생활비 예산에서 나가는가.
+   *
+   * `linkedEntryId` 를 재사용하지 않는다 — 그쪽은 "이 돈을 쓰게 만든 할 일" 이고
+   * 이쪽은 "이 돈이 어느 주머니에서 나가는가" 다. 뜻이 다른 두 관계다.
+   *
+   * 값이 있고 그 예산의 기간 안에 있으면 일반 지출 합계에서 빠지고 예산 안에서 세어진다
+   * (`domain/budget.ts`). 반복 항목은 연결하지 않는다 — 주머니 하나에 몇 번 들어갈지가
+   * 애매해지고, 그 애매함을 규칙으로 덮을 만한 쓸모가 없다.
+   */
+  budgetId: string | null;
+  /**
+   * 이 지출이 어느 대출을 갚는가. legacy `repay` 를 대신한다.
+   *
+   * 계산은 일반 지출과 같다. 대출 잔액을 자동으로 깎지 않는다 — 가계부는 거래를
+   * 자동으로 가져오지 않는다는 원칙 그대로, 대출 회차는 사용자가 직접 적는다.
+   */
+  debtId: string | null;
+  /**
+   * 먼저 갚기로 표시한 항목. legacy `priority` 를 대신한다.
+   * 계산에 영향을 주지 않는 표시값이다.
+   */
+  priority: boolean;
 }
 
 /**
@@ -162,6 +211,46 @@ export interface Debt {
   updatedAt: string;
 }
 
+/**
+ * 생활비 — 기간 동안 쓰라고 미리 확보한 총액.
+ *
+ * 기간형 지출(`living`)과 다르다. 기간형 지출은 예산 70만과 실제 점심 1만 2천을 적으면
+ * 71만 2천이 나가는 것으로 셌다. 예산은 그렇지 않다 — 70만을 확보해 두고 그 안에서
+ * 1만 2천을 쓰면 68만 8천이 남는다. 나가는 돈의 총량은 여전히 70만이다.
+ *
+ * 그래서 가용 한도에 대한 몫은 `max(총 예산, 쓴 돈)` 이다. 예산 안에서 쓰는 동안 한도는
+ * 움직이지 않고, 예산을 넘긴 만큼만 더 깎인다.
+ */
+export interface Budget {
+  id: string;
+  name: string;
+  /** 포함 시작일. */
+  startDate: DateISO;
+  /** 포함 종료일. */
+  endDate: DateISO;
+  /** 이 기간에 쓰기로 확보한 총액. 최소 단위 정수. */
+  amountMinor: number;
+  currency: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+/**
+ * 세이브 — 잔고에는 있지만 쓰지 않기로 떼어 둔 돈.
+ *
+ * legacy `save` 항목은 `sign: 0` 이라 아무 데도 반영되지 않는 참고 숫자였다. 이제는
+ * **잔고는 그대로 두고 가용 한도에서만 빠진다.** 날짜가 없다 — 특정 날에 일어나는
+ * 사건이 아니라 지금 묶여 있는 상태다.
+ */
+export interface Reserve {
+  id: string;
+  name: string;
+  amountMinor: number;
+  currency: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
 /** 렌즈별 고정 메모. 날짜를 갖지 않으므로 entry 가 아니다. */
 export interface Pin {
   id: string;
@@ -252,7 +341,7 @@ export interface RecoveryRule {
 }
 
 /** 백업이 담는 네 컬렉션. 전체 교체는 이 넷 모두에 똑같이 적용된다. */
-export type BackupCollection = 'entries' | 'accounts' | 'debts' | 'pins';
+export type BackupCollection = 'entries' | 'accounts' | 'debts' | 'pins' | 'budgets' | 'reserves';
 
 export type ThemePref = 'system' | 'light' | 'dark';
 /** 글씨 크기. 'auto' 는 브라우저·OS 설정을 따른다는 뜻이다. */
@@ -270,6 +359,8 @@ export interface Prefs {
   weekStart: WeekStart;
   pinCollapsed: Partial<Record<LensId, boolean>>;
   debtsCollapsed: boolean;
+  /** 생활비 · 세이브 줄. 대출과 따로 접는다. */
+  budgetsCollapsed: boolean;
   todayCollapsed: boolean;
   todayMoneyCollapsed: boolean;
   moneyCardCollapsed: boolean;

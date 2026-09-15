@@ -20,7 +20,7 @@ describe('buildBackup', () => {
   it('내보낸 파일을 그대로 되읽는다', () => {
     const data = {
       entries: [newEntry('task', { id: 't1', title: '치과', startDate: '2026-08-20' })],
-      accounts: [account], debts: [], pins: [], recovery: null,
+      accounts: [account], debts: [], pins: [], budgets: [], reserves: [], recovery: null,
     };
     const r = readBackupFile(JSON.stringify(buildBackup(data)));
     expect(r.ok).toBe(true);
@@ -37,7 +37,7 @@ describe('buildBackup', () => {
     // 조용히 흘리게 된다.
     const rule = { ...defaultRecoveryRule(), enabled: true, intervalDays: 5, debtCount: 2 };
     const r = readBackupFile(JSON.stringify(buildBackup({
-      entries: [], accounts: [], debts: [], pins: [], recovery: rule,
+      entries: [], accounts: [], debts: [], pins: [], budgets: [], reserves: [], recovery: rule,
     })));
     expect(r.ok).toBe(true);
     if (r.ok) {
@@ -50,7 +50,7 @@ describe('buildBackup', () => {
   });
 
   it('내보낸 파일에는 앱 이름과 버전이 들어 있다', () => {
-    const payload = buildBackup({ entries: [], accounts: [], debts: [], pins: [], recovery: null });
+    const payload = buildBackup({ entries: [], accounts: [], debts: [], pins: [], budgets: [], reserves: [], recovery: null });
     expect(payload.app).toBe('Dada Calendar');
     expect(payload.version).toBe(BACKUP_VERSION);
   });

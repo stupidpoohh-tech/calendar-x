@@ -4,7 +4,7 @@ import {
 import { normalizeDate, todayISO, ymRange } from './date';
 import { formatAmount } from './money';
 import type {
-  ColorId, DateISO, Entry, EntryKind, MoneyType, Recurrence, TaskStatus,
+  ColorId, DateISO, Entry, EntryKind, MoneyFields, MoneyType, Recurrence, TaskStatus,
 } from './types';
 
 export function uid(): string {
@@ -67,7 +67,7 @@ export function newEntry(kind: EntryKind, patch: Partial<Entry> = {}): Entry {
       ? { status: 'planned', important: false, urgent: false, order: Date.now() }
       : null,
     money: kind === 'money'
-      ? { type: 'expense', amountMinor: 0, currency: DEFAULT_CURRENCY, linkedEntryId: null }
+      ? newMoney()
       : null,
     recovery: null,
     createdAt: now,
@@ -75,6 +75,25 @@ export function newEntry(kind: EntryKind, patch: Partial<Entry> = {}): Entry {
   };
 
   return withDerived({ ...base, ...patch, kind }, now);
+}
+
+/**
+ * 가계부 필드 한 벌. 기본값을 한곳에서만 정한다.
+ *
+ * 필드가 늘 때마다 생성 자리를 전부 찾아다니면 하나씩 빠뜨린다 — 그때마다 `budgetId`
+ * 없는 항목이 생기고, 읽기 계층이 그것을 null 로 메우느라 오류가 조용히 묻힌다.
+ */
+export function newMoney(patch: Partial<MoneyFields> = {}): MoneyFields {
+  return {
+    type: 'expense',
+    amountMinor: 0,
+    currency: DEFAULT_CURRENCY,
+    linkedEntryId: null,
+    budgetId: null,
+    debtId: null,
+    priority: false,
+    ...patch,
+  };
 }
 
 function defaultColorFor(kind: EntryKind, moneyType?: MoneyType): ColorId {
@@ -97,7 +116,7 @@ export function convertKind(e: Entry, to: EntryKind): Entry {
       ? e.task ?? { status: 'planned', important: false, urgent: false, order: Date.now() }
       : null,
     money: to === 'money'
-      ? e.money ?? { type: 'expense', amountMinor: 0, currency: DEFAULT_CURRENCY, linkedEntryId: null }
+      ? e.money ?? newMoney()
       : null,
     // 회복 표식은 할 일 위에만 얹힌다. 다른 축으로 옮기면 표식이 남을 자리가 없다.
     recovery: to === 'task' ? e.recovery : null,

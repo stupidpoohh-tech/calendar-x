@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { convertKind, displayTitle, effectiveEndDate, isRanged, newEntry, occursOn, setRecurrence, withDerived } from './entry';
+import { convertKind, displayTitle, effectiveEndDate, isRanged, newEntry, newMoney, occursOn, setRecurrence, withDerived } from './entry';
 import { formatMoney, formatSigned, parseAmountToMinor } from './money';
 
 describe('newEntry', () => {
@@ -81,12 +81,12 @@ describe('displayTitle', () => {
     expect(displayTitle(newEntry('task'))).toBe('(제목 없음)');
   });
   it('가계부는 금액을 함께 보여 준다', () => {
-    const e = newEntry('money', { title: '전기요금', money: { type: 'expense', amountMinor: 45_000, currency: 'KRW', linkedEntryId: null } });
+    const e = newEntry('money', { title: '전기요금', money: newMoney({ type: 'expense', amountMinor: 45_000 }) });
     expect(displayTitle(e)).toBe('전기요금 · 45,000');
   });
   it('라벨이 없으면 유형명을 쓴다', () => {
-    const e = newEntry('money', { money: { type: 'income', amountMinor: 2_500_000, currency: 'KRW', linkedEntryId: null } });
-    expect(displayTitle(e)).toBe('예상 입금 2,500,000');
+    const e = newEntry('money', { money: newMoney({ type: 'income', amountMinor: 2_500_000 }) });
+    expect(displayTitle(e)).toBe('들어올 돈 2,500,000');
   });
 });
 

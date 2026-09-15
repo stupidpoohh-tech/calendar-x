@@ -31,7 +31,7 @@
  * 존재를 확인한다 (`createManyIfAbsent`). 이미 있는 문서는 충돌로 남기고 건드리지 않는다.
  */
 import { isValidDate, normalizeDate } from '../domain/date';
-import type { Account, BackupCollection, Debt, Entry, Pin } from '../domain/types';
+import type { Account, BackupCollection, Budget, Debt, Entry, Pin, Reserve } from '../domain/types';
 import type { BackupData } from './backup';
 import type { CreateManyResult } from './repo';
 
@@ -164,6 +164,29 @@ function checkPin(p: Pin): string | null {
   return null;
 }
 
+function checkBudget(b: Budget): string | null {
+  if (!b.name) return '이름이 비어 있습니다.';
+  if (b.name.length > LIMITS.name) return `이름이 ${LIMITS.name}자를 넘습니다.`;
+  if (!isInt(b.amountMinor)) return '예산이 정수가 아닙니다.';
+  if (b.amountMinor < 0) return '예산이 음수입니다.';
+  if (!b.currency) return '통화가 비어 있습니다.';
+  const start = dateProblem('시작일', b.startDate);
+  if (start) return start;
+  const end = dateProblem('종료일', b.endDate);
+  if (end) return end;
+  if (normalizeDate(b.endDate) < normalizeDate(b.startDate)) return '종료일이 시작일보다 앞섭니다.';
+  return null;
+}
+
+function checkReserve(r: Reserve): string | null {
+  if (!r.name) return '이름이 비어 있습니다.';
+  if (r.name.length > LIMITS.name) return `이름이 ${LIMITS.name}자를 넘습니다.`;
+  if (!isInt(r.amountMinor)) return '금액이 정수가 아닙니다.';
+  if (r.amountMinor < 0) return '금액이 음수입니다.';
+  if (!r.currency) return '통화가 비어 있습니다.';
+  return null;
+}
+
 function scan<T extends { id: string }>(
   collection: BackupCollection, list: readonly T[],
   check: (v: T) => string | null, out: BackupProblem[],
@@ -196,6 +219,8 @@ export function validateBackup(data: BackupData): BackupProblem[] {
   scan('accounts', data.accounts, checkAccount, out);
   scan('debts', data.debts, checkDebt, out);
   scan('pins', data.pins, checkPin, out);
+  scan('budgets', data.budgets, checkBudget, out);
+  scan('reserves', data.reserves, checkReserve, out);
   return out;
 }
 
@@ -220,6 +245,8 @@ export function planMerge(current: BackupData, incoming: BackupData): BackupData
     accounts: only(current.accounts, incoming.accounts),
     debts: only(current.debts, incoming.debts),
     pins: only(current.pins, incoming.pins),
+    budgets: only(current.budgets, incoming.budgets),
+    reserves: only(current.reserves, incoming.reserves),
     /*
       회복 규칙은 컬렉션이 아니라 `users/{uid}` 문서의 필드 하나다. 병합 실행 경로
       (`createIfAbsent`)는 컬렉션 네 개만 쓰므로 이 값은 **어디에도 반영되지 않는다.**
@@ -241,8 +268,9 @@ export const MERGE_SKIPS_RECOVERY =
   + '회복 규칙은 항목이 아니라 계정 설정이라, 지금 쓰고 있는 설정을 덮지 않습니다. '
   + '간격·기본 메모·OFF 항목은 설정 화면에서 직접 맞춰 주세요.';
 
-export function countDocs(d: BackupData): number {
-  return d.entries.length + d.accounts.length + d.debts.length + d.pins.length;
+export function countDocs(d: Omit<BackupData, 'recovery'>): number {
+  return d.entries.length + d.accounts.length + d.debts.length + d.pins.length
+    + d.budgets.length + d.reserves.length;
 }
 
 // ---------- 실행 순서 ----------

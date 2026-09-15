@@ -1,14 +1,16 @@
 import { useEffect, useMemo, useRef, useState, type KeyboardEvent } from 'react';
 import {
-  COLORS, DEFAULT_CURRENCY, KIND_LABEL, MONEY_TYPES, MONEY_TYPE_BY_ID,
+  COLORS, DEFAULT_CURRENCY, KIND_LABEL, MONEY_TYPE_BY_ID, NEW_MONEY_TYPES,
   REPEAT_OPTIONS, STATUSES,
 } from '../domain/constants';
 import { todayISO as computeToday } from '../domain/date';
-import { convertKind, newEntry, withDerived } from '../domain/entry';
+import { convertKind, newEntry, newMoney, withDerived } from '../domain/entry';
 import { normalizeTag } from '../domain/filters';
 import { minorToInput, parseAmountToMinor } from '../domain/money';
 import { describeRecurrence } from '../domain/recurrence';
-import type { Entry, EntryKind, MoneyType, RepeatFreq, TaskStatus } from '../domain/types';
+import type {
+  Budget, Debt, Entry, EntryKind, NewMoneyType, RepeatFreq, TaskStatus,
+} from '../domain/types';
 import { Icon } from './Icon';
 
 interface Props {
@@ -17,6 +19,10 @@ interface Props {
   initial: Entry | null;
   allTags: readonly string[];
   linkableTasks: readonly Entry[];
+  /** 지출을 걸 수 있는 생활비 예산. 없으면 '생활비에서 사용' 자리가 뜨지 않는다. */
+  budgets: readonly Budget[];
+  /** 상환을 걸 수 있는 대출. */
+  debts: readonly Debt[];
   onSave: (e: Entry) => void;
   onDelete: (e: Entry) => void;
   onClose: () => void;
@@ -30,8 +36,23 @@ function isComposingEnter(e: KeyboardEvent): boolean {
   return e.nativeEvent.isComposing || e.key === 'Process' || e.keyCode === 229;
 }
 
+/**
+ * 나갈 돈이 어디로 가는가. 종류(`MoneyType`)가 아니라 **연결**로 적는다.
+ *
+ * 예전에는 이 셋이 전부 종류였다 (`expense` · `living` · `repay`). 그러면
+ * "생활비에서 나간 대출 상환" 같은 것을 적을 자리가 없고, 생활비는 종류가 기간형이라
+ * 예산이 아니라 기간형 지출로 계산됐다. 지금은 흐름은 둘뿐이고 나머지는 연결이다.
+ */
+type MoneyUse = 'plain' | 'budget' | 'debt';
+
+function moneyUseOf(money: Entry['money']): MoneyUse {
+  if (money?.budgetId) return 'budget';
+  if (money?.debtId) return 'debt';
+  return 'plain';
+}
+
 export function EntryModal({
-  open, mode, initial, allTags, linkableTasks, onSave, onDelete, onClose,
+  open, mode, initial, allTags, linkableTasks, budgets, debts, onSave, onDelete, onClose,
 }: Props) {
   const [form, setForm] = useState<Entry>(() => initial ?? newEntry('task'));
   const [amountText, setAmountText] = useState('');
@@ -67,6 +88,13 @@ export function EntryModal({
   const isTask = form.kind === 'task';
   const isMoney = form.kind === 'money';
   const moneyDef = form.money ? MONEY_TYPE_BY_ID[form.money.type] : null;
+  const legacyDef = moneyDef?.legacy ? moneyDef : null;
+  /** 나가는 돈에만 사용처가 있다. 들어올 돈은 예산에서도 대출에서도 나가지 않는다. */
+  const isOutflow = isMoney && (moneyDef?.sign ?? 0) < 0;
+  const moneyUse = moneyUseOf(form.money);
+  const pickedBudget = budgets.find((b) => b.id === form.money?.budgetId) ?? null;
+  const outsideBudget = pickedBudget !== null
+    && (form.startDate < pickedBudget.startDate || form.startDate > pickedBudget.endDate);
 
   const patch = (p: Partial<Entry>) => setForm((f) => ({ ...f, ...p }));
 
@@ -80,7 +108,7 @@ export function EntryModal({
 
   const setMoney = (p: Partial<NonNullable<Entry['money']>>) => {
     setForm((f) => {
-      const money = { ...(f.money ?? { type: 'expense' as MoneyType, amountMinor: 0, currency: DEFAULT_CURRENCY, linkedEntryId: null }), ...p };
+      const money = { ...(f.money ?? newMoney()), ...p };
       // 유형을 바꾸면 기본 색상도 따라간다. 사용자가 색을 직접 고쳤다면 건드리지 않는다.
       const typeChanged = p.type && p.type !== f.money?.type;
       return {
@@ -91,6 +119,26 @@ export function EntryModal({
         endDate: typeChanged && !MONEY_TYPE_BY_ID[money.type].ranged ? null : f.endDate,
       };
     });
+  };
+
+  /**
+   * 흐름 고르기. 옛 종류에서 새 종류로 옮기는 자리이기도 하다.
+   *
+   * 들어올 돈으로 바꾸면 사용처를 지운다 — 입금은 예산에서도 대출에서도 나가지 않는다.
+   * 남겨 두면 예산이 그 입금을 지출로 세어 남은 금액이 늘어난다.
+   */
+  const setFlow = (type: NewMoneyType) => {
+    setMoney(type === 'income' ? { type, budgetId: null, debtId: null } : { type });
+  };
+
+  /** 사용처. 한 번에 하나만 걸린다 — 같이 걸면 어느 쪽에서 나간 돈인지가 두 개가 된다. */
+  const setUse = (use: MoneyUse) => {
+    if (use === 'plain') { setMoney({ budgetId: null, debtId: null }); return; }
+    if (use === 'budget') {
+      setMoney({ budgetId: form.money?.budgetId ?? budgets[0]?.id ?? null, debtId: null });
+      return;
+    }
+    setMoney({ debtId: form.money?.debtId ?? debts[0]?.id ?? null, budgetId: null });
   };
 
   const setTask = (p: Partial<NonNullable<Entry['task']>>) => {
@@ -122,7 +170,7 @@ export function EntryModal({
       }
       const next = withDerived({
         ...form,
-        money: { ...(form.money ?? { type: 'expense', currency: DEFAULT_CURRENCY, linkedEntryId: null }), amountMinor: Math.abs(minor), type: form.money?.type ?? 'expense', currency: form.money?.currency ?? DEFAULT_CURRENCY, linkedEntryId: form.money?.linkedEntryId ?? null },
+        money: newMoney({ ...form.money, amountMinor: Math.abs(minor) }),
       });
       onSave(next);
       return;
@@ -181,21 +229,123 @@ export function EntryModal({
               </div>
 
               <div className="mod-row">
-                <span className="mod-lbl">유형</span>
+                <span className="mod-lbl">흐름</span>
                 <div className="mod-chips">
-                  {MONEY_TYPES.map((t) => (
+                  {NEW_MONEY_TYPES.map((t) => (
                     <button
                       key={t.id}
                       className={'chip mt' + (form.money?.type === t.id ? ' on' : '')}
                       style={{ ['--c' as string]: t.color }}
-                      onClick={() => setMoney({ type: t.id })}
+                      onClick={() => setFlow(t.id as NewMoneyType)}
                       title={t.hint}
                     >
                       <span className="chip-dot" />{t.label}
                     </button>
                   ))}
+                  {legacyDef && (
+                    /*
+                      옛 종류로 저장된 항목. 고를 수는 없지만 **보여는 준다** — 안 보여 주면
+                      이 항목이 지금 무엇으로 계산되고 있는지 알 수 없고, 다른 칸을 고치려다
+                      종류가 조용히 바뀐다. 누르면 그때 비로소 새 흐름으로 옮긴다.
+                    */
+                    <span
+                      className="chip mt on legacy"
+                      style={{ ['--c' as string]: legacyDef.color }}
+                      title="예전 유형입니다. 위에서 흐름을 고르면 바뀝니다."
+                    >
+                      <span className="chip-dot" />{legacyDef.label} (예전)
+                    </span>
+                  )}
                 </div>
               </div>
+
+              {isOutflow && (
+                <div className="mod-row">
+                  <span className="mod-lbl">사용처</span>
+                  <div className="mod-chips">
+                    <button
+                      className={'chip' + (moneyUse === 'plain' ? ' on' : '')}
+                      onClick={() => setUse('plain')}
+                    >
+                      별도 지출
+                    </button>
+                    <button
+                      className={'chip' + (moneyUse === 'budget' ? ' on' : '')}
+                      onClick={() => setUse('budget')}
+                      disabled={budgets.length === 0}
+                      title={budgets.length === 0 ? '만들어 둔 생활비가 없습니다.' : undefined}
+                    >
+                      생활비에서 사용
+                    </button>
+                    <button
+                      className={'chip' + (moneyUse === 'debt' ? ' on' : '')}
+                      onClick={() => setUse('debt')}
+                      disabled={debts.length === 0}
+                      title={debts.length === 0 ? '등록한 대출이 없습니다.' : undefined}
+                    >
+                      대출 상환
+                    </button>
+                  </div>
+                </div>
+              )}
+
+              {isOutflow && moneyUse === 'budget' && (
+                <div className="mod-row">
+                  <label className="mod-lbl" htmlFor="budget">생활비</label>
+                  <select
+                    id="budget" className="mod-input"
+                    value={form.money?.budgetId ?? ''}
+                    onChange={(e) => setMoney({ budgetId: e.target.value || null })}
+                  >
+                    {budgets.map((b) => (
+                      <option key={b.id} value={b.id}>
+                        {b.name} ({b.startDate} ~ {b.endDate})
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              )}
+              {isOutflow && moneyUse === 'budget' && outsideBudget && (
+                <p className="mod-hint">
+                  이 날짜는 생활비 기간 밖입니다. 이대로 저장하면 별도 지출로 계산됩니다.
+                </p>
+              )}
+              {isOutflow && moneyUse === 'budget' && form.recurrence && (
+                <p className="mod-hint">
+                  반복 항목은 생활비에 넣지 않습니다. 이대로 저장하면 별도 지출로 계산됩니다.
+                </p>
+              )}
+
+              {isOutflow && moneyUse === 'debt' && (
+                <div className="mod-row">
+                  <label className="mod-lbl" htmlFor="debt">대출</label>
+                  <select
+                    id="debt" className="mod-input"
+                    value={form.money?.debtId ?? ''}
+                    onChange={(e) => setMoney({ debtId: e.target.value || null })}
+                  >
+                    {debts.map((d) => (
+                      <option key={d.id} value={d.id}>{d.name || '(이름 없음)'}</option>
+                    ))}
+                  </select>
+                </div>
+              )}
+
+              {isOutflow && (
+                <div className="mod-row">
+                  <span className="mod-lbl">속성</span>
+                  <div className="mod-chips">
+                    <button
+                      className={'chip' + (form.money?.priority ? ' on' : '')}
+                      onClick={() => setMoney({ priority: !form.money?.priority })}
+                    >
+                      <Icon.Star size={12} filled={form.money?.priority === true} fillColor="#8b5cf6" stroke="#8b5cf6" />
+                      {' '}먼저 낼 것
+                    </button>
+                  </div>
+                </div>
+              )}
+
               {moneyDef && <p className="mod-hint">{moneyDef.hint}</p>}
 
               <div className="mod-row">

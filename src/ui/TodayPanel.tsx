@@ -12,7 +12,7 @@
 import { useMemo, useState } from 'react';
 import { MONEY_TYPE_BY_ID } from '../domain/constants';
 import { currencyScopeOf, headlineLimit, horizonOf } from '../domain/tide';
-import type { Account } from '../domain/types';
+import type { Account, Budget, Reserve } from '../domain/types';
 import { addDaysISO, fmtDayShort } from '../domain/date';
 import { displayTitle, effectiveEndDate, isDone, newEntry } from '../domain/entry';
 import { formatAmount } from '../domain/money';
@@ -35,6 +35,9 @@ interface Props {
   /** 계산용 자료를 받았는가. 'ready' 가 아니면 금액을 지어내지 않는다. */
   calcState?: CalcState;
   accounts: readonly Account[];
+  /** 한도에서 미리 빠져 있는 돈. 가계부 카드와 같은 값을 봐야 두 카드가 어긋나지 않는다. */
+  budgets?: readonly Budget[];
+  reserves?: readonly Reserve[];
   /** 잔고를 한 번도 입력하지 않았으면 tide 값을 0으로 단정하지 않는다. */
   hasBalance: boolean;
   collapsed: boolean;
@@ -48,12 +51,16 @@ interface Props {
   onSaveAccount: (a: Account) => void;
 }
 
+const NO_BUDGETS: readonly Budget[] = [];
+const NO_RESERVES: readonly Reserve[] = [];
+
 function occursOnDay(e: Entry, iso: string): boolean {
   return e.startDate <= iso && effectiveEndDate(e) >= iso;
 }
 
 export function TodayPanel({
-  todayISO, entries, tideEntries, tideFrom, calcState = CALC_READY, accounts, hasBalance,
+  todayISO, entries, tideEntries, tideFrom, calcState = CALC_READY, accounts,
+  budgets = NO_BUDGETS, reserves = NO_RESERVES, hasBalance,
   collapsed, onToggleCollapsed, moneyCollapsed, onToggleMoneyCollapsed,
   onEntryClick, onStatusChange, onPromote, onQuickIdea, onSaveAccount,
 }: Props) {
@@ -80,12 +87,13 @@ export function TodayPanel({
   const horizon = useMemo(() => horizonOf(tideEntries, todayISO), [tideEntries, todayISO]);
   // 통화가 섞이면 최소 단위가 달라 애초에 더할 수 없다.
   const scope = useMemo(() => currencyScopeOf(accounts, tideEntries), [accounts, tideEntries]);
+  const res = useMemo(() => ({ budgets, reserves }), [budgets, reserves]);
 
   const tideLimit = useMemo(
     () => hasBalance && calcState.kind === 'ready' && scope.ok
-      ? headlineLimit(accounts, tideEntries, todayISO)
+      ? headlineLimit(accounts, tideEntries, todayISO, res)
       : null,
-    [hasBalance, calcState.kind, scope.ok, accounts, tideEntries, todayISO],
+    [hasBalance, calcState.kind, scope.ok, accounts, tideEntries, todayISO, res],
   );
 
   const caveat = calcCaveat(calcState);

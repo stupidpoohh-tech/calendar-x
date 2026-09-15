@@ -9,7 +9,7 @@
  */
 import { describe, expect, it } from 'vitest';
 import { localDateOf } from './date';
-import { newEntry, setRecurrence } from './entry';
+import { newEntry, newMoney, setRecurrence } from './entry';
 import {
   currencyScopeOf, entriesOn, headlineLimit, horizonOf, limitOn, netBetween,
   occurrences, settle, summarize, upcomingInHorizon,
@@ -38,7 +38,7 @@ const money = (
     title: extra.title ?? '',
     startDate,
     endDate: extra.endDate ?? null,
-    money: { type, amountMinor, currency: 'KRW', linkedEntryId: null },
+    money: newMoney({ type, amountMinor }),
   });
 
 const monthly = (type: MoneyType, amount: number, startDate: string, title?: string): Entry =>
@@ -349,7 +349,7 @@ describe('통화 — 한 번에 하나만 다룬다', () => {
   const usd = (amountMinor: number, startDate: string): Entry =>
     newEntry('money', {
       startDate,
-      money: { type: 'expense', amountMinor, currency: 'USD', linkedEntryId: null },
+      money: newMoney({ type: 'expense', amountMinor, currency: 'USD' }),
     });
 
   it('계좌와 항목이 같은 통화면 통과한다', () => {
@@ -378,7 +378,7 @@ describe('통화 — 한 번에 하나만 다룬다', () => {
     // sign 0 이라 한도를 건드리지 않는다. 그것 때문에 계산을 막을 이유가 없다.
     const save = newEntry('money', {
       startDate: '2026-08-15',
-      money: { type: 'save', amountMinor: 1_000, currency: 'USD', linkedEntryId: null },
+      money: newMoney({ type: 'save', amountMinor: 1_000, currency: 'USD' }),
     });
     expect(currencyScopeOf([account()], [save]).ok).toBe(true);
   });

@@ -7,7 +7,7 @@
  *   2. 전체 교체는 "먼저 쓰고, 다 됐을 때만 지운다". 지우는 목록은 네 컬렉션 모두에서 뽑는다
  */
 import { describe, expect, it } from 'vitest';
-import { newEntry } from '../domain/entry';
+import { newEntry, newMoney } from '../domain/entry';
 import { defaultRecoveryRule } from '../domain/recovery';
 import type { Account, BackupCollection, Debt, Entry, Pin } from '../domain/types';
 import type { BackupData } from './backup';
@@ -32,7 +32,7 @@ const pin = (p: Partial<Pin> = {}): Pin => ({
   id: 'p1', lens: 'task', text: '이번 분기 목표', order: 0, createdAt: '', updatedAt: '', ...p,
 });
 const data = (p: Partial<BackupData> = {}): BackupData => ({
-  entries: [], accounts: [], debts: [], pins: [], recovery: null, ...p,
+  entries: [], accounts: [], debts: [], pins: [], budgets: [], reserves: [], recovery: null, ...p,
 });
 
 describe('검증 — 온전한 파일은 통과한다', () => {
@@ -40,7 +40,7 @@ describe('검증 — 온전한 파일은 통과한다', () => {
     const ok = data({
       entries: [newEntry('task', { id: 't1', title: '치과' }), newEntry('money', {
         id: 'm1', startDate: '2026-09-12',
-        money: { type: 'expense', amountMinor: 65_000, currency: 'KRW', linkedEntryId: null },
+        money: newMoney({ type: 'expense', amountMinor: 65_000 }),
       })],
       accounts: [account()], debts: [debt()], pins: [pin()],
     });
@@ -122,7 +122,7 @@ describe('검증 — 잘못된 값은 조용히 바뀌지 않고 보고된다', 
     const bad = data({
       entries: [newEntry('money', {
         id: 'm1', startDate: '2026-09-01',
-        money: { type: 'expense', amountMinor: 1234.5, currency: 'KRW', linkedEntryId: null },
+        money: newMoney({ type: 'expense', amountMinor: 1234.5 }),
       })],
     });
     expect(firstReason(bad)).toContain('정수');
@@ -132,7 +132,7 @@ describe('검증 — 잘못된 값은 조용히 바뀌지 않고 보고된다', 
     const bad = data({
       entries: [newEntry('money', {
         id: 'm1', startDate: '2026-09-01',
-        money: { type: 'expense', amountMinor: -1000, currency: 'KRW', linkedEntryId: null },
+        money: newMoney({ type: 'expense', amountMinor: -1000 }),
       })],
     });
     expect(firstReason(bad)).toContain('음수');
@@ -230,10 +230,11 @@ describe('무결성 — Entry 가 아닌 값', () => {
 function fakeStore(seed: BackupData, opts: { failWrites?: Set<string> } = {}) {
   const state: BackupData = {
     entries: [...seed.entries], accounts: [...seed.accounts],
-    debts: [...seed.debts], pins: [...seed.pins], recovery: seed.recovery,
+    debts: [...seed.debts], pins: [...seed.pins],
+    budgets: [...seed.budgets], reserves: [...seed.reserves], recovery: seed.recovery,
   };
   const log: string[] = [];
-  const keys: BackupCollection[] = ['entries', 'accounts', 'debts', 'pins'];
+  const keys: BackupCollection[] = ['entries', 'accounts', 'debts', 'pins', 'budgets', 'reserves'];
 
   const io: RestoreIO = {
     fetchAll: async () => {
@@ -241,6 +242,7 @@ function fakeStore(seed: BackupData, opts: { failWrites?: Set<string> } = {}) {
       return {
         entries: [...state.entries], accounts: [...state.accounts],
         debts: [...state.debts], pins: [...state.pins],
+        budgets: [...state.budgets], reserves: [...state.reserves],
       };
     },
     createIfAbsent: async (payload) => {

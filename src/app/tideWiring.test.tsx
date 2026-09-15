@@ -14,7 +14,7 @@ import { afterEach, beforeAll, afterAll, describe, expect, it, vi } from 'vitest
 import { entryFromDoc, entryToDoc } from '../data/converters';
 import { monthWindow, tideWindow } from '../data/repo';
 import { endOfMonth, startOfMonth, toISO } from '../domain/date';
-import { newEntry, setRecurrence } from '../domain/entry';
+import { newEntry, newMoney, setRecurrence } from '../domain/entry';
 import { applyFilters, emptyFilters } from '../domain/filters';
 import { materialize } from '../domain/recurrence';
 import { TideInputError } from '../domain/tide';
@@ -42,7 +42,7 @@ const money = (
     title: extra.title ?? '',
     startDate,
     endDate: extra.endDate ?? null,
-    money: { type, amountMinor, currency: 'KRW', linkedEntryId: null },
+    money: newMoney({ type, amountMinor }),
   });
 
 /** Firestore 왕복을 거친 모양. 앱이 실제로 손에 쥐는 값이다. */

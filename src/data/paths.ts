@@ -11,6 +11,10 @@ export const COL = {
   accounts: 'accounts',
   debts: 'debts',
   pins: 'pins',
+  /** 생활비 예산. */
+  budgets: 'budgets',
+  /** 세이브 — 잔고에 있지만 쓰지 않기로 떼어 둔 돈. */
+  reserves: 'reserves',
   /** 이관 전 구조. 읽기 전용으로만 접근한다. */
   legacyItems: 'items',
 } as const;

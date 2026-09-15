@@ -15,11 +15,11 @@ import {
 } from 'firebase/firestore';
 import { ymOf } from '../domain/date';
 import { describeFirestoreError } from './errors';
-import type { Account, Debt, Entry, Pin, RecoveryRule, YearMonth } from '../domain/types';
+import type { Account, Budget, Debt, Entry, Pin, RecoveryRule, Reserve, YearMonth } from '../domain/types';
 import {
-  accountFromDoc, accountToDoc, debtFromDoc, debtToDoc,
-  entryFromDoc, entryToDoc, pinFromDoc, pinToDoc,
-  recoveryRuleFromDoc, recoveryRuleToDoc,
+  accountFromDoc, accountToDoc, budgetFromDoc, budgetToDoc,
+  debtFromDoc, debtToDoc, entryFromDoc, entryToDoc, pinFromDoc, pinToDoc,
+  recoveryRuleFromDoc, recoveryRuleToDoc, reserveFromDoc, reserveToDoc,
 } from './converters';
 import { COL, col, docIn, userDoc } from './paths';
 
@@ -149,6 +149,32 @@ export function subscribeDebts(
   );
 }
 
+/**
+ * 생활비 예산 · 세이브.
+ *
+ * 둘 다 개수가 적고 **달과 무관하다** — 9월 예산은 12월 달력을 보고 있어도 한도를
+ * 잡고 있어야 한다. 그래서 월 창이 아니라 전량을 구독한다. 잔고·대출과 같은 갈래다.
+ */
+export function subscribeBudgets(
+  db: Firestore, uid: string, cb: SnapSink<Budget>, onError: ErrorSink,
+): Unsubscribe {
+  return onSnapshot(
+    col(db, uid, COL.budgets), WITH_META,
+    keepingSorted(budgetFromDoc, (a, b) => a.startDate.localeCompare(b.startDate), cb),
+    (err) => onError('budgets', err),
+  );
+}
+
+export function subscribeReserves(
+  db: Firestore, uid: string, cb: SnapSink<Reserve>, onError: ErrorSink,
+): Unsubscribe {
+  return onSnapshot(
+    col(db, uid, COL.reserves), WITH_META,
+    keepingSorted(reserveFromDoc, (a, b) => a.name.localeCompare(b.name), cb),
+    (err) => onError('reserves', err),
+  );
+}
+
 export function subscribePins(
   db: Firestore, uid: string, cb: (v: Pin[]) => void, onError: ErrorSink,
 ): Unsubscribe {
@@ -244,6 +270,22 @@ export function deleteDebt(db: Firestore, uid: string, id: string): Promise<void
   return deleteDoc(docIn(db, uid, COL.debts, id));
 }
 
+export function saveBudget(db: Firestore, uid: string, b: Budget): Promise<void> {
+  return setDoc(docIn(db, uid, COL.budgets, b.id), budgetToDoc(b));
+}
+
+export function deleteBudget(db: Firestore, uid: string, id: string): Promise<void> {
+  return deleteDoc(docIn(db, uid, COL.budgets, id));
+}
+
+export function saveReserve(db: Firestore, uid: string, r: Reserve): Promise<void> {
+  return setDoc(docIn(db, uid, COL.reserves, r.id), reserveToDoc(r));
+}
+
+export function deleteReserve(db: Firestore, uid: string, id: string): Promise<void> {
+  return deleteDoc(docIn(db, uid, COL.reserves, id));
+}
+
 export function savePin(db: Firestore, uid: string, p: Pin): Promise<void> {
   return setDoc(docIn(db, uid, COL.pins, p.id), pinToDoc(p));
 }
@@ -273,18 +315,23 @@ export async function saveTaskOrder(
 /** 전체를 한 번에 읽는다. 백업·이관처럼 드물게 도는 작업에서만 쓴다. */
 export async function fetchAll(db: Firestore, uid: string): Promise<{
   entries: Entry[]; accounts: Account[]; debts: Debt[]; pins: Pin[];
+  budgets: Budget[]; reserves: Reserve[];
 }> {
-  const [e, a, d, p] = await Promise.all([
+  const [e, a, d, p, b, r] = await Promise.all([
     getDocs(col(db, uid, COL.entries)),
     getDocs(col(db, uid, COL.accounts)),
     getDocs(col(db, uid, COL.debts)),
     getDocs(col(db, uid, COL.pins)),
+    getDocs(col(db, uid, COL.budgets)),
+    getDocs(col(db, uid, COL.reserves)),
   ]);
   return {
     entries: mapSnap(e, entryFromDoc),
     accounts: mapSnap(a, accountFromDoc),
     debts: mapSnap(d, debtFromDoc),
     pins: mapSnap(p, pinFromDoc),
+    budgets: mapSnap(b, budgetFromDoc),
+    reserves: mapSnap(r, reserveFromDoc),
   };
 }
 
@@ -305,7 +352,10 @@ export interface WriteManyResult {
  */
 export async function writeMany(
   db: Firestore, uid: string,
-  payload: { entries?: Entry[]; accounts?: Account[]; debts?: Debt[]; pins?: Pin[] },
+  payload: {
+    entries?: Entry[]; accounts?: Account[]; debts?: Debt[]; pins?: Pin[];
+    budgets?: Budget[]; reserves?: Reserve[];
+  },
   onProgress?: (done: number, total: number) => void,
 ): Promise<WriteManyResult> {
   type Job = { name: string; id: string; data: Record<string, unknown> };
@@ -314,6 +364,8 @@ export async function writeMany(
     ...(payload.accounts ?? []).map((x) => ({ name: COL.accounts, id: x.id, data: accountToDoc(x) })),
     ...(payload.debts ?? []).map((x) => ({ name: COL.debts, id: x.id, data: debtToDoc(x) })),
     ...(payload.pins ?? []).map((x) => ({ name: COL.pins, id: x.id, data: pinToDoc(x) })),
+    ...(payload.budgets ?? []).map((x) => ({ name: COL.budgets, id: x.id, data: budgetToDoc(x) })),
+    ...(payload.reserves ?? []).map((x) => ({ name: COL.reserves, id: x.id, data: reserveToDoc(x) })),
   ];
 
   const result: WriteManyResult = { written: 0, failed: [], allFailed: false };
@@ -368,7 +420,10 @@ export interface CreateManyResult {
 
 export async function createManyIfAbsent(
   db: Firestore, uid: string,
-  payload: { entries?: Entry[]; accounts?: Account[]; debts?: Debt[]; pins?: Pin[] },
+  payload: {
+    entries?: Entry[]; accounts?: Account[]; debts?: Debt[]; pins?: Pin[];
+    budgets?: Budget[]; reserves?: Reserve[];
+  },
   onProgress?: (done: number, total: number) => void,
 ): Promise<CreateManyResult> {
   type Job = { name: string; id: string; data: Record<string, unknown> };
@@ -377,6 +432,8 @@ export async function createManyIfAbsent(
     ...(payload.accounts ?? []).map((x) => ({ name: COL.accounts, id: x.id, data: accountToDoc(x) })),
     ...(payload.debts ?? []).map((x) => ({ name: COL.debts, id: x.id, data: debtToDoc(x) })),
     ...(payload.pins ?? []).map((x) => ({ name: COL.pins, id: x.id, data: pinToDoc(x) })),
+    ...(payload.budgets ?? []).map((x) => ({ name: COL.budgets, id: x.id, data: budgetToDoc(x) })),
+    ...(payload.reserves ?? []).map((x) => ({ name: COL.reserves, id: x.id, data: reserveToDoc(x) })),
   ];
 
   const result: CreateManyResult = { created: 0, conflicts: [], failed: [], allFailed: false };
