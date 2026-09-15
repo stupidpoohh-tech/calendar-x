@@ -7,6 +7,7 @@
  *   2. 전체 교체는 "먼저 쓰고, 다 됐을 때만 지운다". 지우는 목록은 네 컬렉션 모두에서 뽑는다
  */
 import { describe, expect, it } from 'vitest';
+import { newBudget, newReserve } from '../domain/budget';
 import { newEntry, newMoney } from '../domain/entry';
 import { defaultRecoveryRule } from '../domain/recovery';
 import type { Account, BackupCollection, Debt, Entry, Pin } from '../domain/types';
@@ -204,6 +205,47 @@ describe('병합 계획', () => {
   it('회복 규칙은 쓰고 있는 것을 남긴다', () => {
     const mine = data({ recovery: { ...defaultRecoveryRule(), enabled: true } });
     expect(planMerge(mine, incoming).recovery).toBe(mine.recovery);
+  });
+});
+
+describe('생활비 · 세이브 — 병합과 검증', () => {
+  it('파일에만 있는 예산·세이브를 더하고 같은 id 는 지금 것을 남긴다', () => {
+    const mine = newBudget({ id: 'b1', name: '내 것', amountMinor: 700_000 });
+    const current = data({ budgets: [mine] });
+    const incoming = data({
+      budgets: [newBudget({ id: 'b1', name: '파일 것', amountMinor: 1 }), newBudget({ id: 'b2' })],
+      reserves: [newReserve({ id: 'r1', amountMinor: 500_000 })],
+    });
+    const add = planMerge(current, incoming);
+    expect(add.budgets.map((b) => b.id)).toEqual(['b2']);
+    expect(add.reserves.map((r) => r.id)).toEqual(['r1']);
+  });
+
+  it('건수에 예산·세이브가 들어간다 — 총계가 맞아야 보고가 읽힌다', () => {
+    const d = data({
+      budgets: [newBudget({ id: 'b1' }), newBudget({ id: 'b2' })],
+      reserves: [newReserve({ id: 'r1' })],
+    });
+    expect(countDocs(d)).toBe(3);
+  });
+
+  it('기간이 뒤집힌 예산은 저장소를 건드리기 전에 걸러진다', () => {
+    const bad = data({
+      budgets: [newBudget({ id: 'b1', startDate: '2026-09-30', endDate: '2026-09-01' })],
+    });
+    const problems = validateBackup(bad);
+    expect(problems[0]?.collection).toBe('budgets');
+    expect(problems[0]?.reason).toContain('종료일이 시작일보다 앞섭니다');
+  });
+
+  it('음수 세이브는 걸러진다', () => {
+    const bad = data({ reserves: [newReserve({ id: 'r1', amountMinor: -1 })] });
+    expect(validateBackup(bad)[0]?.reason).toContain('음수입니다');
+  });
+
+  it('id 가 겹치는 예산은 걸러진다', () => {
+    const bad = data({ budgets: [newBudget({ id: 'b1' }), newBudget({ id: 'b1' })] });
+    expect(validateBackup(bad)[0]?.reason).toContain('겹칩니다');
   });
 });
 

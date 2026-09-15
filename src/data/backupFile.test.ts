@@ -425,3 +425,82 @@ describe('뜻이 흐려지는 보정은 보고한다', () => {
     if (r.ok) expect(r.file.notes).toEqual([]);
   });
 });
+
+describe('v4 — 생활비와 세이브', () => {
+  const v4 = (over: Record<string, unknown> = {}) => ({
+    ...v3(), version: 4, budgets: [], reserves: [], ...over,
+  });
+  const bgt = (over: Record<string, unknown> = {}) => ({
+    id: 'b1', name: '9월 생활비', startDate: '2026-09-01', endDate: '2026-09-30',
+    amountMinor: 700_000, currency: 'KRW', createdAt: '', updatedAt: '', ...over,
+  });
+  const rsv = (over: Record<string, unknown> = {}) => ({
+    id: 'r1', name: '비상금', amountMinor: 500_000, currency: 'KRW',
+    createdAt: '', updatedAt: '', ...over,
+  });
+
+  it('v4 를 읽는다', () => {
+    const r = read(v4({ budgets: [bgt()], reserves: [rsv()] }));
+    expect(r.ok).toBe(true);
+    if (r.ok) {
+      expect(r.file.format).toBe('v4');
+      expect(r.file.data.budgets[0]?.amountMinor).toBe(700_000);
+      expect(r.file.data.reserves[0]?.name).toBe('비상금');
+    }
+  });
+
+  it.each(['budgets', 'reserves'])('v4 에 %s 가 없으면 잘린 파일로 본다', (name) => {
+    const obj = v4();
+    delete (obj as Record<string, unknown>)[name];
+    const p = problemsOf(read(obj));
+    expect(p.some((x) => x.startsWith(name) && x.includes('반드시'))).toBe(true);
+  });
+
+  it('v3 파일에 없는 것은 정상이다 — 그 구조가 없던 시절의 파일이다', () => {
+    const r = read(v3({ entries: [entry()] }));
+    expect(r.ok).toBe(true);
+    if (r.ok) {
+      expect(r.file.data.budgets).toEqual([]);
+      expect(r.file.data.reserves).toEqual([]);
+    }
+  });
+
+  it('v3 파일에 들어 있으면 검증은 한다', () => {
+    // 손으로 고친 파일이 검사 없이 새어 들어가면 잘못된 예산이 한도를 조용히 깎는다.
+    const p = problemsOf(read(v3({ budgets: [bgt({ amountMinor: 1.5 })] })));
+    expect(p[0]).toContain('정수가 아닙니다');
+  });
+
+  it('기간이 뒤집힌 예산은 거른다', () => {
+    const p = problemsOf(read(v4({ budgets: [bgt({ endDate: '2026-08-01' })] })));
+    expect(p[0]).toContain('종료일이 시작일보다 앞섭니다');
+  });
+
+  it('예산 금액이 문자열이면 거른다', () => {
+    expect(problemsOf(read(v4({ budgets: [bgt({ amountMinor: '700000' })] })))[0])
+      .toContain('금액이 문자열입니다');
+  });
+
+  it('음수 예산은 거른다', () => {
+    expect(problemsOf(read(v4({ reserves: [rsv({ amountMinor: -1 })] })))[0])
+      .toContain('음수입니다');
+  });
+
+  it('예산 id 가 겹치면 거른다', () => {
+    const p = problemsOf(read(v4({ budgets: [bgt(), bgt()] })));
+    expect(p[0]).toContain('겹칩니다');
+  });
+
+  it('지출의 budgetId · debtId 는 문자열이어야 한다', () => {
+    const bad = moneyEntry({
+      money: { type: 'expense', amountMinor: 12_000, currency: 'KRW', linkedEntryId: null, budgetId: 7 },
+    });
+    expect(problemsOf(read(v4({ entries: [bad] })))[0]).toContain('문자열이 아닙니다');
+  });
+
+  it('예전 백업(v2 · v3)은 계속 들어온다', () => {
+    const { recovery: _drop, ...rest } = v3({ entries: [entry()] });
+    expect(read({ ...rest, version: 2 }).ok).toBe(true);
+    expect(read(v3({ entries: [entry()] })).ok).toBe(true);
+  });
+});

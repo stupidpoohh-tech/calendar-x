@@ -169,6 +169,54 @@ describe('accounts / debts / pins', () => {
   });
 });
 
+describe('budgets / reserves', () => {
+  const budget = {
+    name: '9월 생활비', startDate: '2026-09-01', endDate: '2026-09-30',
+    amountMinor: 700000, currency: 'KRW', createdAt: '', updatedAt: '',
+  };
+  const reserve = { name: '비상금', amountMinor: 500000, currency: 'KRW', createdAt: '', updatedAt: '' };
+
+  it('생활비 예산을 저장할 수 있다', async () => {
+    await assertSucceeds(setDoc(doc(db(ME), `users/${ME}/budgets/b1`), budget));
+  });
+
+  it('예산 금액이 정수가 아니면 거부한다', async () => {
+    await assertFails(setDoc(doc(db(ME), `users/${ME}/budgets/b1`), { ...budget, amountMinor: '700000' }));
+  });
+
+  it('기간이 날짜 모양이 아니면 거부한다', async () => {
+    await assertFails(setDoc(doc(db(ME), `users/${ME}/budgets/b1`), { ...budget, endDate: '2026-9-30' }));
+  });
+
+  it('세이브를 저장할 수 있다', async () => {
+    await assertSucceeds(setDoc(doc(db(ME), `users/${ME}/reserves/r1`), reserve));
+  });
+
+  it('세이브 금액이 정수가 아니면 거부한다', async () => {
+    await assertFails(setDoc(doc(db(ME), `users/${ME}/reserves/r1`), { ...reserve, amountMinor: 1.5 }));
+  });
+
+  it('남의 예산·세이브는 건드릴 수 없다', async () => {
+    await assertFails(setDoc(doc(db(OTHER), `users/${ME}/budgets/b1`), budget));
+    await assertFails(setDoc(doc(db(OTHER), `users/${ME}/reserves/r1`), reserve));
+  });
+
+  it('지출에 budgetId · debtId 가 붙어도 항목 규칙이 막지 않는다', async () => {
+    // 규칙은 필수 필드의 타입만 본다. 새 필드가 조용히 막히면 "저장은 되는데
+    // 사라지는" 예전 문제로 돌아간다.
+    await assertSucceeds(setDoc(
+      doc(db(ME), `users/${ME}/entries/e1`),
+      validEntry({
+        kind: 'money',
+        money: {
+          type: 'expense', amountMinor: 12000, currency: 'KRW',
+          linkedEntryId: null, budgetId: 'b1', debtId: null, priority: false,
+        },
+      }),
+    ));
+  });
+});
+
 /*
   회복은 규칙을 고치지 않고 들어왔다. 항목 규칙은 필수 필드의 타입만 보고 나머지를
   통과시키도록 쓰여 있고(그래서 새 필드가 조용히 막히지 않는다), 회복 규칙은
