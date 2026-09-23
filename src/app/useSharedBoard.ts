@@ -90,6 +90,11 @@ export interface SharedApi {
 
 interface Options {
   uid: string | null;
+  /**
+   * 오늘. 공유 대상을 가르는 경계다 — 지나간 일정은 올리지 않고, 이미 올라간 것은
+   * 맞추기가 지운다. 훅이 시계를 직접 읽지 않는 이유는 개인 화면과 같다 (`useToday`).
+   */
+  todayISO: string;
   /** 계정 표시 이름. 보드에 적어 두어 상대가 누구인지 알 수 있게 한다. */
   accountName: string;
   /** 보드 내용까지 구독할 것인가 (= 같이 보기 화면이 열려 있는가). */
@@ -102,7 +107,7 @@ const NO_ITEMS: SharedTodoItem[] = [];
 const NO_PINS: SharedPin[] = [];
 const NO_DDAYS: SharedDday[] = [];
 
-export function useSharedBoard({ uid, accountName, open, onError, commit }: Options): SharedApi {
+export function useSharedBoard({ uid, todayISO, accountName, open, onError, commit }: Options): SharedApi {
   const { db } = getFirebase();
 
   const [boards, setBoards] = useState<SharedBoard[]>([]);
@@ -188,7 +193,7 @@ export function useSharedBoard({ uid, accountName, open, onError, commit }: Opti
         도착한 뒤에만 부른다 (아래 effect 가 `contentReady` 를 기다린다).
       */
       const tasks = await fetchOwnerTasks(db, uid);
-      const plan = planOwnerSync(tasks, items);
+      const plan = planOwnerSync(tasks, items, todayISO);
       if (isEmptyPlan(plan)) return 'ok';
       await applyOwnerSync(db, board.id, uid, plan, new Date().toISOString());
       return 'ok';
@@ -197,7 +202,7 @@ export function useSharedBoard({ uid, accountName, open, onError, commit }: Opti
       errorRef.current(`같이 보기를 맞추지 못했습니다. ${describeFirestoreError(err)}`);
       return 'error';
     }
-  }, [db, uid, board, items]);
+  }, [db, uid, board, items, todayISO]);
 
   const syncRef = useRef(syncNow);
   syncRef.current = syncNow;
@@ -220,7 +225,7 @@ export function useSharedBoard({ uid, accountName, open, onError, commit }: Opti
 
     const pushEntry = (e: Entry) => {
       if (!activeBoard || !uid) return;
-      if (!isShareableTask(e)) return;
+      if (!isShareableTask(e, todayISO)) return;
       commit({
         kind: 'sharedSource', label: '같이 보기',
         summary: e.title.trim() || '(제목 없음)',
@@ -433,7 +438,7 @@ export function useSharedBoard({ uid, accountName, open, onError, commit }: Opti
       syncNow,
     };
   }, [
-    db, uid, dataUid, accountName, board, boards, ready, items, pins, ddays, memo,
+    db, uid, dataUid, todayISO, accountName, board, boards, ready, items, pins, ddays, memo,
     contentReady, error, commit, syncNow,
   ]);
 }

@@ -7,24 +7,39 @@
  *   같이 보기 · {보드}
  *   [D-Day]      ← 두 건까지. 나머지는 접힌다
  *   📌 고정메모   ← 한 건
- *   TODO         ← 이 화면의 본문
+ *   TODO         ← 이 화면의 본문. 달력이거나 리스트다
  *
  * D-Day 와 고정메모는 TODO 보다 부가 기능이라 자리를 크게 쓰지 않는다. 캘린더X 의
  * 조용한 톤을 그대로 쓰고, 공유 기능 때문에 화면을 새로 디자인하지 않는다.
  *
+ * ── 달력이 기본이다 ─────────────────────────────────────────────
+ *
+ * 이 앱은 캘린더다. 공유 화면만 리스트 하나로 두면 항목이 쌓이는 순간 못 쓰게 된다 —
+ * 230건을 세로로 늘어놓으면 이번 주에 무엇이 있는지 볼 수 없다. 달력·리스트 토글과
+ * 달 이동을 개인 화면과 같은 모양으로 둔다.
+ *
+ * **달력은 `MonthCalendar` 를 그대로 쓴다.** 월 그리드 · 기간 바 · "항목을 숨기지
+ * 않는다"(개수에 따라 바 높이를 압축) 가 전부 거기 있고, 공유용으로 하나 더 그리면
+ * 두 달력이 서서히 달라진다. 공유 항목을 **화면용 `Entry`** 로 옮겨 넘긴다
+ * (`asDisplayEntries`) — 저장 경로에 닿지 않는 표시 전용 값이다.
+ *
  * ── 이 화면의 편집은 공유 자료만 바꾼다 ─────────────────────────
  *
- * 콜백은 전부 `SharedTodoItem` · `SharedDday` · 문자열을 받는다. `Entry` 를 다루는
- * 함수가 props 에 없으므로, 여기서 개인 TODO 를 고칠 방법이 없다.
+ * 콜백은 전부 `SharedTodoItem` · `SharedDday` · 문자열을 받는다. 달력이 돌려주는
+ * `Entry` 는 id 로 원래 항목을 되찾는 데만 쓰고, 그대로 저장하는 길은 없다.
  */
 import { useMemo, useState } from 'react';
-import { fmtDayShort } from '../domain/date';
+import { DEFAULT_COLOR } from '../domain/constants';
+import { fmtDayShort, fmtMonthTitle, ymOfDate } from '../domain/date';
 import { uid as newId } from '../domain/entry';
 import {
   applyOverrides, isOverridden, newLocalItem, setHidden, sharedSortKey, sharedTitle, sharedView,
 } from '../domain/shared';
-import type { SharedBoard, SharedDday, SharedTodoItem } from '../domain/types';
+import type {
+  Entry, SharedBoard, SharedDday, SharedTodoItem, ViewId, WeekStart, YearMonth,
+} from '../domain/types';
 import { Icon } from './Icon';
+import { MonthCalendar } from './MonthCalendar';
 import { SharedDdayPanel } from './SharedDdayPanel';
 import { SharedItemSheet } from './SharedItemSheet';
 import { SharedMemo } from './SharedMemo';
@@ -38,6 +53,12 @@ interface Props {
   memoText: string;
   contentReady: boolean;
   todayISO: string;
+  /** 보고 있는 달. 개인 화면과 **같은 커서**라 돌아가도 그 달에 있다. */
+  cursor: Date;
+  onCursorChange: (next: Date) => void;
+  view: ViewId;
+  onViewChange: (next: ViewId) => void;
+  weekStart: WeekStart;
   onBack: () => void;
   onOpenInvite: () => void;
   onSaveItem: (item: SharedTodoItem) => void;
@@ -49,18 +70,47 @@ interface Props {
 
 interface Group { date: string; items: SharedTodoItem[] }
 
+/** 달력은 금액을 그리지 않는다. 공유 자료에 돈이 오지 않으므로 빈 값을 넘긴다. */
+const NO_MONTHS: YearMonth[] = [];
+const NO_ACCOUNTS: [] = [];
+const NO_ENTRIES: Entry[] = [];
+
 export function SharedScreen({
   board, partner, myUid, items, ddays, memoText, contentReady, todayISO,
+  cursor, onCursorChange, view, onViewChange, weekStart,
   onBack, onOpenInvite, onSaveItem, onDeleteItem, onSaveMemo, onSaveDday, onDeleteDday,
 }: Props) {
   const [editing, setEditing] = useState<{ item: SharedTodoItem; mode: 'create' | 'edit' } | null>(null);
   const [showHidden, setShowHidden] = useState(false);
 
   const hiddenCount = items.filter((i) => i.hidden).length;
+  const shown = useMemo(
+    () => items.filter((i) => showHidden || !i.hidden),
+    [items, showHidden],
+  );
 
+  /** 달력이 돌려준 `Entry` 로 원래 항목을 되찾는다. id 가 같다. */
+  const byId = useMemo(() => new Map(items.map((i) => [i.id, i])), [items]);
+  const displayEntries = useMemo(() => asDisplayEntries(shown), [shown]);
+  /*
+    날짜가 없는 항목은 달력에 놓을 자리가 없다. 아무 날에나 꽂지 않고 빼되, 몇 건이
+    빠졌는지는 적는다 — 조용히 사라지면 리스트로 바꾸기 전까지 찾을 수 없다.
+  */
+  const undated = useMemo(() => shown.filter((i) => !sharedView(i).startDate), [shown]);
+
+  /*
+    리스트는 보고 있는 달만 그린다 — 개인 리스트와 같은 규칙이다. 다만 날짜가 없는
+    항목은 어느 달에도 속하지 않으므로 늘 남겨 둔다. 달을 넘길 때마다 사라지면
+    영영 못 찾는다.
+  */
   const groups = useMemo<Group[]>(() => {
-    const shown = items.filter((i) => showHidden || !i.hidden);
-    const sorted = [...shown].sort((a, b) => sharedSortKey(a).localeCompare(sharedSortKey(b)));
+    const ym = ymOfDate(cursor);
+    const inMonth = shown.filter((i) => {
+      const v = sharedView(i);
+      if (!v.startDate) return true;
+      return v.startDate.startsWith(ym) || (v.endDate ?? v.startDate) >= `${ym}-01` && v.startDate <= `${ym}-31`;
+    });
+    const sorted = [...inMonth].sort((a, b) => sharedSortKey(a).localeCompare(sharedSortKey(b)));
     const map = new Map<string, SharedTodoItem[]>();
     for (const item of sorted) {
       const key = sharedView(item).startDate || '미정';
@@ -69,7 +119,7 @@ export function SharedScreen({
       else map.set(key, [item]);
     }
     return [...map.entries()].map(([date, list]) => ({ date, items: list }));
-  }, [items, showHidden]);
+  }, [shown, cursor]);
 
   /*
     상세를 열어 두는 동안에도 상대의 수정이 들어온다. 열었던 항목의 **id 로** 최신
@@ -77,16 +127,19 @@ export function SharedScreen({
     덮는다. 항목이 사라졌으면 상세도 닫는다.
   */
   const editingNow = editing
-    ? (editing.mode === 'create'
-        ? editing.item
-        : items.find((i) => i.id === editing.item.id) ?? null)
+    ? (editing.mode === 'create' ? editing.item : byId.get(editing.item.id) ?? null)
     : null;
 
-  const startCreate = () => {
+  const startCreate = (dateISO = todayISO) => {
     setEditing({
       mode: 'create',
-      item: newLocalItem(newId(), myUid, { title: '', startDate: todayISO }),
+      item: newLocalItem(newId(), myUid, { title: '', startDate: dateISO }),
     });
+  };
+
+  const openItem = (id: string) => {
+    const item = byId.get(id);
+    if (item) setEditing({ item, mode: 'edit' });
   };
 
   const toggleStatus = (item: SharedTodoItem) => {
@@ -123,26 +176,84 @@ export function SharedScreen({
 
       <SharedMemo text={memoText} onSave={onSaveMemo} />
 
-      <div className="sh-listh">
-        <h2 className="sh-listt">TODO</h2>
-        {contentReady && <span className="sh-n">{groups.reduce((n, g) => n + g.items.length, 0)}</span>}
-        <div className="spacer" />
-        {hiddenCount > 0 && (
-          <button className="sh-ghost" onClick={() => setShowHidden((v) => !v)}>
-            {showHidden ? '감춘 항목 숨기기' : `감춘 항목 ${hiddenCount.toLocaleString('ko-KR')}개 보기`}
+      {/* 달 이동과 보기 전환. 개인 화면의 도구줄과 같은 조각을 쓴다. */}
+      <div className="toolbar sh-toolbar">
+        <div className="tool-l">
+          <button className="ico-btn sm" aria-label="이전 달"
+            onClick={() => onCursorChange(new Date(cursor.getFullYear(), cursor.getMonth() - 1, 1))}>
+            <Icon.Chevron size={16} dir="left" />
           </button>
-        )}
-        <button className="add-btn sm" onClick={startCreate}>
-          <Icon.Plus size={14} /><span className="lbl">추가</span>
-        </button>
+          <span className="sh-month">{fmtMonthTitle(cursor)}</span>
+          <button className="ico-btn sm" aria-label="다음 달"
+            onClick={() => onCursorChange(new Date(cursor.getFullYear(), cursor.getMonth() + 1, 1))}>
+            <Icon.Chevron size={16} />
+          </button>
+          <button className="today-btn" onClick={() => onCursorChange(new Date())}>오늘</button>
+          {contentReady && <span className="sh-n">{shown.length}</span>}
+        </div>
+
+        <div className="tool-r">
+          <div className="seg">
+            {(['calendar', 'list'] as ViewId[]).map((v) => (
+              <button
+                key={v}
+                className={'seg-btn' + (view === v ? ' on' : '')}
+                onClick={() => onViewChange(v)}
+                aria-pressed={view === v}
+              >
+                {v === 'calendar' ? <Icon.Calendar size={14} /> : <Icon.List size={14} />}
+                <span className="lbl">{v === 'calendar' ? '캘린더' : '리스트'}</span>
+              </button>
+            ))}
+          </div>
+          {hiddenCount > 0 && (
+            <button
+              className={'ico-btn' + (showHidden ? ' on' : '')}
+              onClick={() => setShowHidden((s) => !s)}
+              aria-label={showHidden ? '감춘 항목 숨기기' : `감춘 항목 ${hiddenCount}개 보기`}
+              aria-pressed={showHidden}
+            >
+              <Icon.EyeOff size={15} />
+            </button>
+          )}
+          <button className="add-btn" onClick={() => startCreate()}>
+            <Icon.Plus size={16} /><span className="lbl">추가</span>
+          </button>
+        </div>
       </div>
 
       {/* 아직 한 건도 못 받았으면 "없다" 고 말하지 않는다. */}
       {!contentReady ? (
         <p className="sh-empty">불러오는 중입니다.</p>
+      ) : view === 'calendar' ? (
+        <>
+        <MonthCalendar
+          cursor={cursor}
+          onCursorChange={onCursorChange}
+          entries={displayEntries}
+          // 공유 자료에 돈은 오지 않는다. 한도 줄이 뜰 조건을 아예 만들지 않는다.
+          tideEntries={NO_ENTRIES}
+          tideMonths={NO_MONTHS}
+          accounts={NO_ACCOUNTS}
+          hasBalance={false}
+          lens="task"
+          weekStart={weekStart}
+          todayISO={todayISO}
+          onEntryClick={(e) => openItem(e.id)}
+          // 빈 자리를 누르면 그 날짜로 새 항목을 만든다. 만드는 것은 시트라
+          // 잘못 눌러도 저장되지 않는다.
+          onDayOpen={startCreate}
+          onDayCreate={startCreate}
+        />
+        {undated.length > 0 && (
+          <button className="sh-undated" onClick={() => onViewChange('list')}>
+            날짜가 없는 항목 {undated.length.toLocaleString('ko-KR')}건 — 리스트에서 봅니다
+          </button>
+        )}
+        </>
       ) : groups.length === 0 ? (
         <div className="empty">
-          <p className="empty-t">같이 볼 TODO 가 아직 없습니다.</p>
+          <p className="empty-t">이 달에는 같이 볼 TODO 가 없습니다.</p>
           <p className="empty-s">내 TODO 에 적은 할 일이 여기에 따라옵니다. 이 화면에서만 쓸 항목은 '추가' 로 만듭니다.</p>
         </div>
       ) : (
@@ -168,7 +279,7 @@ export function SharedScreen({
                         >
                           {done && <Icon.Check size={11} />}
                         </button>
-                        <button className="sh-row-main" onClick={() => setEditing({ item, mode: 'edit' })}>
+                        <button className="sh-row-main" onClick={() => openItem(item.id)}>
                           <span className={'sh-row-t' + (done ? ' done' : '')}>
                             {sharedTitle(item)}
                             {v.recurring && <Icon.Repeat size={11} />}
@@ -206,4 +317,49 @@ export function SharedScreen({
       )}
     </section>
   );
+}
+
+/**
+ * 공유 항목을 달력이 그릴 수 있는 **화면용** `Entry` 로 옮긴다.
+ *
+ * 저장하지 않는다. `MonthCalendar` 는 `Entry` 의 날짜·제목·상태만 보고 그리므로,
+ * 표시에 필요한 만큼만 채우고 나머지는 빈 값이다. 돌아오는 길은 `onEntryClick` 의
+ * id 하나뿐이고, 그 id 로 진짜 `SharedTodoItem` 을 찾아 연다.
+ *
+ * `virtual` 은 **세우지 않는다.** 그 표식은 "반복을 펼친 사본" 이라는 뜻이고 tide 가
+ * 그것을 보고 계산을 거절하는데, 이 값들은 애초에 tide 로 가지 않는다. 뜻이 다른
+ * 표식을 빌려 쓰면 다음 사람이 그 표식을 잘못 읽는다.
+ *
+ * 반복 항목은 발생분으로 펼치지 않는다 — 원본 한 건에 표식만 붙는다
+ * (`recurrence` 는 null 이라 달력이 전개하지도 않는다).
+ */
+function asDisplayEntries(items: readonly SharedTodoItem[]): Entry[] {
+  const out: Entry[] = [];
+  for (const item of items) {
+    const v = sharedView(item);
+    // 날짜가 없으면 달력에 놓을 자리가 없다. 아무 날에나 꽂지 않는다.
+    if (!v.startDate) continue;
+    out.push({
+      id: item.id,
+      kind: 'task',
+      title: v.title,
+      note: v.note,
+      color: DEFAULT_COLOR,
+      tags: [],
+      location: '',
+      startDate: v.startDate,
+      startTime: v.startTime,
+      endDate: v.endDate,
+      endTime: null,
+      recurrence: null,
+      ymSpan: [],
+      isRecurring: v.recurring,
+      task: { status: v.status, important: v.important, urgent: v.urgent, order: 0 },
+      money: null,
+      recovery: null,
+      createdAt: item.createdAt,
+      updatedAt: item.updatedAt,
+    });
+  }
+  return out;
 }

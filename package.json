@@ -13,6 +13,7 @@
     "test:watch": "vitest",
     "check": "npm run typecheck && npm run lint && npm run test",
     "test:rules": "firebase emulators:exec --only firestore --project dada-rules-test \"vitest run --config vitest.rules.config.ts\"",
+    "rules:console": "node scripts/console-rules.mjs",
     "emulators": "firebase emulators:start --project dada-calendar-dev"
   },
   "dependencies": {

@@ -283,13 +283,17 @@ export interface SharedSyncPlan {
  *
  * `tasks` 는 **전량**이어야 한다. 부분 목록을 넣으면 없는 항목을 지운 것으로 본다.
  *
- * 공유 화면에서만 만든 항목(`localOnly`)은 원본이 없는 것이 정상이므로 지우지 않는다.
- * 회복 항목은 공유 대상이 아니므로, 어쩌다 올라가 있으면 지운다.
+ * 공유 대상이 아닌 것이 올라가 있으면 지운다 — 원본이 사라졌거나, 할 일이 아니게
+ * 됐거나(아이디어로 강등), 회복 항목이거나, **지나간 일정**이다. 마지막 갈래가
+ * 시간이 흐르기만 해도 생기므로, 이 맞추기가 보드를 스스로 정리하는 자리가 된다.
+ *
+ * 공유 화면에서만 만든 항목(`localOnly`)은 건드리지 않는다. 원본이 없는 것이 정상이고,
+ * 지우면 되살릴 곳이 없다 — 지난 날짜라도 그것은 보드의 자기 기록이다.
  */
 export function planOwnerSync(
-  tasks: readonly Entry[], items: readonly SharedTodoItem[],
+  tasks: readonly Entry[], items: readonly SharedTodoItem[], todayISO: string,
 ): SharedSyncPlan {
-  const shareable = tasks.filter(isShareableTask);
+  const shareable = tasks.filter((t) => isShareableTask(t, todayISO));
   const byId = new Map(items.map((i) => [i.id, i]));
   const upserts: SharedSyncPlan['upserts'] = [];
   for (const t of shareable) {

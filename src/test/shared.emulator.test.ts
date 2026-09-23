@@ -51,6 +51,8 @@ beforeEach(async () => { await env.clearFirestore(); });
 const dbOf = (uid: string): Firestore => env.authenticatedContext(uid).firestore() as unknown as Firestore;
 
 const NOW = '2026-09-23T00:00:00.000Z';
+/** 오늘. 지나간 일정은 공유 대상이 아니므로 시험 항목은 이 뒤에 둔다. */
+const TODAY = '2026-09-23';
 
 const board = (): SharedBoard => ({
   id: BOARD,
@@ -334,7 +336,7 @@ describe('공유 화면 전용 항목', () => {
     const tasks = await fetchOwnerTasks(owner, OWNER);
     const items = (await getDocs(collection(owner, `sharedBoards/${BOARD}/items`))).docs
       .map((d) => sharedItemFromDoc(d.id, d.data() as Record<string, unknown>));
-    await applyOwnerSync(owner, BOARD, OWNER, planOwnerSync(tasks, items), NOW);
+    await applyOwnerSync(owner, BOARD, OWNER, planOwnerSync(tasks, items, TODAY), NOW);
 
     expect(await readItem(owner, 'local-1')).not.toBeNull();
   });
@@ -343,16 +345,40 @@ describe('공유 화면 전용 항목', () => {
 describe('맞추기 — 보드를 만든 뒤 한 번', () => {
   it('보드를 만들기 전부터 있던 TODO 를 공유에 올린다', async () => {
     const owner = dbOf(OWNER);
-    await saveEntry(owner, OWNER, task({ id: 'old-1', title: '예전 할 일' }));
-    await saveEntry(owner, OWNER, newEntry('idea', { id: 'idea-1', title: '아이디어' }));
-    await saveEntry(owner, OWNER, newEntry('money', { id: 'money-1', title: '전기요금' }));
+    await saveEntry(owner, OWNER, task({ id: 'old-1', title: '앞으로 할 일' }));
+    await saveEntry(owner, OWNER, newEntry('idea', { id: 'idea-1', title: '아이디어', startDate: '2026-09-25' }));
+    await saveEntry(owner, OWNER, newEntry('money', { id: 'money-1', title: '전기요금', startDate: '2026-09-25' }));
     const { member } = await connect();
 
     const tasks = await fetchOwnerTasks(owner, OWNER);
-    await applyOwnerSync(owner, BOARD, OWNER, planOwnerSync(tasks, []), NOW);
+    await applyOwnerSync(owner, BOARD, OWNER, planOwnerSync(tasks, [], TODAY), NOW);
 
     const items = await getDocs(collection(member, `sharedBoards/${BOARD}/items`));
     expect(items.docs.map((d) => d.id)).toEqual(['old-1']);
+  });
+
+  /*
+    사용자의 TODO 는 몇 년치가 쌓여 있다. 그것이 통째로 올라가면 상대 화면이 지난
+    기록으로 덮인다 — 실제로 230건이 올라갔다. 맞추기가 그것을 정리하는 자리다.
+  */
+  it('지나간 일정은 올리지 않고, 이미 올라간 것은 지운다', async () => {
+    const { owner, member } = await connect();
+    const past = task({ id: 'past-1', title: '지난 달 할 일', startDate: '2026-08-01' });
+    const future = task({ id: 'future-1', title: '다음 주 할 일', startDate: '2026-09-30' });
+    await saveEntry(owner, OWNER, past);
+    await saveEntry(owner, OWNER, future);
+    // 지난 항목이 이미 보드에 올라가 있는 상태를 만든다.
+    await pushSource(owner, BOARD, past.id, sourceOf(past), OWNER, NOW);
+
+    const tasks = await fetchOwnerTasks(owner, OWNER);
+    const items = (await getDocs(collection(owner, `sharedBoards/${BOARD}/items`))).docs
+      .map((d) => sharedItemFromDoc(d.id, d.data() as Record<string, unknown>));
+    await applyOwnerSync(owner, BOARD, OWNER, planOwnerSync(tasks, items, TODAY), NOW);
+
+    const after = await getDocs(collection(member, `sharedBoards/${BOARD}/items`));
+    expect(after.docs.map((d) => d.id)).toEqual(['future-1']);
+    // 원본은 그대로다. 공유에서 빠질 뿐이다.
+    expect((await getDoc(doc(owner, `users/${OWNER}/entries/past-1`))).exists()).toBe(true);
   });
 
   it('맞추기가 상대의 수정과 감춤을 지우지 않는다', async () => {
@@ -369,7 +395,7 @@ describe('맞추기 — 보드를 만든 뒤 한 번', () => {
     await saveEntry(owner, OWNER, moved);
     const tasks = await fetchOwnerTasks(owner, OWNER);
     const stale = [await readItem(owner, entry.id)].filter((x): x is SharedTodoItem => x !== null);
-    await applyOwnerSync(owner, BOARD, OWNER, planOwnerSync(tasks, stale), NOW);
+    await applyOwnerSync(owner, BOARD, OWNER, planOwnerSync(tasks, stale, TODAY), NOW);
 
     const after = await readItem(member, entry.id);
     expect(after?.hidden).toBe(true);
@@ -386,7 +412,7 @@ describe('맞추기 — 보드를 만든 뒤 한 번', () => {
 
     const tasks = await fetchOwnerTasks(owner, OWNER);
     const items = [await readItem(owner, entry.id)].filter((x): x is SharedTodoItem => x !== null);
-    await applyOwnerSync(owner, BOARD, OWNER, planOwnerSync(tasks, items), NOW);
+    await applyOwnerSync(owner, BOARD, OWNER, planOwnerSync(tasks, items, TODAY), NOW);
 
     expect(await readItem(member, entry.id)).toBeNull();
   });

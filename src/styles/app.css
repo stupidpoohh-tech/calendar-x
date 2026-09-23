@@ -1404,13 +1404,13 @@
   color: var(--ink-4); padding: 0 9px; display: flex; align-items: center;
 }
 .shd-x:hover { color: var(--bad); }
-.shd-add, .shd-more, .shm-add, .sh-ghost {
+.shd-add, .shd-more, .shm-add, .sh-undated {
   appearance: none; border: none; background: transparent; cursor: pointer;
   align-self: flex-start;
   display: inline-flex; align-items: center; gap: 4px; padding: 4px 2px;
   font-size: 0.75rem; font-weight: 600; color: var(--ink-3);
 }
-.shd-add:hover, .shd-more:hover, .shm-add:hover, .sh-ghost:hover { color: var(--ink); }
+.shd-add:hover, .shd-more:hover, .shm-add:hover, .sh-undated:hover { color: var(--ink); }
 .shd-form { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; }
 .shd-in {
   flex: 1 1 8rem; min-width: 0;
@@ -1448,9 +1448,19 @@
 .shm-in:focus { outline: none; border-color: var(--ink-4); }
 .shm-actions { display: flex; gap: 6px; justify-content: flex-end; }
 
+/* ---- 달 이동 · 보기 전환 ----
+ *
+ * 개인 화면의 `.toolbar` 를 그대로 쓰되, 카드 안쪽이라 좌우 여백만 걷어낸다.
+ * 두 화면의 도구줄이 다르게 생기면 같은 앱으로 읽히지 않는다.
+ */
+.sh-toolbar { padding: 4px 0 2px; }
+.sh-month {
+  font-size: 0.875rem; font-weight: 700; letter-spacing: -.01em;
+  padding: 0 2px; white-space: nowrap;
+}
+.sh-undated { margin-top: 6px; text-decoration: underline; }
+
 /* ---- TODO 목록 ---- */
-.sh-listh { display: flex; align-items: center; gap: 8px; margin-top: 4px; }
-.sh-listt { margin: 0; font-size: 0.8125rem; font-weight: 700; color: var(--ink-2); }
 .sh-n {
   font-size: 0.71875rem; font-weight: 600; color: var(--ink-3);
   background: var(--accent-soft); border-radius: 999px; padding: 1px 7px;

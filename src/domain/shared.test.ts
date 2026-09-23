@@ -9,7 +9,7 @@
 import { describe, expect, it } from 'vitest';
 import { newEntry, withDerived } from './entry';
 import {
-  applyOverrides, canRevert, isOverridden, isShareableTask, newLocalItem,
+  applyOverrides, canRevert, isOverridden, isPastTask, isShareableTask, newLocalItem,
   overriddenFields, revertToSource, sameSource, setHidden, sharedSortKey,
   sharedTitle, sharedView, shortName, sourceOf, withSource, partnerName,
   newInviteCode, inviteUrl,
@@ -17,6 +17,7 @@ import {
 import type { Entry, SharedTodoItem } from './types';
 
 const OWNER = 'owner-uid';
+const TODAY = '2026-09-23';
 
 function task(patch: Partial<Entry> = {}): Entry {
   return newEntry('task', { id: 'task-a', title: '병원 예약', startDate: '2026-09-25', ...patch });
@@ -29,20 +30,20 @@ function mirrored(e: Entry): SharedTodoItem {
 
 describe('공유 대상', () => {
   it('할 일만 나간다 — 아이디어와 가계부는 자동 공유하지 않는다', () => {
-    expect(isShareableTask(task())).toBe(true);
-    expect(isShareableTask(newEntry('idea', { title: '떠오른 것' }))).toBe(false);
-    expect(isShareableTask(newEntry('money', { title: '전기요금' }))).toBe(false);
+    expect(isShareableTask(task(), TODAY)).toBe(true);
+    expect(isShareableTask(newEntry('idea', { title: '떠오른 것', startDate: '2026-09-25' }), TODAY)).toBe(false);
+    expect(isShareableTask(newEntry('money', { title: '전기요금', startDate: '2026-09-25' }), TODAY)).toBe(false);
   });
 
   it('회복 항목은 빼 둔다 — 개인 시스템 항목이다', () => {
     const recovery = task({
       recovery: { options: [{ id: 'work', label: '회사 일' }], repayment: false, movedCount: 0 },
     });
-    expect(isShareableTask(recovery)).toBe(false);
+    expect(isShareableTask(recovery, TODAY)).toBe(false);
   });
 
   it('반복 전개분은 빼 둔다 — 저장되지 않는 화면용 사본이다', () => {
-    expect(isShareableTask({ ...task(), virtual: true })).toBe(false);
+    expect(isShareableTask({ ...task(), virtual: true }, TODAY)).toBe(false);
   });
 
   it('공유하는 필드만 뽑는다 — 색·태그·장소는 가지 않는다', () => {
@@ -57,6 +58,66 @@ describe('공유 대상', () => {
       ...task(), recurrence: { freq: 'weekly', interval: 1, until: null, count: null },
     });
     expect(sourceOf(repeating).recurring).toBe(true);
+  });
+});
+
+/*
+  같이 보기는 "둘이 앞으로 무엇을 하는가" 를 보는 자리다. 몇 년치 할 일이 통째로
+  올라가면 상대 화면이 지난 기록으로 덮인다. 경계는 시작일이 아니라 **끝나는 날**이다.
+*/
+describe('지나간 일정은 공유하지 않는다', () => {
+  it('어제 끝난 것은 나가지 않는다', () => {
+    expect(isShareableTask(task({ startDate: '2026-09-22' }), TODAY)).toBe(false);
+  });
+
+  it('오늘 것은 나간다', () => {
+    expect(isShareableTask(task({ startDate: TODAY }), TODAY)).toBe(true);
+  });
+
+  it('내일 것은 나간다', () => {
+    expect(isShareableTask(task({ startDate: '2026-09-24' }), TODAY)).toBe(true);
+  });
+
+  it('어제 시작해 모레 끝나는 것은 아직 진행 중이라 나간다', () => {
+    const running = task({ startDate: '2026-09-20', endDate: '2026-09-25' });
+    expect(isShareableTask(running, TODAY)).toBe(true);
+    expect(isPastTask(running, TODAY)).toBe(false);
+  });
+
+  it('어제 끝난 기간 일정은 나가지 않는다', () => {
+    expect(isPastTask(task({ startDate: '2026-09-01', endDate: '2026-09-22' }), TODAY)).toBe(true);
+  });
+
+  /*
+    반복은 시작일이 아무리 오래됐어도 지금 돌고 있다. 시작일로 판정하면 2025년에
+    시작한 매주 반복이 통째로 빠진다.
+  */
+  it('끝이 없는 반복은 시작일이 오래돼도 나간다', () => {
+    const repeating = withDerived({
+      ...task({ startDate: '2025-01-01' }),
+      recurrence: { freq: 'weekly', interval: 1, until: null, count: null },
+    });
+    expect(isShareableTask(repeating, TODAY)).toBe(true);
+  });
+
+  it('끝난 반복은 나가지 않는다', () => {
+    const finished = withDerived({
+      ...task({ startDate: '2025-01-01' }),
+      recurrence: { freq: 'weekly', interval: 1, until: '2026-08-01', count: null },
+    });
+    expect(isShareableTask(finished, TODAY)).toBe(false);
+  });
+
+  it('오늘 끝나는 반복은 나간다', () => {
+    const endingToday = withDerived({
+      ...task({ startDate: '2025-01-01' }),
+      recurrence: { freq: 'weekly', interval: 1, until: TODAY, count: null },
+    });
+    expect(isShareableTask(endingToday, TODAY)).toBe(true);
+  });
+
+  it('오늘을 알 수 없으면 지난 것으로 몰아 지우지 않는다', () => {
+    expect(isPastTask(task({ startDate: '2020-01-01' }), '')).toBe(false);
   });
 });
 

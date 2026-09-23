@@ -30,7 +30,7 @@
  */
 import { normalizeDate } from './date';
 import type {
-  Entry, SharedOverridableField, SharedOverrides, SharedSource, SharedTodoItem,
+  DateISO, Entry, SharedOverridableField, SharedOverrides, SharedSource, SharedTodoItem,
 } from './types';
 
 export const SHARED_OVERRIDABLE_FIELDS: readonly SharedOverridableField[] = [
@@ -67,9 +67,36 @@ export interface SharedView extends SharedSource {
  * 회복 항목도 뺀다. 그것은 "휴식을 빚지 않게" 관리하는 개인 시스템 항목이고,
  * 캘린더에 올라온 한 건은 규칙이 방금 만든 것이라 상대가 볼 자료가 아니다.
  * 반복 전개분(`virtual`)도 뺀다 — 저장되지 않는 화면용 사본이다.
+ *
+ * ── 그리고 **지나간 일정은 공유하지 않는다** ────────────────────
+ *
+ * 같이 보기는 "둘이 앞으로 무엇을 하는가" 를 보는 자리다. 몇 년치 할 일을 통째로
+ * 올리면 상대 화면이 지난 기록으로 덮여 이번 주에 무엇이 있는지 볼 수 없다.
+ *
+ * 경계는 **끝나는 날**이다 — 어제 시작해 모레 끝나는 일정은 아직 진행 중이므로
+ * 남는다. 오늘 끝나는 것도 남는다.
+ *
+ * 반복 항목은 시작일이 아무리 오래됐어도 지금 돌고 있다. 그래서 반복은 `until` 로
+ * 판정한다 — 끝이 없으면 계속 공유하고, `until` 이 지났으면 뺀다. (`count` 로 끝나는
+ * 반복은 마지막 회차를 알려면 전개해야 하는데, 그 비용을 저장 한 번마다 치를 만한
+ * 이득이 없다. 끝난 뒤에도 남아 있을 수 있고, 그 편이 있는 것을 지우는 것보다 낫다.)
  */
-export function isShareableTask(e: Entry): boolean {
-  return e.kind === 'task' && e.recovery == null && e.virtual !== true;
+export function isShareableTask(e: Entry, todayISO: DateISO): boolean {
+  if (e.kind !== 'task' || e.recovery != null || e.virtual === true) return false;
+  return !isPastTask(e, todayISO);
+}
+
+/** 이 항목이 오늘보다 앞에서 끝났는가. */
+export function isPastTask(e: Pick<Entry, 'startDate' | 'endDate' | 'isRecurring' | 'recurrence'>, todayISO: DateISO): boolean {
+  const today = normalizeDate(todayISO);
+  if (!today) return false;
+  if (e.isRecurring || e.recurrence) {
+    const until = normalizeDate(e.recurrence?.until);
+    return until !== '' && until < today;
+  }
+  const start = normalizeDate(e.startDate);
+  const end = normalizeDate(e.endDate) || start;
+  return (end >= start ? end : start) < today;
 }
 
 /** 원본에서 공유할 값만 뽑는다. 여기 없는 필드는 상대에게 가지 않는다. */

@@ -8,6 +8,7 @@ const DEFAULTS: Prefs = {
   fontScale: 'auto',
   lens: 'all',
   view: 'calendar',
+  sharedView: 'calendar',
   weekStart: 'mon',
   pinCollapsed: {},
   debtsCollapsed: false,

@@ -38,21 +38,36 @@ function mount(over: {
   items?: SharedTodoItem[];
   ddays?: Parameters<typeof SharedScreen>[0]['ddays'];
   memoText?: string;
+  contentReady?: boolean;
+  partner?: string | null;
+  myUid?: string;
+  board?: SharedBoard;
+  /** 기본은 리스트다. 달력은 별도 describe 에서 따로 본다. */
+  view?: 'calendar' | 'list';
+  cursor?: Date;
   onSaveItem?: (i: SharedTodoItem) => void;
   onDeleteItem?: (i: SharedTodoItem) => void;
   onSaveMemo?: (t: string) => void;
   onSaveDday?: Parameters<typeof SharedScreen>[0]['onSaveDday'];
   onBack?: () => void;
+  onViewChange?: (v: 'calendar' | 'list') => void;
+  onCursorChange?: (d: Date) => void;
 } = {}) {
   const props = {
-    board,
-    partner: 'owner',
-    myUid: ME,
+    board: over.board ?? board,
+    partner: over.partner === undefined ? 'owner' : over.partner,
+    myUid: over.myUid ?? ME,
     items: over.items ?? [],
     ddays: over.ddays ?? [],
     memoText: over.memoText ?? '',
-    contentReady: true,
+    contentReady: over.contentReady ?? true,
     todayISO: TODAY,
+    // 테스트 항목이 2026-09 에 있으므로 커서도 그 달에 둔다.
+    cursor: over.cursor ?? new Date(2026, 8, 1),
+    onCursorChange: over.onCursorChange ?? vi.fn(),
+    view: over.view ?? ('list' as const),
+    onViewChange: over.onViewChange ?? vi.fn(),
+    weekStart: 'mon' as const,
     onBack: over.onBack ?? vi.fn(),
     onOpenInvite: vi.fn(),
     onSaveItem: over.onSaveItem ?? vi.fn(),
@@ -79,29 +94,14 @@ describe('돌아가기와 머리글', () => {
   });
 
   it('아직 아무도 수락하지 않았으면 그 사실을 적는다', () => {
-    render(
-      <SharedScreen
-        board={{ ...board, memberUids: [OWNER] }}
-        partner={null} myUid={OWNER} items={[]} ddays={[]} memoText=""
-        contentReady todayISO={TODAY}
-        onBack={vi.fn()} onOpenInvite={vi.fn()} onSaveItem={vi.fn()} onDeleteItem={vi.fn()}
-        onSaveMemo={vi.fn()} onSaveDday={vi.fn()} onDeleteDday={vi.fn()}
-      />,
-    );
+    mount({ board: { ...board, memberUids: [OWNER] }, partner: null, myUid: OWNER });
     expect(screen.getByText('아직 아무도 수락하지 않았습니다')).toBeInTheDocument();
   });
 
   it('아직 한 건도 못 받았으면 "없다" 고 말하지 않는다', () => {
-    render(
-      <SharedScreen
-        board={board} partner="owner" myUid={ME} items={[]} ddays={[]} memoText=""
-        contentReady={false} todayISO={TODAY}
-        onBack={vi.fn()} onOpenInvite={vi.fn()} onSaveItem={vi.fn()} onDeleteItem={vi.fn()}
-        onSaveMemo={vi.fn()} onSaveDday={vi.fn()} onDeleteDday={vi.fn()}
-      />,
-    );
+    mount({ contentReady: false });
     expect(screen.getByText('불러오는 중입니다.')).toBeInTheDocument();
-    expect(screen.queryByText('같이 볼 TODO 가 아직 없습니다.')).not.toBeInTheDocument();
+    expect(screen.queryByText(/같이 볼 TODO 가 없습니다/)).not.toBeInTheDocument();
   });
 });
 
@@ -110,6 +110,18 @@ describe('목록', () => {
     mount({ items: [mirrored(task())] });
     expect(screen.getByText('병원 예약')).toBeInTheDocument();
     expect(screen.getByText(/25일/)).toBeInTheDocument();
+  });
+
+  it('보고 있는 달의 것만 그린다 — 리스트가 몇 백 줄이 되지 않는다', () => {
+    mount({ items: [mirrored(task()), mirrored(task({ id: 'far', title: '먼 달', startDate: '2026-12-01' }))] });
+    expect(screen.getByText('병원 예약')).toBeInTheDocument();
+    expect(screen.queryByText('먼 달')).not.toBeInTheDocument();
+  });
+
+  it('날짜가 없는 항목은 어느 달에서도 남겨 둔다 — 사라지면 못 찾는다', () => {
+    mount({ items: [newLocalItem('u1', ME, { title: '언젠가 같이' })], cursor: new Date(2027, 0, 1) });
+    expect(screen.getByText('언젠가 같이')).toBeInTheDocument();
+    expect(screen.getByText('날짜 미정')).toBeInTheDocument();
   });
 
   it('공유 화면에서 고친 항목에 표시를 남긴다', () => {
@@ -268,6 +280,66 @@ describe('항목 편집', () => {
     expect(saved.createdBy).toBe(ME);
     expect(saved.overrides.title).toBe('토요일 같이 장보기');
     expect(saved.overrides.startDate).toBe(TODAY);
+  });
+});
+
+/*
+  이 앱은 캘린더다. 공유 화면만 리스트 하나로 두면 항목이 쌓이는 순간 못 쓰게 된다.
+  달력은 `MonthCalendar` 를 그대로 쓰므로, 여기서 확인하는 것은 **넘기는 값**이다 —
+  공유 항목이 그 달의 바로 뜨는가, 누르면 원래 항목으로 돌아오는가.
+*/
+describe('달력', () => {
+  it('그 달의 항목을 달력에 그린다', () => {
+    mount({ view: 'calendar', items: [mirrored(task())] });
+    expect(screen.getByText('병원 예약')).toBeInTheDocument();
+    // 요일 머리글이 있으면 월 그리드가 그려진 것이다.
+    expect(screen.getByText('월')).toBeInTheDocument();
+  });
+
+  it('다른 달을 보고 있으면 그 항목은 달력에 없다', () => {
+    mount({ view: 'calendar', items: [mirrored(task())], cursor: new Date(2026, 10, 1) });
+    expect(screen.queryByText('병원 예약')).not.toBeInTheDocument();
+  });
+
+  it('항목을 누르면 편집 시트가 열린다', () => {
+    mount({ view: 'calendar', items: [mirrored(task())] });
+    fireEvent.click(screen.getByText('병원 예약'));
+    expect(screen.getByRole('dialog', { name: '같이 보기 항목' })).toBeInTheDocument();
+  });
+
+  it('빈 날을 누르면 그 날짜로 새 항목을 만든다', () => {
+    const onSaveItem = vi.fn();
+    mount({ view: 'calendar', onSaveItem });
+
+    fireEvent.click(screen.getByRole('button', { name: '2026-09-10 상세 보기' }));
+    const dialog = screen.getByRole('dialog', { name: '같이 보기 새 항목' });
+    fireEvent.change(within(dialog).getByPlaceholderText('제목'), { target: { value: '같이 저녁' } });
+    fireEvent.click(within(dialog).getByRole('button', { name: '저장' }));
+
+    const saved = onSaveItem.mock.calls[0]![0] as SharedTodoItem;
+    expect(saved.localOnly).toBe(true);
+    expect(saved.overrides.startDate).toBe('2026-09-10');
+  });
+
+  it('달을 넘길 수 있다', () => {
+    const onCursorChange = vi.fn();
+    mount({ view: 'calendar', onCursorChange });
+    fireEvent.click(screen.getByRole('button', { name: '다음 달' }));
+    const next = onCursorChange.mock.calls[0]![0] as Date;
+    expect(next.getMonth()).toBe(9);
+  });
+
+  it('리스트로 바꿀 수 있다', () => {
+    const onViewChange = vi.fn();
+    mount({ view: 'calendar', onViewChange });
+    fireEvent.click(screen.getByRole('button', { name: /리스트/ }));
+    expect(onViewChange).toHaveBeenCalledWith('list');
+  });
+
+  it('날짜가 없는 항목은 달력에 꽂지 않고, 몇 건인지 적는다', () => {
+    mount({ view: 'calendar', items: [newLocalItem('u1', ME, { title: '언젠가 같이' })] });
+    expect(screen.queryByText('언젠가 같이')).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /날짜가 없는 항목 1건/ })).toBeInTheDocument();
   });
 });
 

@@ -158,6 +158,7 @@ function Workspace({ uid, user, onSignOut }: WorkspaceProps) {
   const accountName = user?.displayName || user?.email || '';
   const shared = useSharedBoard({
     uid,
+    todayISO: today,
     accountName,
     open: sharedOpen,
     onError: (message) => dialog.toast(message, 'bad'),
@@ -337,16 +338,16 @@ function Workspace({ uid, user, onSignOut }: WorkspaceProps) {
    * 정합성보다 나쁘다. 실패한 공유 갱신은 다른 쓰기와 같은 목록에 남고, 남은 차이는
    * 같이 보기 화면을 열 때 맞추기가 메운다.
    *
-   * 공유 대상이 아닌 항목(아이디어 · 가계부)은 공유에서 **지운다.** 할 일을 아이디어로
-   * 강등하면 원본은 남아 있지만 공유할 대상이 아니므로, 그대로 두면 상대 화면에 뜻이
-   * 사라진 줄이 남는다. 보드가 없으면 두 호출 모두 아무것도 하지 않는다.
+   * 공유 대상이 아닌 항목은 공유에서 **지운다.** 아이디어 · 가계부로 옮겼거나, 날짜를
+   * 지난 날로 고쳤거나, 애초에 지난 일정이면 상대 화면에 남을 이유가 없다. 보드가
+   * 없으면 두 호출 모두 아무것도 하지 않는다.
    */
   const persist = useCallback((e: Entry) => {
     if (isAnon || !uid) { void promptLogin(); return; }
     commit({ kind: 'entry', label: '항목', summary: displayTitle(e), payload: e });
-    if (isShareableTask(e)) shared.pushEntry(e);
-    else if (e.kind !== 'task') shared.removeEntry(e.id);
-  }, [uid, isAnon, promptLogin, commit, shared]);
+    if (isShareableTask(e, today)) shared.pushEntry(e);
+    else shared.removeEntry(e.id);
+  }, [uid, isAnon, promptLogin, commit, shared, today]);
 
   const handleSave = useCallback((e: Entry) => {
     persist(e);
@@ -388,7 +389,7 @@ function Workspace({ uid, user, onSignOut }: WorkspaceProps) {
       유령 항목을 만들지 않는 쪽을 골랐다. 공유 화면에서 고쳐 둔 값이 있었다면 그것도
       함께 사라지므로, 그 사실을 삭제 전에 알린다.
     */
-    const sharedNote = shared.board && isShareableTask(e)
+    const sharedNote = shared.board && isShareableTask(e, today)
       ? ' 같이 보기에서도 사라집니다 — 거기서 고쳐 둔 내용이 있으면 함께 지워집니다.'
       : '';
     const ok = await dialog.confirm({
@@ -417,7 +418,7 @@ function Workspace({ uid, user, onSignOut }: WorkspaceProps) {
     });
     shared.removeEntry(baseIdOf(e.id));
     dialog.toast('삭제했습니다.');
-  }, [uid, isAnon, promptLogin, dialog, closeModal, recovery, commit, shared]);
+  }, [uid, isAnon, promptLogin, dialog, closeModal, recovery, commit, shared, today]);
 
   const handleStatus = useCallback((e: Entry, status: TaskStatus) => {
     const base = store.entries.find((x) => x.id === baseIdOf(e.id)) ?? e;
@@ -893,6 +894,14 @@ function Workspace({ uid, user, onSignOut }: WorkspaceProps) {
             memoText={shared.memoText}
             contentReady={shared.contentReady}
             todayISO={today}
+            // 커서는 개인 화면과 같은 값이다. 돌아가도 보고 있던 달에 그대로 있다.
+            cursor={cursor}
+            onCursorChange={setCursor}
+            // 보기 방식만 따로 기억한다 — 공유에서 리스트로 바꿨다고 내 TODO 까지
+            // 리스트가 되면 고친 적 없는 화면이 바뀐 것으로 보인다.
+            view={prefs.sharedView}
+            onViewChange={(v) => set('sharedView', v)}
+            weekStart={prefs.weekStart}
             onBack={() => setSharedOpen(false)}
             onOpenInvite={() => setSharedSheet('settings')}
             onSaveItem={shared.saveItem}

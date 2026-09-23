@@ -356,6 +356,13 @@ export interface Prefs {
   fontScale: FontScale;
   lens: LensId;
   view: ViewId;
+  /**
+   * 같이 보기 화면의 보기 방식.
+   *
+   * 개인 화면(`view`)과 따로 둔다. 공유 화면에서 리스트로 바꿨다고 돌아간 내 TODO 까지
+   * 리스트가 되면, 고친 적 없는 화면이 바뀐 것으로 보인다.
+   */
+  sharedView: ViewId;
   weekStart: WeekStart;
   pinCollapsed: Partial<Record<LensId, boolean>>;
   debtsCollapsed: boolean;
