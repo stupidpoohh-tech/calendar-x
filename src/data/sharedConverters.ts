@@ -21,8 +21,8 @@ import { COLOR_BY_ID, DEFAULT_COLOR, STATUS_BY_ID } from '../domain/constants';
 import { normalizeDate } from '../domain/date';
 import { BLANK_SHARED_SOURCE, SHARED_OVERRIDABLE_FIELDS } from '../domain/shared';
 import type {
-  ColorId, SharedBoard, SharedDday, SharedInvite, SharedOverrides, SharedPin,
-  SharedSource, SharedTodoItem, TaskStatus,
+  ColorId, SharedBoard, SharedCollection, SharedCollectionItem, SharedDday, SharedInvite,
+  SharedNote, SharedOverrides, SharedPin, SharedSource, SharedTodoItem, TaskStatus,
 } from '../domain/types';
 
 type Raw = Record<string, unknown>;
@@ -305,5 +305,81 @@ export function sharedDdayToDoc(d: SharedDday): Raw {
   return {
     title: d.title, date: d.date, order: d.order,
     createdBy: d.createdBy, createdAt: d.createdAt, updatedAt: d.updatedAt,
+  };
+}
+
+// ---------- 함께 할 것 ----------
+
+export function sharedCollectionFromDoc(id: string, raw: Raw): SharedCollection {
+  return {
+    id,
+    title: str(raw.title),
+    order: num(raw.order, 0),
+    createdBy: str(raw.createdBy),
+    createdAt: str(raw.createdAt),
+    updatedAt: str(raw.updatedAt),
+  };
+}
+
+export function sharedCollectionToDoc(c: SharedCollection): Raw {
+  return {
+    title: c.title, order: c.order,
+    createdBy: c.createdBy, createdAt: c.createdAt, updatedAt: c.updatedAt,
+  };
+}
+
+export function sharedCollectionItemFromDoc(id: string, raw: Raw): SharedCollectionItem {
+  const completed = bool(raw.completed);
+  return {
+    id,
+    collectionId: str(raw.collectionId),
+    title: str(raw.title),
+    completed,
+    // 완료가 아닌데 완료 시각이 남아 있으면 거짓이다. 상태를 따라 버린다.
+    completedAt: completed ? (str(raw.completedAt) || null) : null,
+    order: num(raw.order, 0),
+    createdBy: str(raw.createdBy),
+    createdAt: str(raw.createdAt),
+    updatedAt: str(raw.updatedAt),
+  };
+}
+
+export function sharedCollectionItemToDoc(i: SharedCollectionItem): Raw {
+  return {
+    collectionId: i.collectionId,
+    title: i.title,
+    completed: i.completed,
+    completedAt: i.completedAt,
+    order: i.order,
+    createdBy: i.createdBy,
+    createdAt: i.createdAt,
+    updatedAt: i.updatedAt,
+  };
+}
+
+// ---------- 메모 ----------
+
+export function sharedNoteFromDoc(id: string, raw: Raw): SharedNote {
+  const title = typeof raw.title === 'string' ? raw.title : '';
+  return {
+    id,
+    // 빈 제목과 제목 없음을 같은 것으로 읽는다 — 화면은 둘 다 본문 첫 줄을 쓴다.
+    title: title.trim() ? title : null,
+    body: str(raw.body),
+    pinned: bool(raw.pinned),
+    authorUid: str(raw.authorUid),
+    createdAt: str(raw.createdAt),
+    updatedAt: str(raw.updatedAt),
+  };
+}
+
+export function sharedNoteToDoc(n: SharedNote): Raw {
+  return {
+    title: n.title ?? '',
+    body: n.body,
+    pinned: n.pinned,
+    authorUid: n.authorUid,
+    createdAt: n.createdAt,
+    updatedAt: n.updatedAt,
   };
 }

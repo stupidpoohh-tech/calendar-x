@@ -1516,3 +1516,108 @@
 /* 작은 버튼. 확인창의 기본 버튼과 같은 모양이고 여백만 줄인다. */
 .btn.sm { padding: 6px 10px; font-size: 0.75rem; }
 .add-btn.sm { padding: 6px 10px; font-size: 0.75rem; }
+
+/* ---------- 같이 보기: 공통 줄 · 2차 탭 ---------- */
+
+/*
+  보드 공통(대표 D-Day · 고정된 메모)은 **한 줄을 넘지 않는다.** 여기가 커지면 본문이
+  아래로 밀려, 무엇을 하는 화면인지가 흐려진다.
+*/
+.sh-common { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-bottom: 8px; }
+
+.sh-dd {
+  display: inline-flex; align-items: baseline; gap: 6px;
+  padding: 5px 10px; border: 1px solid var(--line); border-radius: 999px;
+  background: var(--bg-soft); color: var(--ink-2); font-size: 0.8125rem;
+}
+.sh-dd:hover, .sh-dd.on { border-color: var(--line-2); color: var(--ink); }
+.sh-dd-t { font-weight: 600; color: var(--ink); }
+.sh-dd-n { font-weight: 700; font-variant-numeric: tabular-nums; }
+.sh-dd-d { font-size: 0.71875rem; color: var(--ink-3); }
+
+.sh-pinned {
+  display: inline-flex; align-items: baseline; gap: 6px; min-width: 0; flex: 1;
+  padding: 5px 8px; border-radius: 8px; color: var(--ink-3); font-size: 0.8125rem;
+  text-align: left;
+}
+.sh-pinned:hover { background: var(--bg-soft); }
+.sh-pinned b { color: var(--ink-2); font-weight: 600; }
+.sh-pinned span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/*
+  2차 탭. 1차 렌즈보다 **위계가 낮아야 한다** — 같은 크기로 그리면 축이 일곱 개처럼
+  보인다. 밑줄 하나로 고르고, 배경을 칠하지 않는다.
+*/
+.sh-tabs { display: flex; gap: 2px; border-bottom: 1px solid var(--line); margin-bottom: 10px; }
+.sh-tab {
+  padding: 7px 12px; font-size: 0.8125rem; color: var(--ink-3);
+  border-bottom: 2px solid transparent; margin-bottom: -1px;
+}
+.sh-tab:hover { color: var(--ink-2); }
+.sh-tab.on { color: var(--ink); font-weight: 600; border-bottom-color: var(--ink); }
+
+.sh-when { color: var(--ink-3); }
+
+.sh-done-h {
+  display: flex; align-items: center; gap: 4px;
+  font-size: 0.78125rem; color: var(--ink-3); padding: 6px 2px;
+}
+.sh-done-h:hover { color: var(--ink-2); }
+
+/* ---------- 같이 보기: 함께 할 것 ---------- */
+
+.shc { display: flex; flex-direction: column; gap: 14px; }
+.shc-g { border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px; }
+.shc-gh { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; }
+.shc-t { font-size: 0.875rem; font-weight: 600; color: var(--ink); }
+.shc-n {
+  margin-left: auto; font-size: 0.75rem; color: var(--ink-3);
+  font-variant-numeric: tabular-nums;
+}
+.shc-ul { display: flex; flex-direction: column; }
+.shc-li { display: flex; align-items: center; gap: 8px; padding: 4px 0; }
+.shc-li-t { flex: 1; min-width: 0; font-size: 0.8125rem; color: var(--ink); }
+.shc-li.done .shc-li-t { color: var(--ink-3); text-decoration: line-through; }
+.shc-act { padding: 4px; color: var(--ink-3); border-radius: 6px; }
+.shc-act:hover { color: var(--ink); background: var(--bg-soft); }
+.shc-add { display: flex; gap: 6px; align-items: center; margin-top: 4px; }
+.shc-in {
+  flex: 1; min-width: 0; padding: 6px 8px; font-size: 0.8125rem;
+  border: 1px solid var(--line); border-radius: 8px;
+  background: var(--bg); color: var(--ink);
+}
+.shc-in:focus { border-color: var(--line-2); outline: none; }
+.shc-new {
+  align-self: flex-start; display: inline-flex; align-items: center; gap: 4px;
+  font-size: 0.8125rem; color: var(--ink-3); padding: 6px 2px;
+}
+.shc-new:hover { color: var(--ink); }
+
+/* ---------- 같이 보기: 메모 ---------- */
+
+.shn { display: flex; flex-direction: column; gap: 10px; }
+.shn-top { display: flex; justify-content: flex-end; }
+.shn-form { display: flex; flex-direction: column; gap: 6px; }
+.shn-in {
+  padding: 8px 10px; font-size: 0.875rem; border: 1px solid var(--line);
+  border-radius: 8px; background: var(--bg); color: var(--ink); width: 100%;
+}
+.shn-in.b { resize: vertical; line-height: 1.55; font-family: inherit; }
+.shn-in:focus { border-color: var(--line-2); outline: none; }
+.shn-actions { display: flex; gap: 6px; justify-content: flex-end; }
+
+.shn-card { border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px; }
+.shn-card.pinned { border-color: var(--line-2); background: var(--bg-soft); }
+.shn-h { display: flex; align-items: center; gap: 6px; margin-bottom: 6px; }
+.shn-t { flex: 1; min-width: 0; font-size: 0.875rem; font-weight: 600; color: var(--ink); }
+.shn-edit { font-size: 0.75rem; color: var(--ink-3); padding: 2px 6px; }
+.shn-edit:hover { color: var(--ink); }
+.shn-b { font-size: 0.8125rem; line-height: 1.6; color: var(--ink-2); white-space: pre-wrap; }
+.shn-f { margin-top: 8px; font-size: 0.71875rem; color: var(--ink-3); }
+
+.shn-legacy {
+  border: 1px dashed var(--line-2); border-radius: 10px; padding: 10px 12px;
+  display: flex; flex-direction: column; gap: 6px; align-items: flex-start;
+}
+.shn-legacy-t { font-size: 0.8125rem; color: var(--ink-2); font-weight: 600; }
+.shn-legacy-b { font-size: 0.8125rem; color: var(--ink-3); white-space: pre-wrap; }

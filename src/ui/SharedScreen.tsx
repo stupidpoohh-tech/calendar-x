@@ -3,47 +3,63 @@
  *
  * ── 위계 ────────────────────────────────────────────────────────
  *
- *   ← 내 TODO
- *   같이 보기 · {보드}
- *   [D-Day]      ← 두 건까지. 나머지는 접힌다
- *   📌 고정메모   ← 한 건
- *   TODO         ← 이 화면의 본문. 달력이거나 리스트다
+ *   ← 내 TODO                          같이 보기 · {보드}
+ *   [대표 D-Day]  📌 고정된 메모        ← 보드 공통. 한 줄
+ *   [ 일정 | 함께 할 것 | 메모 ]        ← 2차 탭
+ *                본문
  *
- * D-Day 와 고정메모는 TODO 보다 부가 기능이라 자리를 크게 쓰지 않는다. 캘린더X 의
- * 조용한 톤을 그대로 쓰고, 공유 기능 때문에 화면을 새로 디자인하지 않는다.
+ * 2차 탭은 1차 렌즈(전체 · TODO · 💡 · 가계부)보다 위계가 낮아야 한다. 렌즈를 하나
+ * 더 만들지 않는 이유와 같다 — 축이 다섯 개라는 뜻이 되면 안 된다.
  *
- * ── 달력이 기본이다 ─────────────────────────────────────────────
+ * ── 세 탭이 각각 무엇인가 ───────────────────────────────────────
  *
- * 이 앱은 캘린더다. 공유 화면만 리스트 하나로 두면 항목이 쌓이는 순간 못 쓰게 된다 —
- * 230건을 세로로 늘어놓으면 이번 주에 무엇이 있는지 볼 수 없다. 달력·리스트 토글과
- * 달 이동을 개인 화면과 같은 모양으로 둔다.
+ *   일정        둘이 **실제로 해야 하는 것.** 날짜가 있든 없든 여기 있다
+ *   함께 할 것  **언젠가** 같이 하고 싶은 것. 날짜도 마감도 없다
+ *   메모        게시판처럼 쌓이는 글. 고정메모도 이 중 하나다
  *
- * **달력은 `MonthCalendar` 를 그대로 쓴다.** 월 그리드 · 기간 바 · "항목을 숨기지
- * 않는다"(개수에 따라 바 높이를 압축) 가 전부 거기 있고, 공유용으로 하나 더 그리면
- * 두 달력이 서서히 달라진다. 공유 항목을 **화면용 `Entry`** 로 옮겨 넘긴다
- * (`asDisplayEntries`) — 저장 경로에 닿지 않는 표시 전용 값이다.
+ * 일정과 TODO 를 따로 두지 않는다. 공유 보드에서 "해야 하는 것" 은 하나이고, 그것을
+ * 두 자리에 나누면 어디에 적어야 하는지가 매번 애매해진다.
+ *
+ * ── 일정은 리스트가 기본, 달력도 남긴다 ─────────────────────────
+ *
+ * 둘이 보는 목록은 "지금 뭐가 남았나" 가 먼저라 리스트가 기본이다. 다만 이 앱은
+ * 캘린더이고 날짜가 붙은 항목은 달력에서 봐야 읽히므로, 달력 보기를 토글로 남긴다.
+ * **달력은 `MonthCalendar` 를 그대로 쓴다** — 월 그리드 · 기간 바 · "항목을 숨기지
+ * 않는다" 가 전부 거기 있고, 공유용으로 하나 더 그리면 두 달력이 서서히 달라진다.
  *
  * ── 이 화면의 편집은 공유 자료만 바꾼다 ─────────────────────────
  *
- * 콜백은 전부 `SharedTodoItem` · `SharedDday` · 문자열을 받는다. 달력이 돌려주는
- * `Entry` 는 id 로 원래 항목을 되찾는 데만 쓰고, 그대로 저장하는 길은 없다.
+ * 콜백은 전부 공유 타입을 받는다. 달력이 돌려주는 `Entry` 는 id 로 원래 항목을 되찾는
+ * 데만 쓰고, 그대로 저장하는 길은 없다.
  */
 import { useMemo, useState } from 'react';
 import { colorHex } from '../domain/constants';
-import { fmtDayShort, fmtMonthTitle, ymOfDate } from '../domain/date';
+import { ddayCount, fmtDdayDate } from '../domain/dday';
+import { fmtDayShort, fmtMonthTitle } from '../domain/date';
 import { uid as newId } from '../domain/entry';
 import {
-  applyOverrides, isHiddenFor, isOverridden, newLocalItem, setHiddenFor,
-  sharedSortKey, sharedTitle, sharedView, shortName,
+  applyOverrides, isHiddenFor, isOverridden, newLocalItem, noteSummary, noteTitle,
+  pinnedNote, scheduleGroups, setHiddenFor, sharedTitle, sharedView, shortName,
 } from '../domain/shared';
 import type {
-  Entry, SharedBoard, SharedDday, SharedTodoItem, ViewId, WeekStart, YearMonth,
+  Entry, SharedBoard, SharedCollection, SharedCollectionItem, SharedDday, SharedNote,
+  SharedTodoItem, ViewId, WeekStart, YearMonth,
 } from '../domain/types';
 import { Icon } from './Icon';
 import { MonthCalendar } from './MonthCalendar';
+import { SharedCollections } from './SharedCollections';
 import { SharedDdayPanel } from './SharedDdayPanel';
 import { SharedItemSheet } from './SharedItemSheet';
-import { SharedMemo } from './SharedMemo';
+import { SharedNotes } from './SharedNotes';
+
+/** 공유 보드의 2차 탭. 정확히 셋이다. */
+type Tab = 'schedule' | 'wish' | 'notes';
+
+const TABS: { id: Tab; label: string }[] = [
+  { id: 'schedule', label: '일정' },
+  { id: 'wish', label: '함께 할 것' },
+  { id: 'notes', label: '메모' },
+];
 
 interface Props {
   board: SharedBoard;
@@ -51,7 +67,11 @@ interface Props {
   myUid: string;
   items: readonly SharedTodoItem[];
   ddays: readonly SharedDday[];
-  memoText: string;
+  collections: readonly SharedCollection[];
+  collectionItems: readonly SharedCollectionItem[];
+  notes: readonly SharedNote[];
+  /** 구조가 바뀌기 전의 고정메모. 남아 있으면 메모 탭이 옮길 자리를 준다. */
+  legacyMemo: string;
   contentReady: boolean;
   todayISO: string;
   /** 보고 있는 달. 개인 화면과 **같은 커서**라 돌아가도 그 달에 있다. */
@@ -71,12 +91,19 @@ interface Props {
    */
   onUnshareItem: (item: SharedTodoItem) => void;
   onDeleteItem: (item: SharedTodoItem) => void;
-  onSaveMemo: (text: string) => void;
   onSaveDday: (d: SharedDday) => void;
   onDeleteDday: (d: SharedDday) => void;
+  onSaveCollection: (c: SharedCollection) => void;
+  onDeleteCollection: (c: SharedCollection) => void;
+  onSaveCollectionItem: (i: SharedCollectionItem) => void;
+  onDeleteCollectionItem: (i: SharedCollectionItem) => void;
+  onSaveNote: (n: SharedNote) => void;
+  onDeleteNote: (n: SharedNote) => void;
+  /** 고정을 옮긴다. 살아 있는 고정은 하나라 앞의 것이 함께 풀린다. */
+  onPinNote: (n: SharedNote, pinned: boolean) => void;
+  /** 옛 고정메모를 메모 글로 옮긴다. */
+  onAdoptLegacyMemo: () => void;
 }
-
-interface Group { date: string; items: SharedTodoItem[] }
 
 /** 달력은 금액을 그리지 않는다. 공유 자료에 돈이 오지 않으므로 빈 값을 넘긴다. */
 const NO_MONTHS: YearMonth[] = [];
@@ -84,13 +111,18 @@ const NO_ACCOUNTS: [] = [];
 const NO_ENTRIES: Entry[] = [];
 
 export function SharedScreen({
-  board, partner, myUid, items, ddays, memoText, contentReady, todayISO,
-  cursor, onCursorChange, view, onViewChange, weekStart,
+  board, partner, myUid, items, ddays, collections, collectionItems, notes, legacyMemo,
+  contentReady, todayISO, cursor, onCursorChange, view, onViewChange, weekStart,
   onBack, onOpenInvite, onSaveItem, onUnshareItem, onDeleteItem,
-  onSaveMemo, onSaveDday, onDeleteDday,
+  onSaveDday, onDeleteDday,
+  onSaveCollection, onDeleteCollection, onSaveCollectionItem, onDeleteCollectionItem,
+  onSaveNote, onDeleteNote, onPinNote, onAdoptLegacyMemo,
 }: Props) {
+  const [tab, setTab] = useState<Tab>('schedule');
   const [editing, setEditing] = useState<{ item: SharedTodoItem; mode: 'create' | 'edit' } | null>(null);
   const [showHidden, setShowHidden] = useState(false);
+  const [showDdays, setShowDdays] = useState(false);
+  const [showDone, setShowDone] = useState(false);
 
   // 감추기는 사람별이다. 내가 감춘 것만 내 화면에서 빠진다.
   const hiddenCount = items.filter((i) => isHiddenFor(i, myUid)).length;
@@ -113,27 +145,20 @@ export function SharedScreen({
   const undated = useMemo(() => shown.filter((i) => !sharedView(i).startDate), [shown]);
 
   /*
-    리스트는 보고 있는 달만 그린다 — 개인 리스트와 같은 규칙이다. 다만 날짜가 없는
-    항목은 어느 달에도 속하지 않으므로 늘 남겨 둔다. 달을 넘길 때마다 사라지면
-    영영 못 찾는다.
+    리스트는 달로 자르지 않는다.
+
+    "해야 할 것" 은 이번 달에만 있는 것이 아니다. 달로 자르면 다음 달 일정이 목록에서
+    사라져, 달을 넘겨 보기 전까지는 남은 일이 없는 것처럼 보인다. 달 이동은 달력
+    보기의 도구이므로 그쪽에서만 쓴다.
   */
-  const groups = useMemo<Group[]>(() => {
-    const ym = ymOfDate(cursor);
-    const inMonth = shown.filter((i) => {
-      const v = sharedView(i);
-      if (!v.startDate) return true;
-      return v.startDate.startsWith(ym) || (v.endDate ?? v.startDate) >= `${ym}-01` && v.startDate <= `${ym}-31`;
-    });
-    const sorted = [...inMonth].sort((a, b) => sharedSortKey(a).localeCompare(sharedSortKey(b)));
-    const map = new Map<string, SharedTodoItem[]>();
-    for (const item of sorted) {
-      const key = sharedView(item).startDate || '미정';
-      const bucket = map.get(key);
-      if (bucket) bucket.push(item);
-      else map.set(key, [item]);
-    }
-    return [...map.entries()].map(([date, list]) => ({ date, items: list }));
-  }, [shown, cursor]);
+  const { todo, done } = useMemo(() => scheduleGroups(shown), [shown]);
+
+  /** 보드 위 한 줄에 띄울 것들. 앞으로 다가오는 D-Day 하나와 고정된 글 하나. */
+  const leadDday = useMemo(() => {
+    const dated = ddays.filter((d) => d.date);
+    return dated.find((d) => d.date >= todayISO) ?? dated[0] ?? null;
+  }, [ddays, todayISO]);
+  const pinned = useMemo(() => pinnedNote(notes), [notes]);
 
   /*
     상세를 열어 두는 동안에도 상대의 수정이 들어온다. 열었던 항목의 **id 로** 최신
@@ -144,7 +169,8 @@ export function SharedScreen({
     ? (editing.mode === 'create' ? editing.item : byId.get(editing.item.id) ?? null)
     : null;
 
-  const startCreate = (dateISO = todayISO) => {
+  /** 날짜는 **비어 있어도 된다.** '언제' 가 아직 없는 일도 해야 하는 일이다. */
+  const startCreate = (dateISO = '') => {
     setEditing({
       mode: 'create',
       item: newLocalItem(newId(), myUid, { title: '', startDate: dateISO }),
@@ -157,9 +183,54 @@ export function SharedScreen({
   };
 
   const toggleStatus = (item: SharedTodoItem) => {
-    const done = sharedView(item).status === 'done';
+    const isDone = sharedView(item).status === 'done';
     // 상태도 override 다. 여기서 원본의 상태를 바꾸지 않는다.
-    onSaveItem(applyOverrides(item, { status: done ? 'planned' : 'done' }, myUid));
+    onSaveItem(applyOverrides(item, { status: isDone ? 'planned' : 'done' }, myUid));
+  };
+
+  const row = (item: SharedTodoItem) => {
+    const v = sharedView(item);
+    const isDone = v.status === 'done';
+    return (
+      <li key={item.id} className={'lst-row' + (isHiddenFor(item, myUid) ? ' sh-hidden' : '')}>
+        <div className="sh-row">
+          <button
+            className="tp-check"
+            aria-pressed={isDone}
+            aria-label={`${v.title || '(제목 없음)'} 완료`}
+            onClick={() => toggleStatus(item)}
+          >
+            {isDone && <Icon.Check size={11} />}
+          </button>
+          {/* 달력의 바와 같은 색. 두 화면에서 같은 항목이 같아 보여야 한다. */}
+          <span className="sh-row-bar" style={{ background: colorHex(v.color) }} />
+          <button className="sh-row-main" onClick={() => openItem(item.id)}>
+            <span className={'sh-row-t' + (isDone ? ' done' : '')}>
+              {sharedTitle(item)}
+              {v.recurring && <Icon.Repeat size={11} />}
+            </span>
+            <span className="sh-row-m">
+              <span className="sh-when">
+                {v.startDate
+                  ? (v.startDate === todayISO ? '오늘' : fmtDayShort(v.startDate))
+                  : '날짜 없음'}
+              </span>
+              {v.startTime && <span>{v.startTime}</span>}
+              {item.localOnly && <span className="sh-tag local">같이 보기 전용</span>}
+              {/* 양방향이라 "수정됨" 만으로는 누가 고쳤는지 알 수 없다. */}
+              {isOverridden(item) && (
+                <span className="sh-tag">
+                  {item.overriddenBy ? `${editorName(item.overriddenBy)} 고침` : '공유 화면에서 수정됨'}
+                </span>
+              )}
+              {isHiddenFor(item, myUid) && <span className="sh-tag">나에게만 감춤</span>}
+              {v.important && <Icon.Star size={11} />}
+              {v.urgent && <Icon.Flame size={11} />}
+            </span>
+          </button>
+        </div>
+      </li>
+    );
   };
 
   return (
@@ -180,151 +251,194 @@ export function SharedScreen({
         </button>
       </div>
 
-      <SharedDdayPanel
-        ddays={ddays}
-        todayISO={todayISO}
-        myUid={myUid}
-        onSave={onSaveDday}
-        onDelete={onDeleteDday}
-      />
-
-      <SharedMemo text={memoText} onSave={onSaveMemo} />
-
-      {/* 달 이동과 보기 전환. 개인 화면의 도구줄과 같은 조각을 쓴다. */}
-      <div className="toolbar sh-toolbar">
-        <div className="tool-l">
-          <button className="ico-btn sm" aria-label="이전 달"
-            onClick={() => onCursorChange(new Date(cursor.getFullYear(), cursor.getMonth() - 1, 1))}>
-            <Icon.Chevron size={16} dir="left" />
-          </button>
-          <span className="sh-month">{fmtMonthTitle(cursor)}</span>
-          <button className="ico-btn sm" aria-label="다음 달"
-            onClick={() => onCursorChange(new Date(cursor.getFullYear(), cursor.getMonth() + 1, 1))}>
-            <Icon.Chevron size={16} />
-          </button>
-          <button className="today-btn" onClick={() => onCursorChange(new Date())}>오늘</button>
-          {contentReady && <span className="sh-n">{shown.length}</span>}
-        </div>
-
-        <div className="tool-r">
-          <div className="seg">
-            {(['calendar', 'list'] as ViewId[]).map((v) => (
-              <button
-                key={v}
-                className={'seg-btn' + (view === v ? ' on' : '')}
-                onClick={() => onViewChange(v)}
-                aria-pressed={view === v}
-              >
-                {v === 'calendar' ? <Icon.Calendar size={14} /> : <Icon.List size={14} />}
-                <span className="lbl">{v === 'calendar' ? '캘린더' : '리스트'}</span>
-              </button>
-            ))}
-          </div>
-          {hiddenCount > 0 && (
-            <button
-              className={'ico-btn' + (showHidden ? ' on' : '')}
-              onClick={() => setShowHidden((s) => !s)}
-              aria-label={showHidden ? '감춘 항목 숨기기' : `감춘 항목 ${hiddenCount}개 보기`}
-              aria-pressed={showHidden}
-            >
-              <Icon.EyeOff size={15} />
-            </button>
+      {/*
+        보드 공통. 어느 탭에서나 보이지만 **한 줄을 넘지 않는다** — 본문이 밀리면
+        무엇을 하는 화면인지가 흐려진다. 관리는 눌러서 펼친다.
+      */}
+      <div className="sh-common">
+        <button
+          className={'sh-dd' + (showDdays ? ' on' : '')}
+          onClick={() => setShowDdays((v) => !v)}
+          aria-expanded={showDdays}
+          aria-label="D-Day 관리"
+        >
+          {leadDday ? (
+            <>
+              <span className="sh-dd-t">{leadDday.title || '(제목 없음)'}</span>
+              <span className="sh-dd-n">{ddayCount(leadDday.date, todayISO).label}</span>
+              <span className="sh-dd-d">{fmtDdayDate(leadDday.date, todayISO)}</span>
+            </>
+          ) : (
+            <><Icon.Plus size={12} />D-Day</>
           )}
-          <button className="add-btn" onClick={() => startCreate()}>
-            <Icon.Plus size={16} /><span className="lbl">추가</span>
+        </button>
+
+        {pinned && (
+          <button className="sh-pinned" onClick={() => setTab('notes')}>
+            <Icon.Pin size={12} />
+            <b>{noteTitle(pinned)}</b>
+            <span>{noteSummary(pinned)}</span>
           </button>
-        </div>
+        )}
+      </div>
+
+      {showDdays && (
+        <SharedDdayPanel
+          ddays={ddays}
+          todayISO={todayISO}
+          myUid={myUid}
+          onSave={onSaveDday}
+          onDelete={onDeleteDday}
+        />
+      )}
+
+      <div className="sh-tabs" role="tablist" aria-label="공유 보드">
+        {TABS.map((t) => (
+          <button
+            key={t.id}
+            role="tab"
+            className={'sh-tab' + (tab === t.id ? ' on' : '')}
+            aria-selected={tab === t.id}
+            onClick={() => setTab(t.id)}
+          >
+            {t.label}
+          </button>
+        ))}
       </div>
 
       {/* 아직 한 건도 못 받았으면 "없다" 고 말하지 않는다. */}
       {!contentReady ? (
         <p className="sh-empty">불러오는 중입니다.</p>
-      ) : view === 'calendar' ? (
-        <>
-        <MonthCalendar
-          cursor={cursor}
-          onCursorChange={onCursorChange}
-          entries={displayEntries}
-          // 공유 자료에 돈은 오지 않는다. 한도 줄이 뜰 조건을 아예 만들지 않는다.
-          tideEntries={NO_ENTRIES}
-          tideMonths={NO_MONTHS}
-          accounts={NO_ACCOUNTS}
-          hasBalance={false}
-          lens="task"
-          weekStart={weekStart}
-          todayISO={todayISO}
-          onEntryClick={(e) => openItem(e.id)}
-          // 빈 자리를 누르면 그 날짜로 새 항목을 만든다. 만드는 것은 시트라
-          // 잘못 눌러도 저장되지 않는다.
-          onDayOpen={startCreate}
-          onDayCreate={startCreate}
+      ) : tab === 'wish' ? (
+        <SharedCollections
+          myUid={myUid}
+          collections={collections}
+          items={collectionItems}
+          onSaveCollection={onSaveCollection}
+          onDeleteCollection={onDeleteCollection}
+          onSaveItem={onSaveCollectionItem}
+          onDeleteItem={onDeleteCollectionItem}
+          onPromote={(i) => onSaveItem(
+            newLocalItem(newId(), myUid, { title: i.title.trim(), status: 'planned' }),
+          )}
         />
-        {undated.length > 0 && (
-          <button className="sh-undated" onClick={() => onViewChange('list')}>
-            날짜가 없는 항목 {undated.length.toLocaleString('ko-KR')}건 — 리스트에서 봅니다
-          </button>
-        )}
-        </>
-      ) : groups.length === 0 ? (
-        <div className="empty">
-          <p className="empty-t">이 달에는 같이 볼 TODO 가 없습니다.</p>
-          <p className="empty-s">
-            두 사람이 적은 오늘 이후의 할 일이 여기에 따라옵니다.
-            이 화면에서만 쓸 항목은 '추가' 로 만듭니다.
-          </p>
-        </div>
+      ) : tab === 'notes' ? (
+        <SharedNotes
+          myUid={myUid}
+          memberNames={board.memberNames}
+          notes={notes}
+          onSave={onSaveNote}
+          onDelete={onDeleteNote}
+          onPin={onPinNote}
+          legacyMemo={legacyMemo}
+          onAdoptLegacyMemo={onAdoptLegacyMemo}
+        />
       ) : (
-        <div className="lst sh-lst">
-          {groups.map((g) => (
-            <section className="lst-g" key={g.date}>
-              <h3 className={'lst-gh' + (g.date === todayISO ? ' today' : '')}>
-                {g.date === '미정' ? '날짜 미정' : fmtDayShort(g.date)}
-                {g.date === todayISO && <span className="lst-today">오늘</span>}
-              </h3>
-              <ul className="lst-ul">
-                {g.items.map((item) => {
-                  const v = sharedView(item);
-                  const done = v.status === 'done';
-                  return (
-                    <li key={item.id} className={'lst-row' + (isHiddenFor(item, myUid) ? ' sh-hidden' : '')}>
-                      <div className="sh-row">
-                        <button
-                          className="tp-check"
-                          aria-pressed={done}
-                          aria-label={`${v.title || '(제목 없음)'} 완료`}
-                          onClick={() => toggleStatus(item)}
-                        >
-                          {done && <Icon.Check size={11} />}
-                        </button>
-                        {/* 달력의 바와 같은 색. 두 화면에서 같은 항목이 같아 보여야 한다. */}
-                        <span className="sh-row-bar" style={{ background: colorHex(v.color) }} />
-                        <button className="sh-row-main" onClick={() => openItem(item.id)}>
-                          <span className={'sh-row-t' + (done ? ' done' : '')}>
-                            {sharedTitle(item)}
-                            {v.recurring && <Icon.Repeat size={11} />}
-                          </span>
-                          <span className="sh-row-m">
-                            {v.startTime && <span>{v.startTime}</span>}
-                            {item.localOnly && <span className="sh-tag local">같이 보기 전용</span>}
-                            {/* 양방향이라 "수정됨" 만으로는 누가 고쳤는지 알 수 없다. */}
-                            {isOverridden(item) && (
-                              <span className="sh-tag">
-                                {item.overriddenBy ? `${editorName(item.overriddenBy)} 고침` : '공유 화면에서 수정됨'}
-                              </span>
-                            )}
-                            {isHiddenFor(item, myUid) && <span className="sh-tag">나에게만 감춤</span>}
-                            {v.important && <Icon.Star size={11} />}
-                            {v.urgent && <Icon.Flame size={11} />}
-                          </span>
-                        </button>
-                      </div>
-                    </li>
-                  );
-                })}
-              </ul>
-            </section>
-          ))}
-        </div>
+        <>
+          <div className="toolbar sh-toolbar">
+            <div className="tool-l">
+              {/* 달 이동은 달력의 도구다. 리스트는 달로 자르지 않으므로 띄우지 않는다. */}
+              {view === 'calendar' ? (
+                <>
+                  <button className="ico-btn sm" aria-label="이전 달"
+                    onClick={() => onCursorChange(new Date(cursor.getFullYear(), cursor.getMonth() - 1, 1))}>
+                    <Icon.Chevron size={16} dir="left" />
+                  </button>
+                  <span className="sh-month">{fmtMonthTitle(cursor)}</span>
+                  <button className="ico-btn sm" aria-label="다음 달"
+                    onClick={() => onCursorChange(new Date(cursor.getFullYear(), cursor.getMonth() + 1, 1))}>
+                    <Icon.Chevron size={16} />
+                  </button>
+                  <button className="today-btn" onClick={() => onCursorChange(new Date())}>오늘</button>
+                </>
+              ) : (
+                <span className="sh-month">해야 할 것 {todo.length.toLocaleString('ko-KR')}</span>
+              )}
+            </div>
+
+            <div className="tool-r">
+              <div className="seg">
+                {(['list', 'calendar'] as ViewId[]).map((v) => (
+                  <button
+                    key={v}
+                    className={'seg-btn' + (view === v ? ' on' : '')}
+                    onClick={() => onViewChange(v)}
+                    aria-pressed={view === v}
+                  >
+                    {v === 'calendar' ? <Icon.Calendar size={14} /> : <Icon.List size={14} />}
+                    <span className="lbl">{v === 'calendar' ? '캘린더' : '리스트'}</span>
+                  </button>
+                ))}
+              </div>
+              {hiddenCount > 0 && (
+                <button
+                  className={'ico-btn' + (showHidden ? ' on' : '')}
+                  onClick={() => setShowHidden((s) => !s)}
+                  aria-label={showHidden ? '감춘 항목 숨기기' : `감춘 항목 ${hiddenCount}개 보기`}
+                  aria-pressed={showHidden}
+                >
+                  <Icon.EyeOff size={15} />
+                </button>
+              )}
+              <button className="add-btn" onClick={() => startCreate()}>
+                <Icon.Plus size={16} /><span className="lbl">추가</span>
+              </button>
+            </div>
+          </div>
+
+          {view === 'calendar' ? (
+            <>
+              <MonthCalendar
+                cursor={cursor}
+                onCursorChange={onCursorChange}
+                entries={displayEntries}
+                // 공유 자료에 돈은 오지 않는다. 한도 줄이 뜰 조건을 아예 만들지 않는다.
+                tideEntries={NO_ENTRIES}
+                tideMonths={NO_MONTHS}
+                accounts={NO_ACCOUNTS}
+                hasBalance={false}
+                lens="task"
+                weekStart={weekStart}
+                todayISO={todayISO}
+                onEntryClick={(e) => openItem(e.id)}
+                // 빈 자리를 누르면 그 날짜로 새 항목을 만든다. 만드는 것은 시트라
+                // 잘못 눌러도 저장되지 않는다.
+                onDayOpen={startCreate}
+                onDayCreate={startCreate}
+              />
+              {undated.length > 0 && (
+                <button className="sh-undated" onClick={() => onViewChange('list')}>
+                  날짜가 없는 항목 {undated.length.toLocaleString('ko-KR')}건 — 리스트에서 봅니다
+                </button>
+              )}
+            </>
+          ) : todo.length === 0 && done.length === 0 ? (
+            <div className="empty">
+              <p className="empty-t">아직 같이 볼 일정이 없습니다.</p>
+              <p className="empty-s">
+                두 사람이 적은 오늘 이후의 할 일이 여기에 따라옵니다.
+                이 화면에서만 쓸 일정은 '추가' 로 만들고, 날짜는 없어도 됩니다.
+              </p>
+            </div>
+          ) : (
+            <div className="lst sh-lst">
+              <section className="lst-g">
+                <h3 className="lst-gh">해야 할 것</h3>
+                <ul className="lst-ul">{todo.map(row)}</ul>
+              </section>
+
+              {done.length > 0 && (
+                <section className="lst-g">
+                  <button className="sh-done-h" onClick={() => setShowDone((v) => !v)} aria-expanded={showDone}>
+                    <Icon.Chevron size={13} dir={showDone ? 'down' : 'right'} />
+                    완료 {done.length.toLocaleString('ko-KR')}
+                  </button>
+                  {showDone && <ul className="lst-ul">{done.map(row)}</ul>}
+                </section>
+              )}
+            </div>
+          )}
+        </>
       )}
 
       {editingNow && (

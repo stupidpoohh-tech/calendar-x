@@ -9,7 +9,8 @@
  */
 import { describe, expect, it } from 'vitest';
 import {
-  sharedBoardFromDoc, sharedDdayFromDoc, sharedItemFromDoc, sharedItemToDoc,
+  sharedBoardFromDoc, sharedCollectionFromDoc, sharedCollectionItemFromDoc, sharedDdayFromDoc,
+  sharedItemFromDoc, sharedItemToDoc, sharedNoteFromDoc, sharedNoteToDoc,
   sharedPinFromDoc, sharedSourcePatch,
 } from './sharedConverters';
 import type { SharedSource } from '../domain/types';
@@ -202,5 +203,55 @@ describe('보드 · 메모 · D-Day 읽기', () => {
 
   it('D-Day 날짜가 깨져 있으면 오늘로 메우지 않는다 — 매일 D-Day 가 된다', () => {
     expect(sharedDdayFromDoc('d1', { title: '여행', date: '언젠가' }).date).toBe('');
+  });
+});
+
+describe('함께 할 것 읽기', () => {
+  it('없는 값은 빈 값으로 메운다 — 문서가 깨져도 화면이 서지 않는다', () => {
+    const c = sharedCollectionFromDoc('c1', {});
+    expect(c).toEqual({
+      id: 'c1', title: '', order: 0, createdBy: '', createdAt: '', updatedAt: '',
+    });
+  });
+
+  it('완료가 아닌데 남아 있는 완료 시각은 버린다', () => {
+    const i = sharedCollectionItemFromDoc('i1', {
+      collectionId: 'c1', title: '에버랜드',
+      completed: false, completedAt: '2026-09-01T00:00:00.000Z',
+    });
+    expect(i.completed).toBe(false);
+    // 완료가 아닌데 시각이 남아 있으면 거짓이다.
+    expect(i.completedAt).toBe(null);
+  });
+
+  it('완료면 시각을 그대로 들고 있는다', () => {
+    const i = sharedCollectionItemFromDoc('i1', {
+      collectionId: 'c1', title: '사우나', completed: true, completedAt: '2026-09-01T00:00:00.000Z',
+    });
+    expect(i.completedAt).toBe('2026-09-01T00:00:00.000Z');
+  });
+
+  it('순서가 숫자가 아니면 0 으로 본다', () => {
+    expect(sharedCollectionFromDoc('c1', { order: 'first' }).order).toBe(0);
+  });
+});
+
+describe('메모 읽기', () => {
+  it('빈 제목과 제목 없음을 같은 것으로 읽는다', () => {
+    expect(sharedNoteFromDoc('n1', { title: '   ', body: '본문' }).title).toBe(null);
+    expect(sharedNoteFromDoc('n2', { body: '본문' }).title).toBe(null);
+  });
+
+  it('고정은 참/거짓이 아니면 고정이 아니다', () => {
+    expect(sharedNoteFromDoc('n1', { body: 'x', pinned: 'yes' }).pinned).toBe(false);
+  });
+
+  /** 문서에 `null` 을 쓰지 않는다 — 규칙이 문자열을 요구한다. */
+  it('제목 없는 글은 빈 문자열로 쓴다', () => {
+    const doc = sharedNoteToDoc({
+      id: 'n1', title: null, body: '본문', pinned: false,
+      authorUid: 'u1', createdAt: '', updatedAt: '',
+    });
+    expect(doc.title).toBe('');
   });
 });

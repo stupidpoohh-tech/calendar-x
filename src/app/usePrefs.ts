@@ -8,7 +8,12 @@ const DEFAULTS: Prefs = {
   fontScale: 'auto',
   lens: 'all',
   view: 'calendar',
-  sharedView: 'calendar',
+  /*
+    공유 일정은 리스트가 기본이다. 둘이 보는 목록은 "지금 뭐가 남았나" 가 먼저이고,
+    달력은 날짜가 붙은 항목을 볼 때 켠다. 개인 화면은 그대로 달력이 기본이다 —
+    한쪽을 바꿨다고 다른 쪽까지 바뀌면 고친 적 없는 화면이 바뀐 것으로 보인다.
+  */
+  sharedView: 'list',
   weekStart: 'mon',
   pinCollapsed: {},
   debtsCollapsed: false,

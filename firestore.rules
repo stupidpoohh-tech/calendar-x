@@ -311,11 +311,65 @@ service cloud.firestore {
       }
 
       /** 공유 고정메모. 개인 `users/{uid}/pins` 와 다른 자료다. */
+      /*
+        옛 고정메모.
+
+        고정메모는 이제 메모 글 하나를 세우는 것이다(`notes` 의 `pinned`). 이 자리는
+        그 구조 이전에 적어 둔 글을 **읽고 지우기 위해** 남겨 둔다 — 규칙에서 먼저
+        치우면 옮기지도 지우지도 못하는 문서가 남는다.
+      */
       match /pins/{pinId} {
         allow read, delete: if isBoardMember(boardId);
         allow create, update: if isBoardMember(boardId)
           && withinSize()
           && data().text is string && data().text.size() <= 4000;
+      }
+
+      /*
+        함께 할 것 — 목록과 항목.
+
+        보드는 둘이 함께 쓰는 자리라 member 면 누구나 만들고 고치고 지운다. 공유 일정과
+        달리 '원본' 이 없으므로 주인별로 가를 것이 없다 — 여기서 갈라 봐야 상대가 적은
+        줄을 내가 못 지우는 불편만 남는다.
+
+        항목은 목록 문서 아래가 아니라 보드 아래 평평하게 산다. `collectionId` 로만
+        어느 목록인지를 가리킨다.
+      */
+      match /collections/{collectionId} {
+        allow read, delete: if isBoardMember(boardId);
+        allow create, update: if isBoardMember(boardId)
+          && withinSize()
+          && data().title is string && data().title.size() <= 100
+          && data().order is number;
+      }
+
+      match /collectionItems/{itemId} {
+        allow read, delete: if isBoardMember(boardId);
+        allow create, update: if isBoardMember(boardId)
+          && withinSize()
+          && data().collectionId is string && data().collectionId.size() <= 200
+          && data().title is string && data().title.size() <= 500
+          && data().completed is bool
+          && (data().completedAt == null
+              || (data().completedAt is string && data().completedAt.size() <= 40))
+          && data().order is number;
+      }
+
+      /*
+        메모 — 게시판처럼 쌓이는 글.
+
+        `pinned` 가 보드 위 한 줄에 뜰 글을 정한다. 살아 있는 고정을 하나로 두는 것은
+        화면의 규칙이고 규칙으로 세지 않는다 — 두 사람이 동시에 고정해 잠깐 둘이 되는
+        것보다, 그때 쓰기가 거절돼 적은 것이 사라지는 쪽이 나쁘다.
+      */
+      match /notes/{noteId} {
+        allow read, delete: if isBoardMember(boardId);
+        allow create, update: if isBoardMember(boardId)
+          && withinSize()
+          && data().title is string && data().title.size() <= 200
+          && data().body is string && data().body.size() <= 20000
+          && data().pinned is bool
+          && data().authorUid is string;
       }
 
       /** D-Day. 'D-23' 같은 문자열은 저장하지 않는다 — 날짜와 제목뿐이다. */

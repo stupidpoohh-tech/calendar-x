@@ -744,6 +744,78 @@ describe('같이 보기 — 보드 안의 자료', () => {
     await assertFails(setDoc(doc(db(ME), `sharedBoards/${BOARD}/ddays/d2`), { ...dday, date: null }));
   });
 
+  // ---------- 함께 할 것 ----------
+
+  const list = { title: '갈 곳', order: 0, createdBy: ME, createdAt: '', updatedAt: '' };
+  const wish = {
+    collectionId: 'c1', title: '에버랜드', completed: false, completedAt: null,
+    order: 0, createdBy: ME, createdAt: '', updatedAt: '',
+  };
+
+  /*
+    보드는 둘이 함께 쓰는 자리다. 공유 일정과 달리 '원본' 이 없으므로 주인별로 가를
+    것이 없고, 갈라 봐야 상대가 적은 줄을 내가 못 지우는 불편만 남는다.
+  */
+  it('member 누구나 목록과 항목을 만들고 고치고 지운다', async () => {
+    await assertSucceeds(setDoc(doc(db(ME), `sharedBoards/${BOARD}/collections/c1`), list));
+    await assertSucceeds(setDoc(doc(db(OTHER), `sharedBoards/${BOARD}/collections/c1`), { ...list, title: '먹을 것' }));
+    await assertSucceeds(setDoc(doc(db(OTHER), `sharedBoards/${BOARD}/collectionItems/i1`), wish));
+    await assertSucceeds(getDoc(doc(db(ME), `sharedBoards/${BOARD}/collectionItems/i1`)));
+    await assertSucceeds(deleteDoc(doc(db(ME), `sharedBoards/${BOARD}/collectionItems/i1`)));
+    await assertSucceeds(deleteDoc(doc(db(ME), `sharedBoards/${BOARD}/collections/c1`)));
+  });
+
+  it('제3자는 함께 할 것에 접근할 수 없다', async () => {
+    await assertFails(setDoc(doc(db(THIRD), `sharedBoards/${BOARD}/collections/c1`), list));
+    await assertFails(getDocs(collection(db(THIRD), `sharedBoards/${BOARD}/collectionItems`)));
+  });
+
+  it('완료가 참/거짓이 아니면 거부한다', async () => {
+    await assertFails(setDoc(
+      doc(db(ME), `sharedBoards/${BOARD}/collectionItems/i1`), { ...wish, completed: 'yes' },
+    ));
+  });
+
+  it('완료 시각은 없거나 문자열이어야 한다', async () => {
+    await assertSucceeds(setDoc(
+      doc(db(ME), `sharedBoards/${BOARD}/collectionItems/i1`),
+      { ...wish, completed: true, completedAt: '2026-09-23T10:00:00.000Z' },
+    ));
+    await assertFails(setDoc(
+      doc(db(ME), `sharedBoards/${BOARD}/collectionItems/i2`), { ...wish, completedAt: 42 },
+    ));
+  });
+
+  // ---------- 메모 ----------
+
+  const note = {
+    title: '제주도 준비', body: '렌터카 확인', pinned: false,
+    authorUid: ME, createdAt: '', updatedAt: '',
+  };
+
+  it('member 누구나 메모를 쓰고 고치고 지운다', async () => {
+    await assertSucceeds(setDoc(doc(db(ME), `sharedBoards/${BOARD}/notes/n1`), note));
+    await assertSucceeds(getDoc(doc(db(OTHER), `sharedBoards/${BOARD}/notes/n1`)));
+    await assertSucceeds(setDoc(doc(db(OTHER), `sharedBoards/${BOARD}/notes/n1`), { ...note, pinned: true }));
+    await assertSucceeds(deleteDoc(doc(db(OTHER), `sharedBoards/${BOARD}/notes/n1`)));
+  });
+
+  it('제3자는 메모에 접근할 수 없다', async () => {
+    await assertFails(setDoc(doc(db(THIRD), `sharedBoards/${BOARD}/notes/n1`), note));
+    await assertFails(getDocs(collection(db(THIRD), `sharedBoards/${BOARD}/notes`)));
+  });
+
+  it('본문이 문자열이 아니거나 고정이 참/거짓이 아니면 거부한다', async () => {
+    await assertFails(setDoc(doc(db(ME), `sharedBoards/${BOARD}/notes/n1`), { ...note, body: 42 }));
+    await assertFails(setDoc(doc(db(ME), `sharedBoards/${BOARD}/notes/n2`), { ...note, pinned: 'yes' }));
+  });
+
+  /** 제목은 선택이지만 **없는 것이 아니라 빈 문자열**로 쓴다 (규칙이 문자열을 본다). */
+  it('제목 없는 글은 빈 문자열이어야 한다', async () => {
+    await assertSucceeds(setDoc(doc(db(ME), `sharedBoards/${BOARD}/notes/n1`), { ...note, title: '' }));
+    await assertFails(setDoc(doc(db(ME), `sharedBoards/${BOARD}/notes/n2`), { ...note, title: null }));
+  });
+
   /*
     ── 공유 때문에 개인 자료의 격리가 약해지지 않았다 ──────────────
 

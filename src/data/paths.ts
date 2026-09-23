@@ -48,6 +48,18 @@ export const SHARED = {
   items: 'items',
   pins: 'pins',
   ddays: 'ddays',
+  /** 함께 할 것 — 목록. */
+  collections: 'collections',
+  /**
+   * 함께 할 것 — 항목.
+   *
+   * 목록 문서 **아래가 아니라** 보드 아래 평평하게 둔다. 중첩하면 목록마다 리스너를
+   * 하나씩 붙이거나 `collectionGroup('items')` 을 써야 하는데, 후자는 이름이 같은
+   * 공유 일정 컬렉션(`items`)까지 함께 걸린다.
+   */
+  collectionItems: 'collectionItems',
+  /** 메모 — 게시판처럼 쌓이는 글. 고정메모도 이 중 하나다. */
+  notes: 'notes',
 } as const;
 
 export function boardsCol(db: Firestore): CollectionReference {

@@ -26,12 +26,14 @@ import {
 } from 'firebase/firestore';
 import { isShareableTask, sameSource, sourceOf } from '../domain/shared';
 import type {
-  Entry, SharedBoard, SharedDday, SharedInvite, SharedPin, SharedSource, SharedTodoItem,
+  Entry, SharedBoard, SharedCollection, SharedCollectionItem, SharedDday, SharedInvite,
+  SharedNote, SharedPin, SharedSource, SharedTodoItem,
 } from '../domain/types';
 import {
-  sharedBoardFromDoc, sharedBoardToDoc, sharedDdayFromDoc, sharedDdayToDoc,
+  sharedBoardFromDoc, sharedBoardToDoc, sharedCollectionFromDoc, sharedCollectionItemFromDoc,
+  sharedCollectionItemToDoc, sharedCollectionToDoc, sharedDdayFromDoc, sharedDdayToDoc,
   sharedInviteFromDoc, sharedInviteToDoc, sharedItemFromDoc, sharedItemToDoc,
-  sharedPinFromDoc, sharedPinToDoc, sharedSourcePatch,
+  sharedNoteFromDoc, sharedNoteToDoc, sharedPinFromDoc, sharedPinToDoc, sharedSourcePatch,
 } from './sharedConverters';
 import { entryFromDoc } from './converters';
 import { boardDoc, boardSubCol, boardSubDoc, boardsCol, COL, col, inviteDoc, SHARED } from './paths';
@@ -121,6 +123,54 @@ export function subscribeSharedDdays(
       cb(out.sort((a, b) => a.date.localeCompare(b.date) || a.order - b.order));
     },
     (err) => onError('공유 D-Day', err),
+  );
+}
+
+export function subscribeSharedCollections(
+  db: Firestore, boardId: string, cb: (v: SharedCollection[]) => void, onError: ErrorSink,
+): Unsubscribe {
+  return onSnapshot(
+    boardSubCol(db, boardId, SHARED.collections),
+    (snap) => {
+      const out: SharedCollection[] = [];
+      snap.forEach((d) => out.push(sharedCollectionFromDoc(d.id, d.data() as Raw)));
+      cb(out.sort((a, b) => a.order - b.order || a.createdAt.localeCompare(b.createdAt)));
+    },
+    (err) => onError('함께 할 것 목록', err),
+  );
+}
+
+/**
+ * 함께 할 것 항목 — **한 번의 구독으로 전부** 받는다.
+ *
+ * 목록 문서 아래에 중첩했다면 목록마다 리스너를 붙여야 하고, 목록이 생기고 사라질
+ * 때마다 리스너를 다시 엮어야 한다. 평평하게 두고 `collectionId` 로 가른다.
+ */
+export function subscribeSharedCollectionItems(
+  db: Firestore, boardId: string, cb: (v: SharedCollectionItem[]) => void, onError: ErrorSink,
+): Unsubscribe {
+  return onSnapshot(
+    boardSubCol(db, boardId, SHARED.collectionItems),
+    (snap) => {
+      const out: SharedCollectionItem[] = [];
+      snap.forEach((d) => out.push(sharedCollectionItemFromDoc(d.id, d.data() as Raw)));
+      cb(out);
+    },
+    (err) => onError('함께 할 것', err),
+  );
+}
+
+export function subscribeSharedNotes(
+  db: Firestore, boardId: string, cb: (v: SharedNote[]) => void, onError: ErrorSink,
+): Unsubscribe {
+  return onSnapshot(
+    boardSubCol(db, boardId, SHARED.notes),
+    (snap) => {
+      const out: SharedNote[] = [];
+      snap.forEach((d) => out.push(sharedNoteFromDoc(d.id, d.data() as Raw)));
+      cb(out);
+    },
+    (err) => onError('공유 메모', err),
   );
 }
 
@@ -244,9 +294,55 @@ export function deleteSharedDday(db: Firestore, boardId: string, ddayId: string)
   return deleteDoc(boardSubDoc(db, boardId, SHARED.ddays, ddayId));
 }
 
+export function saveSharedCollection(db: Firestore, boardId: string, c: SharedCollection): Promise<void> {
+  return setDoc(boardSubDoc(db, boardId, SHARED.collections, c.id), sharedCollectionToDoc(c));
+}
+
+/**
+ * 목록을 지우면 그 안의 항목도 함께 지운다.
+ *
+ * 한 배치다 — 목록만 사라지고 항목이 남으면 어디에도 안 보이는 문서가 되고, 같은 이름의
+ * 목록을 다시 만들면 지운 항목이 되살아난다.
+ */
+export function deleteSharedCollection(
+  db: Firestore, boardId: string, collectionId: string, itemIds: readonly string[],
+): Promise<void> {
+  const batch = writeBatch(db);
+  batch.delete(boardSubDoc(db, boardId, SHARED.collections, collectionId));
+  for (const id of itemIds.slice(0, 400)) {
+    batch.delete(boardSubDoc(db, boardId, SHARED.collectionItems, id));
+  }
+  return batch.commit();
+}
+
+export function saveSharedCollectionItem(
+  db: Firestore, boardId: string, item: SharedCollectionItem,
+): Promise<void> {
+  return setDoc(
+    boardSubDoc(db, boardId, SHARED.collectionItems, item.id),
+    sharedCollectionItemToDoc(item),
+  );
+}
+
+export function deleteSharedCollectionItem(db: Firestore, boardId: string, id: string): Promise<void> {
+  return deleteDoc(boardSubDoc(db, boardId, SHARED.collectionItems, id));
+}
+
+export function saveSharedNote(db: Firestore, boardId: string, note: SharedNote): Promise<void> {
+  return setDoc(boardSubDoc(db, boardId, SHARED.notes, note.id), sharedNoteToDoc(note));
+}
+
+export function deleteSharedNote(db: Firestore, boardId: string, id: string): Promise<void> {
+  return deleteDoc(boardSubDoc(db, boardId, SHARED.notes, id));
+}
+
 /** 보드를 지운다. 하위 컬렉션은 클라이언트에서 지워야 한다 — 문서만 지우면 남는다. */
 export async function deleteBoardDeep(db: Firestore, boardId: string): Promise<void> {
-  for (const name of [SHARED.items, SHARED.pins, SHARED.ddays]) {
+  const subs = [
+    SHARED.items, SHARED.pins, SHARED.ddays,
+    SHARED.collections, SHARED.collectionItems, SHARED.notes,
+  ];
+  for (const name of subs) {
     const snap = await getDocs(boardSubCol(db, boardId, name));
     const ids = snap.docs.map((d) => d.id);
     for (let i = 0; i < ids.length; i += 400) {

@@ -39,10 +39,15 @@ const mirrored = (e: Entry): SharedTodoItem =>
 const mine = (e: Entry): SharedTodoItem =>
   withSource(null, e.id, sourceOf(e), ME, '2026-09-01T00:00:00.000Z');
 
+type P = Parameters<typeof SharedScreen>[0];
+
 function mount(over: {
   items?: SharedTodoItem[];
-  ddays?: Parameters<typeof SharedScreen>[0]['ddays'];
-  memoText?: string;
+  ddays?: P['ddays'];
+  collections?: P['collections'];
+  collectionItems?: P['collectionItems'];
+  notes?: P['notes'];
+  legacyMemo?: string;
   contentReady?: boolean;
   partner?: string | null;
   myUid?: string;
@@ -53,8 +58,15 @@ function mount(over: {
   onSaveItem?: (i: SharedTodoItem) => void;
   onUnshareItem?: (i: SharedTodoItem) => void;
   onDeleteItem?: (i: SharedTodoItem) => void;
-  onSaveMemo?: (t: string) => void;
-  onSaveDday?: Parameters<typeof SharedScreen>[0]['onSaveDday'];
+  onSaveDday?: P['onSaveDday'];
+  onSaveCollection?: P['onSaveCollection'];
+  onDeleteCollection?: P['onDeleteCollection'];
+  onSaveCollectionItem?: P['onSaveCollectionItem'];
+  onDeleteCollectionItem?: P['onDeleteCollectionItem'];
+  onSaveNote?: P['onSaveNote'];
+  onDeleteNote?: P['onDeleteNote'];
+  onPinNote?: P['onPinNote'];
+  onAdoptLegacyMemo?: () => void;
   onBack?: () => void;
   onViewChange?: (v: 'calendar' | 'list') => void;
   onCursorChange?: (d: Date) => void;
@@ -65,7 +77,10 @@ function mount(over: {
     myUid: over.myUid ?? ME,
     items: over.items ?? [],
     ddays: over.ddays ?? [],
-    memoText: over.memoText ?? '',
+    collections: over.collections ?? [],
+    collectionItems: over.collectionItems ?? [],
+    notes: over.notes ?? [],
+    legacyMemo: over.legacyMemo ?? '',
     contentReady: over.contentReady ?? true,
     todayISO: TODAY,
     // 테스트 항목이 2026-09 에 있으므로 커서도 그 달에 둔다.
@@ -79,9 +94,16 @@ function mount(over: {
     onSaveItem: over.onSaveItem ?? vi.fn(),
     onUnshareItem: over.onUnshareItem ?? vi.fn(),
     onDeleteItem: over.onDeleteItem ?? vi.fn(),
-    onSaveMemo: over.onSaveMemo ?? vi.fn(),
     onSaveDday: over.onSaveDday ?? vi.fn(),
     onDeleteDday: vi.fn(),
+    onSaveCollection: over.onSaveCollection ?? vi.fn(),
+    onDeleteCollection: over.onDeleteCollection ?? vi.fn(),
+    onSaveCollectionItem: over.onSaveCollectionItem ?? vi.fn(),
+    onDeleteCollectionItem: over.onDeleteCollectionItem ?? vi.fn(),
+    onSaveNote: over.onSaveNote ?? vi.fn(),
+    onDeleteNote: over.onDeleteNote ?? vi.fn(),
+    onPinNote: over.onPinNote ?? vi.fn(),
+    onAdoptLegacyMemo: over.onAdoptLegacyMemo ?? vi.fn(),
   };
   render(<SharedScreen {...props} />);
   return props;
@@ -119,16 +141,31 @@ describe('목록', () => {
     expect(screen.getByText(/25일/)).toBeInTheDocument();
   });
 
-  it('보고 있는 달의 것만 그린다 — 리스트가 몇 백 줄이 되지 않는다', () => {
+  /*
+    "해야 할 것" 은 이번 달에만 있는 것이 아니다. 달로 자르면 다음 달 일정이 목록에서
+    사라져, 달을 넘겨 보기 전까지는 남은 일이 없는 것처럼 보인다.
+  */
+  it('달로 자르지 않는다 — 다음 달 일정도 해야 할 것에 남는다', () => {
     mount({ items: [mirrored(task()), mirrored(task({ id: 'far', title: '먼 달', startDate: '2026-12-01' }))] });
     expect(screen.getByText('병원 예약')).toBeInTheDocument();
-    expect(screen.queryByText('먼 달')).not.toBeInTheDocument();
+    expect(screen.getByText('먼 달')).toBeInTheDocument();
   });
 
-  it('날짜가 없는 항목은 어느 달에서도 남겨 둔다 — 사라지면 못 찾는다', () => {
+  it('날짜가 없는 항목도 남는다 — 사라지면 못 찾는다', () => {
     mount({ items: [newLocalItem('u1', ME, { title: '언젠가 같이' })], cursor: new Date(2027, 0, 1) });
     expect(screen.getByText('언젠가 같이')).toBeInTheDocument();
-    expect(screen.getByText('날짜 미정')).toBeInTheDocument();
+    expect(screen.getByText('날짜 없음')).toBeInTheDocument();
+  });
+
+  /*
+    완료는 접어 둔다. 남은 일 위에 끝낸 일이 쌓이면 목록으로 쓸 수 없다 —
+    다만 개수는 적어서, 어디로 갔는지 찾을 수 있게 한다.
+  */
+  it('완료한 것은 접히고 개수로 남는다', () => {
+    mount({ items: [applyOverrides(mirrored(task()), { status: 'done' }, ME)] });
+    expect(screen.queryByText('병원 예약')).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: /완료 1/ }));
+    expect(screen.getByText('병원 예약')).toBeInTheDocument();
   });
 
   it('공유 화면에서 고친 항목에 표시를 남긴다', () => {
@@ -180,6 +217,8 @@ describe('목록', () => {
     const done = applyOverrides(mirrored(task()), { status: 'done' }, ME);
     mount({ items: [done], onSaveItem });
 
+    // 완료한 항목은 접힌 자리에 있다.
+    fireEvent.click(screen.getByRole('button', { name: /완료 1/ }));
     fireEvent.click(screen.getByRole('button', { name: '병원 예약 완료' }));
     const saved = onSaveItem.mock.calls[0]![0] as SharedTodoItem;
     expect(sharedView(saved).status).toBe('planned');
@@ -335,7 +374,8 @@ describe('항목 편집', () => {
     expect(saved.source).toBe(null);
     expect(saved.createdBy).toBe(ME);
     expect(saved.overrides.title).toBe('토요일 같이 장보기');
-    expect(saved.overrides.startDate).toBe(TODAY);
+    // 날짜는 비어 있어도 된다. '언제' 가 아직 없는 일도 해야 하는 일이다.
+    expect(saved.overrides.startDate ?? '').toBe('');
     expect(saved.overrides.color).toBe('blue');
   });
 });
@@ -406,63 +446,120 @@ describe('달력', () => {
   });
 });
 
-describe('고정메모', () => {
-  it('없으면 추가하라고만 적는다', () => {
-    mount();
-    expect(screen.getByRole('button', { name: /고정메모 추가/ })).toBeInTheDocument();
+/*
+  고정메모는 **별도 시스템이 아니다.** 메모 글 하나를 세우면 보드 위에 한 줄로 뜬다.
+  그래서 이 자리의 시험은 '메모 탭에서 글을 쓰고 고정하는가' 다.
+*/
+describe('메모', () => {
+  const openNotes = () => fireEvent.click(screen.getByRole('tab', { name: '메모' }));
+
+  const note = (over: Partial<P['notes'][number]> = {}): P['notes'][number] => ({
+    id: 'n1', title: '제주도 준비', body: '렌터카 확인\n호텔 체크인 15:00',
+    pinned: false, authorUid: ME, createdAt: '2026-09-22T00:00:00.000Z', updatedAt: '', ...over,
   });
 
-  it('적으면 본문을 저장한다', () => {
-    const onSaveMemo = vi.fn();
-    mount({ onSaveMemo });
+  it('글을 쓰면 본문과 함께 저장한다', () => {
+    const onSaveNote = vi.fn();
+    mount({ onSaveNote });
+    openNotes();
 
-    fireEvent.click(screen.getByRole('button', { name: /고정메모 추가/ }));
-    fireEvent.change(screen.getByRole('textbox'), { target: { value: '토요일 장보기\n영화 예매' } });
+    fireEvent.click(screen.getByRole('button', { name: '글쓰기' }));
+    fireEvent.change(screen.getByPlaceholderText('제목 (선택)'), { target: { value: '여행 전에 읽어줘' } });
+    fireEvent.change(screen.getByRole('textbox', { name: '본문' }), {
+      target: { value: '일정 너무 빡빡하게 안 잡았으면 좋겠어' },
+    });
     fireEvent.click(screen.getByRole('button', { name: '저장' }));
 
-    expect(onSaveMemo).toHaveBeenCalledWith('토요일 장보기\n영화 예매');
+    const saved = onSaveNote.mock.calls[0]![0] as P['notes'][number];
+    expect(saved.title).toBe('여행 전에 읽어줘');
+    expect(saved.body).toBe('일정 너무 빡빡하게 안 잡았으면 좋겠어');
+    expect(saved.pinned).toBe(false);
+    expect(saved.authorUid).toBe(ME);
   });
 
-  it('있으면 본문을 보여 주고 편집으로 고친다', () => {
-    const onSaveMemo = vi.fn();
-    mount({ memoText: '토요일 장보기', onSaveMemo });
+  it('본문이 비면 글을 만들지 않는다', () => {
+    const onSaveNote = vi.fn();
+    mount({ onSaveNote });
+    openNotes();
+    fireEvent.click(screen.getByRole('button', { name: '글쓰기' }));
+    fireEvent.change(screen.getByPlaceholderText('제목 (선택)'), { target: { value: '제목만' } });
+    fireEvent.click(screen.getByRole('button', { name: '저장' }));
+    expect(onSaveNote).not.toHaveBeenCalled();
+  });
+
+  it('제목이 없으면 본문 첫 줄을 제목 자리에 쓴다', () => {
+    mount({ notes: [note({ title: null })] });
+    openNotes();
+    expect(screen.getByText('렌터카 확인')).toBeInTheDocument();
+  });
+
+  it('고정하면 보드 위에 한 줄로 뜬다', () => {
+    mount({ notes: [note({ pinned: true })] });
+    // 탭을 열지 않아도 보인다 — 보드 공통 자리다.
+    expect(screen.getByText('제주도 준비')).toBeInTheDocument();
+    expect(screen.getByText(/렌터카 확인 · 호텔 체크인 15:00/)).toBeInTheDocument();
+  });
+
+  it('고정 줄을 누르면 메모 탭이 열린다', () => {
+    mount({ notes: [note({ pinned: true })] });
+    fireEvent.click(screen.getByText('제주도 준비'));
+    expect(screen.getByRole('tab', { name: '메모' })).toHaveAttribute('aria-selected', 'true');
+  });
+
+  it('고정을 누르면 그 글만 올린다', () => {
+    const onPinNote = vi.fn();
+    mount({ notes: [note()], onPinNote });
+    openNotes();
+    fireEvent.click(screen.getByRole('button', { name: '위에 고정' }));
+    expect(onPinNote).toHaveBeenCalledWith(expect.objectContaining({ id: 'n1' }), true);
+  });
+
+  /*
+    옛 고정메모는 조용히 옮기지 않는다. 사용자가 적은 글이 본인도 모르게 다른 자리로
+    가면 안 되고, 두 곳에 같은 글이 남아도 어느 것이 진짜인지 알 수 없다.
+  */
+  it('옛 고정메모가 있으면 옮길 자리를 준다', () => {
+    const onAdoptLegacyMemo = vi.fn();
+    mount({ legacyMemo: '토요일 장보기', onAdoptLegacyMemo });
+    openNotes();
     expect(screen.getByText('토요일 장보기')).toBeInTheDocument();
-
-    fireEvent.click(screen.getByRole('button', { name: '편집' }));
-    fireEvent.change(screen.getByRole('textbox'), { target: { value: '영화 예매 확인' } });
-    fireEvent.click(screen.getByRole('button', { name: '저장' }));
-
-    expect(onSaveMemo).toHaveBeenCalledWith('영화 예매 확인');
-  });
-
-  it('바뀐 것이 없으면 저장하지 않는다', () => {
-    const onSaveMemo = vi.fn();
-    mount({ memoText: '토요일 장보기', onSaveMemo });
-    fireEvent.click(screen.getByRole('button', { name: '편집' }));
-    fireEvent.click(screen.getByRole('button', { name: '저장' }));
-    expect(onSaveMemo).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole('button', { name: '메모로 옮기기' }));
+    expect(onAdoptLegacyMemo).toHaveBeenCalled();
   });
 });
 
 describe('D-Day', () => {
-  const dday = (over: Partial<Parameters<typeof SharedScreen>[0]['ddays'][number]> = {}) => ({
+  const dday = (over: Partial<P['ddays'][number]> = {}) => ({
     id: 'd1', title: '우리 여행', date: '2026-10-16', order: 0,
     createdBy: ME, createdAt: '', updatedAt: '', ...over,
   });
 
-  it('오늘 기준으로 남은 날을 센다', () => {
+  /** 관리는 보드 공통 줄을 눌러서 편다 — 자리를 상시로 쓰지 않는다. */
+  const openPanel = () => fireEvent.click(screen.getByRole('button', { name: 'D-Day 관리' }));
+
+  it('대표 한 건을 보드 위에 적고 남은 날을 센다', () => {
     mount({ ddays: [dday()] });
     expect(screen.getByText('D-23')).toBeInTheDocument();
     expect(screen.getByText('10월 16일')).toBeInTheDocument();
   });
 
+  /*
+    대표는 **앞으로 다가오는 것**이다. 지난 것을 위에 띄우면 보드가 늘 어제를 가리킨다.
+  */
+  it('대표는 다가오는 것으로 고른다', () => {
+    mount({ ddays: [dday({ id: 'd2', title: '1주년', date: '2026-09-11' }), dday()] });
+    expect(screen.getByText('우리 여행')).toBeInTheDocument();
+    expect(screen.queryByText('1주년')).not.toBeInTheDocument();
+  });
+
   it('오늘이면 D-Day, 지났으면 D+N', () => {
     mount({ ddays: [dday({ date: TODAY }), dday({ id: 'd2', title: '1주년', date: '2026-09-11' })] });
     expect(screen.getByText('D-Day')).toBeInTheDocument();
+    openPanel();
     expect(screen.getByText('D+12')).toBeInTheDocument();
   });
 
-  it('많으면 두 건만 보이고 나머지는 접힌다', () => {
+  it('펼치면 두 건만 보이고 나머지는 접힌다', () => {
     mount({
       ddays: [
         dday({ id: 'd1', title: '여행' }),
@@ -470,6 +567,7 @@ describe('D-Day', () => {
         dday({ id: 'd3', title: '시험' }),
       ],
     });
+    openPanel();
     expect(screen.queryByText('시험')).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: /1개 더 보기/ }));
     expect(screen.getByText('시험')).toBeInTheDocument();
@@ -479,6 +577,7 @@ describe('D-Day', () => {
     const onSaveDday = vi.fn();
     mount({ onSaveDday });
 
+    openPanel();
     fireEvent.click(screen.getByRole('button', { name: /D-Day 추가/ }));
     fireEvent.change(screen.getByPlaceholderText('제목 (우리 여행)'), { target: { value: '우리 여행' } });
     fireEvent.click(screen.getByRole('button', { name: '저장' }));
@@ -496,6 +595,7 @@ describe('D-Day', () => {
   it('제목이 없으면 만들지 않는다', () => {
     const onSaveDday = vi.fn();
     mount({ onSaveDday });
+    openPanel();
     fireEvent.click(screen.getByRole('button', { name: /D-Day 추가/ }));
     fireEvent.click(screen.getByRole('button', { name: '저장' }));
     expect(onSaveDday).not.toHaveBeenCalled();
@@ -533,5 +633,114 @@ describe('초대받은 사람의 화면', () => {
     expect(screen.getByRole('button', { name: '추가' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: '공유 설정' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: '병원 예약 완료' })).toBeInTheDocument();
+  });
+});
+
+/*
+  함께 할 것은 일정과 **다른 자리**다. 일정은 둘이 실제로 해야 하는 것이고, 여기는
+  언젠가 같이 하고 싶은 것이다. 목록 이름을 미리 만들어 두지 않는다 — 칸에 맞는 것만
+  적게 되고, 맞지 않는 것은 아예 안 적는다.
+*/
+describe('함께 할 것', () => {
+  const openWish = () => fireEvent.click(screen.getByRole('tab', { name: '함께 할 것' }));
+
+  const list = (over: Partial<P['collections'][number]> = {}): P['collections'][number] => ({
+    id: 'c1', title: '갈 곳', order: 0, createdBy: ME, createdAt: '', updatedAt: '', ...over,
+  });
+  const wish = (over: Partial<P['collectionItems'][number]> = {}): P['collectionItems'][number] => ({
+    id: 'i1', collectionId: 'c1', title: '에버랜드', completed: false, completedAt: null,
+    order: 0, createdBy: ME, createdAt: '', updatedAt: '', ...over,
+  });
+
+  it('기본 목록을 만들어 두지 않는다', () => {
+    mount();
+    openWish();
+    expect(screen.getByText('아직 목록이 없습니다.')).toBeInTheDocument();
+    expect(screen.queryByText('게임')).not.toBeInTheDocument();
+  });
+
+  it('목록을 만들면 이름 그대로 저장한다', () => {
+    const onSaveCollection = vi.fn();
+    mount({ onSaveCollection });
+    openWish();
+
+    fireEvent.click(screen.getByRole('button', { name: /목록 만들기/ }));
+    fireEvent.change(screen.getByPlaceholderText('목록 이름 (갈 곳)'), { target: { value: '보고 싶은 것' } });
+    fireEvent.click(screen.getByRole('button', { name: '만들기' }));
+
+    expect(onSaveCollection.mock.calls[0]![0].title).toBe('보고 싶은 것');
+  });
+
+  it('진행을 n/m 으로 적는다', () => {
+    mount({
+      collections: [list()],
+      collectionItems: [wish({ id: 'a', completed: true }), wish({ id: 'b', title: '제주도' })],
+    });
+    openWish();
+    expect(screen.getByText('1/2')).toBeInTheDocument();
+  });
+
+  it('완료를 누르면 그 항목만 바뀐다', () => {
+    const onSaveCollectionItem = vi.fn();
+    mount({ collections: [list()], collectionItems: [wish()], onSaveCollectionItem });
+    openWish();
+
+    fireEvent.click(screen.getByRole('button', { name: '에버랜드 완료' }));
+    const saved = onSaveCollectionItem.mock.calls[0]![0];
+    expect(saved.completed).toBe(true);
+    expect(saved.completedAt).not.toBe(null);
+  });
+
+  /*
+    일정으로 만들어도 원래 항목은 **완료하지 않는다.** 날짜를 잡은 것과 다녀온 것은
+    다르다. 만들어지는 것은 공유 화면 전용 일정이고 날짜는 비어 있다.
+  */
+  it('일정으로 만들면 공유 일정이 늘고 원래 항목은 그대로다', () => {
+    const onSaveItem = vi.fn();
+    const onSaveCollectionItem = vi.fn();
+    mount({ collections: [list()], collectionItems: [wish()], onSaveItem, onSaveCollectionItem });
+    openWish();
+
+    fireEvent.click(screen.getByRole('button', { name: '에버랜드 일정으로 만들기' }));
+
+    const made = onSaveItem.mock.calls[0]![0] as SharedTodoItem;
+    expect(made.localOnly).toBe(true);
+    expect(made.overrides.title).toBe('에버랜드');
+    expect(made.overrides.startDate ?? '').toBe('');
+    // 원래 항목은 완료되지 않는다.
+    expect(onSaveCollectionItem).not.toHaveBeenCalled();
+  });
+
+  it('항목을 지우는 것과 목록을 지우는 것은 다른 길이다', () => {
+    const onDeleteItem = vi.fn();
+    const onDeleteCollection = vi.fn();
+    mount({
+      collections: [list()], collectionItems: [wish()],
+      onDeleteCollectionItem: onDeleteItem, onDeleteCollection,
+    });
+    openWish();
+
+    fireEvent.click(screen.getByRole('button', { name: '에버랜드 삭제' }));
+    expect(onDeleteItem).toHaveBeenCalled();
+    expect(onDeleteCollection).not.toHaveBeenCalled();
+
+    fireEvent.click(screen.getByRole('button', { name: '갈 곳 목록 삭제' }));
+    expect(onDeleteCollection).toHaveBeenCalled();
+  });
+});
+
+/*
+  탭은 정확히 셋이다. 일정과 TODO 를 나누지 않는다 — 공유 보드에서 "해야 하는 것" 은
+  하나이고, 두 자리로 나누면 어디에 적어야 하는지가 매번 애매해진다.
+*/
+describe('2차 탭', () => {
+  it('일정 · 함께 할 것 · 메모 셋뿐이다', () => {
+    mount();
+    expect(screen.getAllByRole('tab').map((t) => t.textContent)).toEqual(['일정', '함께 할 것', '메모']);
+  });
+
+  it('일정이 기본이다', () => {
+    mount();
+    expect(screen.getByRole('tab', { name: '일정' })).toHaveAttribute('aria-selected', 'true');
   });
 });

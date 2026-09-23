@@ -16,14 +16,17 @@ import {
 } from '../data/restore';
 import { LENSES, LENS_BY_ID } from '../domain/constants';
 import { endOfMonth, fmtMonthTitle, startOfMonth, toISO } from '../domain/date';
-import { convertKind, displayTitle, newEntry, withDerived } from '../domain/entry';
-import { INVITE_PARAM, isShareableTask, sharedTitle } from '../domain/shared';
+import { convertKind, displayTitle, newEntry, uid as newId, withDerived } from '../domain/entry';
+import {
+  INVITE_PARAM, isShareableTask, newNote, repinNotes, sharedTitle,
+} from '../domain/shared';
 import { formatAmount } from '../domain/money';
 import { applyFilters, collectTags, emptyFilters, hasActiveFilter } from '../domain/filters';
 import { baseIdOf, materialize } from '../domain/recurrence';
 import { isRecoveryEntry } from '../domain/recovery';
 import type {
-  Account, Entry, Filters, LensId, SharedInvite, SharedTodoItem, TaskStatus, ViewId, YearMonth,
+  Account, Entry, Filters, LensId, SharedInvite, SharedNote, SharedTodoItem,
+  TaskStatus, ViewId, YearMonth,
 } from '../domain/types';
 import { Auth } from '../ui/Auth';
 import { BrandFooter } from '../ui/BrandFooter';
@@ -386,6 +389,59 @@ function Workspace({ uid, user, onSignOut }: WorkspaceProps) {
     shared.removeEntry(entryId);
     dialog.toast('공유에서 내렸습니다.');
   }, [uid, isAnon, promptLogin, dialog, commit, shared]);
+
+  /**
+   * 고정을 옮긴다. **살아 있는 고정은 하나다.**
+   *
+   * 앞의 고정이 함께 풀리므로 쓰기가 둘일 수 있다. `repinNotes` 가 바뀐 글만 돌려주고,
+   * 여기서는 그만큼만 저장한다 — 안 바뀐 글까지 다시 쓰면 상대의 편집을 덮는다.
+   */
+  const pinNote = useCallback((n: SharedNote, pinned: boolean) => {
+    for (const next of repinNotes(shared.notes, n.id, pinned)) shared.saveNote(next);
+  }, [shared]);
+
+  /**
+   * 예전 고정메모를 메모 글로 옮긴다.
+   *
+   * 조용히 옮기지 않는다 — 사용자가 적은 글이 본인도 모르게 다른 자리로 가면 안 된다.
+   * 누른 뒤에야 글이 만들어지고, 그때 옛 자리를 비운다.
+   */
+  const adoptLegacyMemo = useCallback(() => {
+    if (!uid) return;
+    const text = shared.memoText.trim();
+    if (!text) return;
+    const note = { ...newNote(newId(), uid, '', text), pinned: true };
+    shared.saveNote(note);
+    // 옛 자리를 비운다. 두 곳에 같은 글이 남으면 어느 것이 진짜인지 알 수 없다.
+    shared.saveMemo('');
+    dialog.toast('메모로 옮겼습니다.');
+  }, [uid, shared, dialog]);
+
+  /** 목록을 지우면 그 안의 항목도 함께 사라진다. 그 사실을 먼저 말한다. */
+  const deleteCollection = useCallback(async (c: { id: string; title: string }) => {
+    const n = shared.collectionItems.filter((i) => i.collectionId === c.id).length;
+    const ok = await dialog.confirm({
+      title: `'${c.title || '이름 없음'}' 목록을 지울까요?`,
+      body: n > 0
+        ? `안에 있는 ${n.toLocaleString('ko-KR')}개 항목도 함께 사라집니다. 되돌릴 수 없습니다.`
+        : '되돌릴 수 없습니다.',
+      confirmLabel: '삭제',
+      danger: true,
+    });
+    if (!ok) return;
+    const target = shared.collections.find((x) => x.id === c.id);
+    if (target) shared.removeCollection(target);
+  }, [shared, dialog]);
+
+  const deleteNote = useCallback(async (n: SharedNote) => {
+    const ok = await dialog.confirm({
+      title: '이 메모를 지울까요?',
+      body: '되돌릴 수 없습니다. 상대 화면에서도 사라집니다.',
+      confirmLabel: '삭제',
+      danger: true,
+    });
+    if (ok) shared.removeNote(n);
+  }, [shared, dialog]);
 
   /** 잔고 저장. 전체 렌즈(오늘 카드)와 가계부 렌즈(며칠 버티나 카드)가 같이 쓴다. */
   const saveBalance = useCallback((a: Account) => {
@@ -971,7 +1027,6 @@ function Workspace({ uid, user, onSignOut }: WorkspaceProps) {
             myUid={uid}
             items={shared.items}
             ddays={shared.ddays}
-            memoText={shared.memoText}
             contentReady={shared.contentReady}
             todayISO={today}
             // 커서는 개인 화면과 같은 값이다. 돌아가도 보고 있던 달에 그대로 있다.
@@ -987,9 +1042,20 @@ function Workspace({ uid, user, onSignOut }: WorkspaceProps) {
             onSaveItem={shared.saveItem}
             onUnshareItem={(item) => { void unshareItem(item); }}
             onDeleteItem={shared.removeItem}
-            onSaveMemo={shared.saveMemo}
             onSaveDday={shared.saveDday}
             onDeleteDday={shared.removeDday}
+            collections={shared.collections}
+            collectionItems={shared.collectionItems}
+            notes={shared.notes}
+            legacyMemo={shared.memoText}
+            onSaveCollection={shared.saveCollection}
+            onDeleteCollection={(c) => { void deleteCollection(c); }}
+            onSaveCollectionItem={shared.saveCollectionItem}
+            onDeleteCollectionItem={shared.removeCollectionItem}
+            onSaveNote={shared.saveNote}
+            onDeleteNote={(n) => { void deleteNote(n); }}
+            onPinNote={pinNote}
+            onAdoptLegacyMemo={adoptLegacyMemo}
           />
         </main>
       ) : (

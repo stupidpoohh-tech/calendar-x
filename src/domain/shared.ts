@@ -36,7 +36,8 @@
 import { DEFAULT_COLOR } from './constants';
 import { normalizeDate } from './date';
 import type {
-  DateISO, Entry, SharedOverridableField, SharedOverrides, SharedSource, SharedTodoItem,
+  DateISO, Entry, SharedCollection, SharedCollectionItem, SharedNote,
+  SharedOverridableField, SharedOverrides, SharedSource, SharedTodoItem,
 } from './types';
 
 export const SHARED_OVERRIDABLE_FIELDS: readonly SharedOverridableField[] = [
@@ -348,4 +349,151 @@ export const INVITE_PARAM = 'join';
 
 export function inviteUrl(origin: string, pathname: string, code: string): string {
   return `${origin}${pathname}?${INVITE_PARAM}=${encodeURIComponent(code)}`;
+}
+
+// ---------- 일정 목록 ----------
+
+/**
+ * 일정 목록을 **해야 할 것 / 완료** 두 덩이로 나눈다.
+ *
+ * 상태를 더 잘게 쪼개지 않는다. 둘이 함께 보는 목록에서 '진행중' 은 각자의 머릿속에만
+ * 있는 값이라 누가 언제 옮겨 두는지가 불분명해진다 (개인 TODO 의 상태는 그대로 온다 —
+ * 여기서 두 덩이로 묶어 보여 줄 뿐이다).
+ *
+ * 날짜가 없는 항목은 뒤로 보내되 **빼지 않는다** (`sharedSortKey`).
+ */
+export function scheduleGroups(items: readonly SharedTodoItem[]): {
+  todo: SharedTodoItem[];
+  done: SharedTodoItem[];
+} {
+  const sorted = [...items].sort((a, b) => sharedSortKey(a).localeCompare(sharedSortKey(b)));
+  const todo: SharedTodoItem[] = [];
+  const done: SharedTodoItem[] = [];
+  for (const i of sorted) (sharedView(i).status === 'done' ? done : todo).push(i);
+  return { todo, done };
+}
+
+// ---------- 함께 할 것 ----------
+
+export function newCollection(
+  id: string, createdBy: string, title: string, order: number, now = new Date().toISOString(),
+): SharedCollection {
+  return { id, title: title.trim(), order, createdBy, createdAt: now, updatedAt: now };
+}
+
+export function newCollectionItem(
+  id: string, collectionId: string, createdBy: string, title: string, order: number,
+  now = new Date().toISOString(),
+): SharedCollectionItem {
+  return {
+    id, collectionId, title: title.trim(), completed: false, completedAt: null,
+    order, createdBy, createdAt: now, updatedAt: now,
+  };
+}
+
+/** 완료를 켜고 끈다. 되돌리면 완료 시각도 지운다 — 남겨 두면 거짓이 된다. */
+export function toggleCollectionItem(
+  item: SharedCollectionItem, now = new Date().toISOString(),
+): SharedCollectionItem {
+  const completed = !item.completed;
+  return { ...item, completed, completedAt: completed ? now : null, updatedAt: now };
+}
+
+/** 목록 하나의 진행. `1/3` 으로 적는다. */
+export function collectionProgress(
+  items: readonly SharedCollectionItem[], collectionId: string,
+): { done: number; total: number } {
+  let done = 0;
+  let total = 0;
+  for (const i of items) {
+    if (i.collectionId !== collectionId) continue;
+    total += 1;
+    if (i.completed) done += 1;
+  }
+  return { done, total };
+}
+
+/** 한 목록의 항목. 완료는 뒤로 보낸다 — 남은 것이 위에 있어야 목록으로 쓸 수 있다. */
+export function itemsOfCollection(
+  items: readonly SharedCollectionItem[], collectionId: string,
+): SharedCollectionItem[] {
+  return items
+    .filter((i) => i.collectionId === collectionId)
+    .sort((a, b) =>
+      Number(a.completed) - Number(b.completed)
+      || a.order - b.order
+      || a.createdAt.localeCompare(b.createdAt));
+}
+
+/**
+ * 함께 할 것 → 공유 일정.
+ *
+ * 날짜 없이 만든다. "언젠가" 를 "언제" 로 바꾸는 것은 사람이 정하는 일이고, 오늘로
+ * 메우면 오늘 해야 하는 일처럼 보인다.
+ *
+ * **원래 항목은 완료하지 않는다.** 일정으로 옮긴 것은 아직 한 것이 아니다 — 실제로
+ * 다녀오거나 해 본 뒤에 완료한다.
+ */
+export function scheduleFromCollectionItem(
+  id: string, item: SharedCollectionItem, createdBy: string, now = new Date().toISOString(),
+): SharedTodoItem {
+  return newLocalItem(id, createdBy, { title: item.title.trim(), status: 'planned' }, now);
+}
+
+// ---------- 메모 ----------
+
+export function newNote(
+  id: string, authorUid: string, title: string, body: string, now = new Date().toISOString(),
+): SharedNote {
+  const t = title.trim();
+  return { id, title: t || null, body, pinned: false, authorUid, createdAt: now, updatedAt: now };
+}
+
+/** 화면에 적을 제목. 없으면 본문 첫 줄을 쓴다 — 제목 없는 카드를 만들지 않는다. */
+export function noteTitle(note: SharedNote): string {
+  const t = (note.title ?? '').trim();
+  if (t) return t;
+  const firstLine = note.body.split('\n').find((l) => l.trim()) ?? '';
+  return firstLine.trim().slice(0, 60) || '(빈 메모)';
+}
+
+/** 보드 위 한 줄에 적을 요약. 줄바꿈은 가운뎃점으로 바꾼다. */
+export function noteSummary(note: SharedNote, max = 60): string {
+  const flat = note.body.split('\n').map((l) => l.trim()).filter(Boolean).join(' · ');
+  return flat.length > max ? `${flat.slice(0, max)}…` : flat;
+}
+
+/** 고정된 글. 여럿이면 가장 최근에 고친 것 하나만 쓴다. */
+export function pinnedNote(notes: readonly SharedNote[]): SharedNote | null {
+  const pinned = notes.filter((n) => n.pinned);
+  if (pinned.length === 0) return null;
+  return [...pinned].sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))[0] ?? null;
+}
+
+/** 고정글 먼저, 그 다음은 최신 순. */
+export function sortNotes(notes: readonly SharedNote[]): SharedNote[] {
+  return [...notes].sort((a, b) =>
+    Number(b.pinned) - Number(a.pinned) || b.createdAt.localeCompare(a.createdAt));
+}
+
+/**
+ * 고정을 옮긴다. **살아 있는 고정은 하나다.**
+ *
+ * 돌려주는 것은 "바뀐 글들" 이다 — 새로 고정할 글과, 고정이 풀리는 글들. 부르는 쪽이
+ * 그만큼만 저장한다. 여럿을 고정할 수 있게 하면 보드 위 한 줄에 무엇을 적을지가
+ * 매번 애매해진다.
+ */
+export function repinNotes(
+  notes: readonly SharedNote[], targetId: string, pinned: boolean,
+  now = new Date().toISOString(),
+): SharedNote[] {
+  const out: SharedNote[] = [];
+  for (const n of notes) {
+    if (n.id === targetId) {
+      if (n.pinned !== pinned) out.push({ ...n, pinned, updatedAt: now });
+    } else if (pinned && n.pinned) {
+      out.push({ ...n, pinned: false, updatedAt: now });
+    }
+  }
+  return out;
 }

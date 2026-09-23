@@ -28,14 +28,15 @@ import {
 } from 'firebase/firestore';
 import type {
   Account, Budget, Debt, Entry, Pin, RecoveryRule, Reserve,
-  SharedBoard, SharedDday, SharedInvite, SharedPin, SharedSource, SharedTodoItem,
+  SharedBoard, SharedCollection, SharedCollectionItem, SharedDday, SharedInvite,
+  SharedNote, SharedPin, SharedSource, SharedTodoItem,
 } from '../domain/types';
 import {
   accountToDoc, budgetToDoc, debtToDoc, entryToDoc, pinToDoc, recoveryRuleToDoc, reserveToDoc,
 } from './converters';
 import {
-  sharedBoardToDoc, sharedDdayToDoc, sharedInviteToDoc, sharedItemToDoc, sharedPinToDoc,
-  sharedSourcePatch,
+  sharedBoardToDoc, sharedCollectionItemToDoc, sharedCollectionToDoc, sharedDdayToDoc,
+  sharedInviteToDoc, sharedItemToDoc, sharedNoteToDoc, sharedPinToDoc, sharedSourcePatch,
 } from './sharedConverters';
 import { boardDoc, boardSubDoc, COL, docIn, inviteDoc, SHARED, userDoc } from './paths';
 
@@ -52,7 +53,10 @@ export type PendingKind =
   | 'sharedBoard' | 'sharedInvite' | 'sharedInviteDelete'
   | 'sharedSource' | 'sharedItem' | 'sharedItemDelete'
   | 'sharedPin' | 'sharedPinDelete'
-  | 'sharedDday' | 'sharedDdayDelete';
+  | 'sharedDday' | 'sharedDdayDelete'
+  | 'sharedCollection' | 'sharedCollectionDelete'
+  | 'sharedCollectionItem' | 'sharedCollectionItemDelete'
+  | 'sharedNote' | 'sharedNoteDelete';
 
 const KINDS: readonly PendingKind[] = [
   'entry', 'entryDelete', 'entryPrivate', 'account', 'debt', 'debtDelete',
@@ -61,6 +65,9 @@ const KINDS: readonly PendingKind[] = [
   'sharedBoard', 'sharedInvite', 'sharedInviteDelete',
   'sharedSource', 'sharedItem', 'sharedItemDelete',
   'sharedPin', 'sharedPinDelete', 'sharedDday', 'sharedDdayDelete',
+  'sharedCollection', 'sharedCollectionDelete',
+  'sharedCollectionItem', 'sharedCollectionItemDelete',
+  'sharedNote', 'sharedNoteDelete',
 ];
 
 /** 회복은 항목과 규칙을 한 배치로 쓴다. 그 한 벌이 payload 다. */
@@ -95,6 +102,10 @@ export type PendingPayload =
   | { boardId: string; item: SharedTodoItem }
   | { boardId: string; pin: SharedPin }
   | { boardId: string; dday: SharedDday }
+  | { boardId: string; collection: SharedCollection }
+  | { boardId: string; item: SharedCollectionItem }
+  | { boardId: string; note: SharedNote }
+  | { boardId: string; id: string; itemIds: string[] }
   | { boardId: string; id: string };
 
 /** 보낼 값 그 자체. 화면에서 만들어 그대로 넘긴다. */
@@ -229,6 +240,45 @@ export function sendPending(db: Firestore, uid: string, op: CommitInput): Promis
       const p = op.payload as { boardId: string; id: string };
       return deleteDoc(boardSubDoc(db, p.boardId, SHARED.ddays, p.id));
     }
+    case 'sharedCollection': {
+      const p = op.payload as { boardId: string; collection: SharedCollection };
+      return setDoc(
+        boardSubDoc(db, p.boardId, SHARED.collections, p.collection.id),
+        sharedCollectionToDoc(p.collection),
+      );
+    }
+    /*
+      목록과 그 안의 항목은 **한 배치**다. 목록만 사라지고 항목이 남으면 어디에도 안
+      보이는 문서가 되고, 같은 이름의 목록을 다시 만들면 지운 항목이 되살아난다.
+    */
+    case 'sharedCollectionDelete': {
+      const p = op.payload as { boardId: string; id: string; itemIds: string[] };
+      const batch = writeBatch(db);
+      batch.delete(boardSubDoc(db, p.boardId, SHARED.collections, p.id));
+      for (const id of p.itemIds.slice(0, 400)) {
+        batch.delete(boardSubDoc(db, p.boardId, SHARED.collectionItems, id));
+      }
+      return batch.commit();
+    }
+    case 'sharedCollectionItem': {
+      const p = op.payload as { boardId: string; item: SharedCollectionItem };
+      return setDoc(
+        boardSubDoc(db, p.boardId, SHARED.collectionItems, p.item.id),
+        sharedCollectionItemToDoc(p.item),
+      );
+    }
+    case 'sharedCollectionItemDelete': {
+      const p = op.payload as { boardId: string; id: string };
+      return deleteDoc(boardSubDoc(db, p.boardId, SHARED.collectionItems, p.id));
+    }
+    case 'sharedNote': {
+      const p = op.payload as { boardId: string; note: SharedNote };
+      return setDoc(boardSubDoc(db, p.boardId, SHARED.notes, p.note.id), sharedNoteToDoc(p.note));
+    }
+    case 'sharedNoteDelete': {
+      const p = op.payload as { boardId: string; id: string };
+      return deleteDoc(boardSubDoc(db, p.boardId, SHARED.notes, p.id));
+    }
   }
 }
 
@@ -349,6 +399,30 @@ function targetOf(op: PendingOp, uid: string): { path: string[]; base: string } 
       const p = op.payload as { boardId: string; id: string };
       return board(p.boardId, SHARED.ddays, p.id, op.at);
     }
+    case 'sharedCollection': {
+      const p = op.payload as { boardId: string; collection: SharedCollection };
+      return board(p.boardId, SHARED.collections, p.collection.id, p.collection.updatedAt);
+    }
+    case 'sharedCollectionItem': {
+      const p = op.payload as { boardId: string; item: SharedCollectionItem };
+      return board(p.boardId, SHARED.collectionItems, p.item.id, p.item.updatedAt);
+    }
+    case 'sharedNote': {
+      const p = op.payload as { boardId: string; note: SharedNote };
+      return board(p.boardId, SHARED.notes, p.note.id, p.note.updatedAt);
+    }
+    case 'sharedCollectionItemDelete': {
+      const p = op.payload as { boardId: string; id: string };
+      return board(p.boardId, SHARED.collectionItems, p.id, op.at);
+    }
+    case 'sharedNoteDelete': {
+      const p = op.payload as { boardId: string; id: string };
+      return board(p.boardId, SHARED.notes, p.id, op.at);
+    }
+    /*
+      목록 삭제는 여러 문서를 지우는 한 배치라 견줄 문서가 하나로 정해지지 않는다.
+      `unknown` 으로 두고 다시 보내기 전에 사람에게 묻는다.
+    */
     default: return null;
   }
 }

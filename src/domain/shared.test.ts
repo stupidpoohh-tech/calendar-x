@@ -9,12 +9,14 @@
 import { describe, expect, it } from 'vitest';
 import { newEntry, withDerived } from './entry';
 import {
-  applyOverrides, canRevert, isHiddenFor, isOverridden, isPastTask, isShareableTask,
-  newLocalItem, overriddenFields, ownsMirror, revertToSource, sameSource, setHiddenFor,
-  sharedSortKey, sharedTitle, sharedView, shortName, sourceOf, withSource, partnerName,
-  newInviteCode, inviteUrl,
+  applyOverrides, canRevert, collectionProgress, isHiddenFor, isOverridden, isPastTask,
+  isShareableTask, itemsOfCollection, newCollection, newCollectionItem, newLocalItem, newNote,
+  noteSummary, noteTitle, overriddenFields, ownsMirror, pinnedNote, repinNotes, revertToSource,
+  sameSource, scheduleFromCollectionItem, scheduleGroups, setHiddenFor, sharedSortKey,
+  sharedTitle, sharedView, shortName, sortNotes, sourceOf, toggleCollectionItem, withSource,
+  partnerName, newInviteCode, inviteUrl,
 } from './shared';
-import type { Entry, SharedTodoItem } from './types';
+import type { Entry, SharedCollectionItem, SharedNote, SharedTodoItem } from './types';
 
 const OWNER = 'owner-uid';
 const TODAY = '2026-09-23';
@@ -412,5 +414,152 @@ describe('초대 코드', () => {
 
   it('링크는 앱 주소에 코드를 붙인다', () => {
     expect(inviteUrl('https://example.com', '/', 'abc')).toBe('https://example.com/?join=abc');
+  });
+});
+
+/*
+  일정은 **해야 할 것 / 완료** 두 덩이다. 상태를 더 잘게 쪼개지 않는다 — 둘이 함께 보는
+  목록에서 '진행중' 은 각자의 머릿속에만 있는 값이라 누가 언제 옮기는지가 불분명해진다.
+*/
+describe('일정 묶기', () => {
+  const local = (id: string, title: string, over: Record<string, unknown> = {}) =>
+    newLocalItem(id, OWNER, { title, ...over });
+
+  it('완료를 뒤로 보낸다', () => {
+    const { todo, done } = scheduleGroups([
+      local('a', '장보기', { status: 'done' }),
+      local('b', '영화 예매'),
+    ]);
+    expect(todo.map((i) => i.id)).toEqual(['b']);
+    expect(done.map((i) => i.id)).toEqual(['a']);
+  });
+
+  it('날짜가 있는 것이 먼저고, 없는 것은 뒤에 남는다', () => {
+    const { todo } = scheduleGroups([
+      local('none', '언젠가'),
+      local('late', '다음 달', { startDate: '2026-10-05' }),
+      local('soon', '내일', { startDate: '2026-09-24' }),
+    ]);
+    expect(todo.map((i) => i.id)).toEqual(['soon', 'late', 'none']);
+  });
+
+  it('진행중은 해야 할 것에 남는다', () => {
+    const { todo } = scheduleGroups([local('a', '쓰는 중', { status: 'in-progress' })]);
+    expect(todo).toHaveLength(1);
+  });
+});
+
+/*
+  함께 할 것은 **언젠가** 같이 하고 싶은 것이다. 날짜도 마감도 우선순위도 없다.
+*/
+describe('함께 할 것', () => {
+  const list = newCollection('c1', OWNER, '갈 곳', 0, '2026-09-01T00:00:00.000Z');
+  const item = (id: string, over: Partial<SharedCollectionItem> = {}): SharedCollectionItem => ({
+    ...newCollectionItem(id, 'c1', OWNER, id, 0, '2026-09-01T00:00:00.000Z'),
+    ...over,
+  });
+
+  it('목록 이름은 앞뒤 공백을 지운다', () => {
+    expect(newCollection('c2', OWNER, '  게임  ', 0).title).toBe('게임');
+  });
+
+  it('완료를 켜면 시각이 남고, 되돌리면 지워진다', () => {
+    const on = toggleCollectionItem(item('에버랜드'), '2026-09-23T10:00:00.000Z');
+    expect(on.completed).toBe(true);
+    expect(on.completedAt).toBe('2026-09-23T10:00:00.000Z');
+
+    const off = toggleCollectionItem(on, '2026-09-23T11:00:00.000Z');
+    expect(off.completed).toBe(false);
+    // 완료가 아닌데 완료 시각이 남아 있으면 거짓이다.
+    expect(off.completedAt).toBe(null);
+  });
+
+  it('진행을 n/m 으로 센다 — 다른 목록은 세지 않는다', () => {
+    const items = [
+      item('a', { completed: true }),
+      item('b'),
+      { ...item('c'), collectionId: 'other' },
+    ];
+    expect(collectionProgress(items, list.id)).toEqual({ done: 1, total: 2 });
+  });
+
+  it('완료한 것은 목록 아래로 내려간다', () => {
+    const items = [item('a', { completed: true, order: 0 }), item('b', { order: 1 })];
+    expect(itemsOfCollection(items, 'c1').map((i) => i.id)).toEqual(['b', 'a']);
+  });
+
+  /*
+    일정으로 만들어도 **원래 항목은 완료하지 않는다.** 날짜를 잡은 것과 다녀온 것은
+    다르다. 날짜도 비워 둔다 — 오늘로 메우면 오늘 해야 하는 일처럼 보인다.
+  */
+  it('일정으로 만들면 날짜 없는 공유 전용 항목이 된다', () => {
+    const made = scheduleFromCollectionItem('s1', item('에버랜드'), MEMBER);
+    expect(made.localOnly).toBe(true);
+    expect(made.sourceEntryId).toBe(null);
+    expect(made.createdBy).toBe(MEMBER);
+    expect(sharedView(made).title).toBe('에버랜드');
+    expect(sharedView(made).startDate).toBe('');
+    expect(sharedView(made).status).toBe('planned');
+  });
+});
+
+/*
+  메모는 게시판처럼 쌓인다. **고정메모는 별도 시스템이 아니다** — 글 하나를 세울 뿐이다.
+*/
+describe('메모', () => {
+  const note = (id: string, over: Partial<SharedNote> = {}): SharedNote => ({
+    ...newNote(id, OWNER, '', `${id} 본문`, `2026-09-0${id.length}T00:00:00.000Z`),
+    ...over,
+  });
+
+  it('제목이 없으면 본문 첫 줄을 제목 자리에 쓴다', () => {
+    const n = newNote('n1', OWNER, '   ', '\n렌터카 확인\n호텔 체크인');
+    expect(n.title).toBe(null);
+    expect(noteTitle(n)).toBe('렌터카 확인');
+  });
+
+  it('요약은 줄바꿈을 가운뎃점으로 바꾼다', () => {
+    const n = newNote('n1', OWNER, '준비물', '충전기\n보조배터리\n우산');
+    expect(noteSummary(n)).toBe('충전기 · 보조배터리 · 우산');
+  });
+
+  it('고정글이 먼저고 그 다음은 최신 순이다', () => {
+    const notes = [
+      { ...note('a'), createdAt: '2026-09-01T00:00:00.000Z' },
+      { ...note('b'), createdAt: '2026-09-05T00:00:00.000Z' },
+      { ...note('c'), createdAt: '2026-09-03T00:00:00.000Z', pinned: true },
+    ];
+    expect(sortNotes(notes).map((n) => n.id)).toEqual(['c', 'b', 'a']);
+  });
+
+  it('고정이 없으면 null 이다', () => {
+    expect(pinnedNote([note('a'), note('b')])).toBe(null);
+  });
+
+  /*
+    살아 있는 고정은 하나다. 여럿이면 보드 위 한 줄에 무엇을 적을지가 매번 애매해진다.
+  */
+  it('새로 고정하면 앞의 고정이 풀리고, 바뀐 글만 돌려준다', () => {
+    const notes = [
+      { ...note('a'), pinned: true },
+      note('b'),
+      note('c'),
+    ];
+    const changed = repinNotes(notes, 'b', true, 'NOW');
+    expect(changed.map((n) => [n.id, n.pinned])).toEqual([['a', false], ['b', true]]);
+    // 손대지 않은 글은 돌려주지 않는다 — 다시 쓰면 상대의 편집을 덮는다.
+    expect(changed.some((n) => n.id === 'c')).toBe(false);
+  });
+
+  it('이미 그 상태면 아무것도 바꾸지 않는다', () => {
+    const notes = [{ ...note('a'), pinned: true }];
+    expect(repinNotes(notes, 'a', true)).toEqual([]);
+  });
+
+  it('고정을 풀면 그 글 하나만 바뀐다', () => {
+    const notes = [{ ...note('a'), pinned: true }, note('b')];
+    const changed = repinNotes(notes, 'a', false, 'NOW');
+    expect(changed.map((n) => n.id)).toEqual(['a']);
+    expect(changed[0]!.pinned).toBe(false);
   });
 });

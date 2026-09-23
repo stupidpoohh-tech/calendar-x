@@ -28,15 +28,17 @@ import { describeFirestoreError } from '../data/errors';
 import { getFirebase } from '../data/firebase';
 import {
   acceptInvite, applyMirrorSync, deleteBoardDeep, fetchBoardInvites, fetchMyTasks, isEmptyPlan,
-  leaveBoard, planMirrorSync, readInvite, subscribeMyBoards,
-  subscribeSharedDdays, subscribeSharedItems, subscribeSharedPins, SHARED_MEMO_ID,
+  leaveBoard, planMirrorSync, readInvite, subscribeMyBoards, subscribeSharedCollectionItems,
+  subscribeSharedCollections, subscribeSharedDdays, subscribeSharedItems, subscribeSharedNotes,
+  subscribeSharedPins, SHARED_MEMO_ID,
 } from '../data/sharedRepo';
 import { uid as newId } from '../domain/entry';
 import {
   isShareableTask, newInviteCode, partnerName, sharedTitle, sourceOf,
 } from '../domain/shared';
 import type {
-  Entry, SharedBoard, SharedDday, SharedInvite, SharedPin, SharedTodoItem,
+  Entry, SharedBoard, SharedCollection, SharedCollectionItem, SharedDday, SharedInvite,
+  SharedNote, SharedPin, SharedTodoItem,
 } from '../domain/types';
 import type { Commit } from './useWriteQueue';
 
@@ -55,9 +57,18 @@ export interface SharedApi {
 
   items: SharedTodoItem[];
   pins: SharedPin[];
-  /** 고정메모 본문. 보드당 한 건이라 문자열 하나로 내놓는다. */
+  /**
+   * 옛 고정메모 본문.
+   *
+   * 고정메모는 이제 **메모 글 하나를 세우는 것**이다 (`SharedNote.pinned`). 이 값은
+   * 그 구조 이전에 적어 둔 글이 아직 남아 있을 때만 차 있고, 화면이 "메모로 옮기기"
+   * 한 줄을 띄우는 데만 쓴다. 옮기거나 지우면 다시는 나오지 않는다.
+   */
   memoText: string;
   ddays: SharedDday[];
+  collections: SharedCollection[];
+  collectionItems: SharedCollectionItem[];
+  notes: SharedNote[];
   /** 보드 내용 구독이 한 번이라도 도착했는가. */
   contentReady: boolean;
   error: string | null;
@@ -73,6 +84,15 @@ export interface SharedApi {
   saveMemo: (text: string) => void;
   saveDday: (d: SharedDday) => void;
   removeDday: (d: SharedDday) => void;
+
+  saveCollection: (c: SharedCollection) => void;
+  /** 목록과 그 안의 항목을 한 배치로 지운다. */
+  removeCollection: (c: SharedCollection) => void;
+  saveCollectionItem: (i: SharedCollectionItem) => void;
+  removeCollectionItem: (i: SharedCollectionItem) => void;
+
+  saveNote: (n: SharedNote) => void;
+  removeNote: (n: SharedNote) => void;
 
   createBoard: (name: string) => SharedInvite | null;
   /** 지금 살아 있는 초대 링크. 코드는 문서 id 라 목록 조회로만 되찾을 수 있다. */
@@ -106,6 +126,9 @@ interface Options {
 const NO_ITEMS: SharedTodoItem[] = [];
 const NO_PINS: SharedPin[] = [];
 const NO_DDAYS: SharedDday[] = [];
+const NO_COLLECTIONS: SharedCollection[] = [];
+const NO_COLLECTION_ITEMS: SharedCollectionItem[] = [];
+const NO_NOTES: SharedNote[] = [];
 
 export function useSharedBoard({ uid, todayISO, accountName, open, onError, commit }: Options): SharedApi {
   const { db } = getFirebase();
@@ -115,6 +138,9 @@ export function useSharedBoard({ uid, todayISO, accountName, open, onError, comm
   const [items, setItems] = useState<SharedTodoItem[]>(NO_ITEMS);
   const [pins, setPins] = useState<SharedPin[]>(NO_PINS);
   const [ddays, setDdays] = useState<SharedDday[]>(NO_DDAYS);
+  const [collections, setCollections] = useState<SharedCollection[]>(NO_COLLECTIONS);
+  const [collectionItems, setCollectionItems] = useState<SharedCollectionItem[]>(NO_COLLECTION_ITEMS);
+  const [notes, setNotes] = useState<SharedNote[]>(NO_NOTES);
   const [contentReady, setContentReady] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -124,6 +150,7 @@ export function useSharedBoard({ uid, todayISO, accountName, open, onError, comm
     setDataUid(uid);
     setBoards([]); setReady(false);
     setItems(NO_ITEMS); setPins(NO_PINS); setDdays(NO_DDAYS);
+    setCollections(NO_COLLECTIONS); setCollectionItems(NO_COLLECTION_ITEMS); setNotes(NO_NOTES);
     setContentReady(false); setError(null);
   }
 
@@ -159,15 +186,26 @@ export function useSharedBoard({ uid, todayISO, accountName, open, onError, comm
   // 2. 보드 내용 — 화면이 열려 있을 때만.
   useEffect(() => {
     if (!uid || !boardId || !open) {
-      setItems(NO_ITEMS); setPins(NO_PINS); setDdays(NO_DDAYS); setContentReady(false);
+      setItems(NO_ITEMS); setPins(NO_PINS); setDdays(NO_DDAYS);
+      setCollections(NO_COLLECTIONS); setCollectionItems(NO_COLLECTION_ITEMS); setNotes(NO_NOTES);
+      setContentReady(false);
       return;
     }
+    /*
+      여섯 갈래가 모두 한 번씩 도착해야 "내용을 받았다" 로 본다. 하나라도 덜 왔는데
+      화면을 열면, 아직 안 온 탭이 "비어 있다" 로 보이고 맞추기까지 그 빈 목록으로
+      돈다 — 맞추기는 "원본이 없는 항목" 을 지우므로 그 판정이 틀리면 지운다.
+    */
+    const FEEDS = 6;
     let got = 0;
-    const arrived = () => { got += 1; if (got >= 3) setContentReady(true); };
+    const arrived = () => { got += 1; if (got >= FEEDS) setContentReady(true); };
     const unsubs = [
       subscribeSharedItems(db, boardId, own(uid, (v) => { setItems(v); arrived(); }), own(uid, sink)),
       subscribeSharedPins(db, boardId, own(uid, (v) => { setPins(v); arrived(); }), own(uid, sink)),
       subscribeSharedDdays(db, boardId, own(uid, (v) => { setDdays(v); arrived(); }), own(uid, sink)),
+      subscribeSharedCollections(db, boardId, own(uid, (v) => { setCollections(v); arrived(); }), own(uid, sink)),
+      subscribeSharedCollectionItems(db, boardId, own(uid, (v) => { setCollectionItems(v); arrived(); }), own(uid, sink)),
+      subscribeSharedNotes(db, boardId, own(uid, (v) => { setNotes(v); arrived(); }), own(uid, sink)),
     ];
     return () => unsubs.forEach((u) => u());
   }, [db, uid, boardId, open, own, sink]);
@@ -251,6 +289,9 @@ export function useSharedBoard({ uid, todayISO, accountName, open, onError, comm
       pins: blocked ? NO_PINS : pins,
       memoText: blocked ? '' : (memo?.text ?? ''),
       ddays: blocked ? NO_DDAYS : ddays,
+      collections: blocked ? NO_COLLECTIONS : collections,
+      collectionItems: blocked ? NO_COLLECTION_ITEMS : collectionItems,
+      notes: blocked ? NO_NOTES : notes,
       contentReady: blocked ? false : contentReady,
       error,
 
@@ -328,6 +369,66 @@ export function useSharedBoard({ uid, todayISO, accountName, open, onError, comm
         commit({
           kind: 'sharedDdayDelete', label: '같이 보기 D-Day 삭제',
           summary: d.title.trim() || d.date, payload: { boardId: activeBoard.id, id: d.id },
+        });
+      },
+
+      // ---------- 함께 할 것 ----------
+
+      saveCollection: (c) => {
+        if (!activeBoard) return;
+        commit({
+          kind: 'sharedCollection', label: '함께 할 것 목록',
+          summary: c.title || '(이름 없음)', payload: { boardId: activeBoard.id, collection: c },
+        });
+      },
+
+      /** 목록과 그 안의 항목을 한 배치로 지운다 — 목록만 지우면 항목이 떠돈다. */
+      removeCollection: (c) => {
+        if (!activeBoard) return;
+        commit({
+          kind: 'sharedCollectionDelete', label: '함께 할 것 목록 삭제',
+          summary: c.title || '(이름 없음)',
+          payload: {
+            boardId: activeBoard.id,
+            id: c.id,
+            itemIds: collectionItems.filter((i) => i.collectionId === c.id).map((i) => i.id),
+          },
+        });
+      },
+
+      saveCollectionItem: (i) => {
+        if (!activeBoard) return;
+        commit({
+          kind: 'sharedCollectionItem', label: '함께 할 것',
+          summary: i.title || '(제목 없음)', payload: { boardId: activeBoard.id, item: i },
+        });
+      },
+
+      removeCollectionItem: (i) => {
+        if (!activeBoard) return;
+        commit({
+          kind: 'sharedCollectionItemDelete', label: '함께 할 것 삭제',
+          summary: i.title || '(제목 없음)', payload: { boardId: activeBoard.id, id: i.id },
+        });
+      },
+
+      // ---------- 메모 ----------
+
+      saveNote: (n) => {
+        if (!activeBoard) return;
+        commit({
+          kind: 'sharedNote', label: '공유 메모',
+          summary: (n.title ?? n.body).slice(0, 40) || '(빈 메모)',
+          payload: { boardId: activeBoard.id, note: n },
+        });
+      },
+
+      removeNote: (n) => {
+        if (!activeBoard) return;
+        commit({
+          kind: 'sharedNoteDelete', label: '공유 메모 삭제',
+          summary: (n.title ?? n.body).slice(0, 40) || '(빈 메모)',
+          payload: { boardId: activeBoard.id, id: n.id },
         });
       },
 
@@ -446,6 +547,6 @@ export function useSharedBoard({ uid, todayISO, accountName, open, onError, comm
     };
   }, [
     db, uid, dataUid, todayISO, accountName, board, boards, ready, items, pins, ddays, memo,
-    contentReady, error, commit, syncNow,
+    collections, collectionItems, notes, contentReady, error, commit, syncNow,
   ]);
 }

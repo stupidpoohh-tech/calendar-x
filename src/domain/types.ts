@@ -545,3 +545,59 @@ export interface SharedDday {
   createdAt: string;
   updatedAt: string;
 }
+
+/**
+ * 함께 할 것 — 목록 하나.
+ *
+ * 일정과 다르다. 날짜도 마감도 우선순위도 없고, 하나씩 완료해 가는 목록이다.
+ * 목록 이름을 하드코딩하지 않는다 — '게임' · '갈 곳' 은 예시이고, 무엇을 모을지는
+ * 쓰는 사람이 정한다.
+ */
+export interface SharedCollection {
+  id: string;
+  title: string;
+  order: number;
+  createdBy: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+/**
+ * 함께 할 것 — 항목 하나.
+ *
+ * **목록 문서 아래가 아니라 보드 아래 평평하게 둔다** (`collectionId` 로 가리킨다).
+ * 중첩하면 목록마다 리스너를 하나씩 붙이거나 `collectionGroup` 을 써야 하는데,
+ * 후자는 이름이 `items` 인 공유 일정 컬렉션까지 함께 걸린다.
+ */
+export interface SharedCollectionItem {
+  id: string;
+  collectionId: string;
+  title: string;
+  completed: boolean;
+  /** 완료한 순간. 되돌리면 null 이다. */
+  completedAt: string | null;
+  order: number;
+  createdBy: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+/**
+ * 메모 — 게시판처럼 쌓이는 글 한 건.
+ *
+ * 용도를 가르지 않는다. 편지 · 준비물 · 예약 정보 · 서로에게 남기는 말이 같은 구조를
+ * 쓴다. 분류를 만들면 어디에 적어야 하는지를 매번 고민하게 되고, 그러면 안 적는다.
+ *
+ * **고정메모는 별도 시스템이 아니다.** 이 글 중 하나를 `pinned` 로 세워 보드 위에
+ * 한 줄로 띄운다.
+ */
+export interface SharedNote {
+  id: string;
+  /** 제목은 선택이다. 없으면 본문 첫 줄이 제목 자리를 대신한다. */
+  title: string | null;
+  body: string;
+  pinned: boolean;
+  authorUid: string;
+  createdAt: string;
+  updatedAt: string;
+}
