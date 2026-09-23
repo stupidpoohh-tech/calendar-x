@@ -1,4 +1,4 @@
-/* Calendar X: quiet chrome, crisp color, every event stays visible. */
+/* Calendar X shell refinement. Event blocks retain their original styling. */
 .app { background: var(--bg); }
 .topbar {
   position: relative; display: flex; flex-wrap: wrap; gap: 12px;
@@ -45,7 +45,6 @@
 .tp-h { padding-top: 9px; padding-bottom: 9px; }
 /* Grid lines recede; the current day and colored events carry the hierarchy. */
 .cal { border-color: var(--line); border-radius: var(--radius); }
-.cal-week { min-height: max(116px, var(--week-height, 0px)); }
 .cal-head { background: var(--bg); }
 .cal-dow { padding: 11px 0; font-size: .8125rem; font-weight: 500; }
 .cal-cell.today { background: color-mix(in srgb, var(--accent) 6%, var(--bg)); }
@@ -53,14 +52,6 @@
 .cal-num { font-size: .9375rem; font-weight: 600; margin: 5px 0 0 6px; min-width: 27px; min-height: 27px; }
 .cal-num.is-today, .cal-cell.wknd .cal-num.is-today { background: var(--accent); color: var(--bg); border-radius: 6px; }
 .cal-cell.out .cal-num { color: var(--ink-4); }
-.cal-bar { border: 1px solid color-mix(in srgb, var(--bar) 32%, var(--bg)); border-left: 3px solid var(--bar); border-radius: 4px; background: color-mix(in srgb, var(--bar) 11%, var(--bg)); font-size: .8125rem; padding: 0 6px; color: var(--ink); }
-.cal-bar:hover { filter: none; background: color-mix(in srgb, var(--bar) 20%, var(--bg)); }
-.cal-bar-x { font-weight: 600; letter-spacing: -.015em; }
-.cal-bar-t { font-size: .71875rem; font-weight: 400; color: var(--ink-2); }
-.cal-bar.done, .cal-bar.canceled { opacity: .6; }
-.cal-bar.canceled .cal-bar-x { text-decoration: line-through; }
-.cal-bar.cont-l { border-left: 0; border-top-left-radius: 0; border-bottom-left-radius: 0; }
-.cal-bar.cont-r { border-right: 0; border-top-right-radius: 0; border-bottom-right-radius: 0; }
 .lst-item { box-shadow: none; }
 .fab { display: none; }
 @media (max-width: 1200px) {
@@ -96,12 +87,9 @@
   .add-btn .lbl { display: none; }
   .side { padding: 0 8px; }
   .main { padding: 8px 8px 24px; }
-  .cal-week { min-height: max(82px, var(--week-height, 0px)); }
   .cal-num { margin-left: 2px; font-size: .8125rem; }
-  .cal-bar { font-size: .75rem; padding: 0 2px; border-left-width: 2px; }
-  .cal-bar-in { flex-wrap: wrap; gap: 0 3px; line-height: 1.1; }
-  .cal-bar-t { font-size: .625rem; }
-  .cal-bar-x { flex-basis: 100%; }
-  .cal-kind { display: none; }
   .cal-dow { font-size: .75rem; }
 }
+
+/* Keep the original event foreground and tint in both themes. */
+.cal-bar { --bg: var(--event-bg); --ink: var(--event-ink); --ink-3: var(--event-muted); }
