@@ -151,6 +151,27 @@ describe('entry 형태 검증', () => {
     await assertSucceeds(setDoc(doc(db(ME), `users/${ME}/entries/e1`), validEntry({ keepPrivate: true })));
     await assertFails(setDoc(doc(db(ME), `users/${ME}/entries/e2`), validEntry({ keepPrivate: 'yes' })));
   });
+
+  /*
+    '공유에서 내리기' 는 원본 전체가 아니라 표식 한 칸만 쓴다 (`entryPrivate`).
+    같이 보기 화면은 원본을 들고 있지 않고, 창 밖의 달에 있으면 메모리에도 없다.
+
+    merge 쓰기에서 규칙이 보는 것은 **합쳐진 문서**이므로 검사는 그대로 걸린다 —
+    한 칸짜리 쓰기가 규칙을 비껴가지 않는다는 것을 여기서 못 박는다.
+  */
+  it('비공개 표식만 덧쓰는 것도 통과하고, 형태 검사는 그대로 걸린다', async () => {
+    await assertSucceeds(setDoc(doc(db(ME), `users/${ME}/entries/e3`), validEntry()));
+    await assertSucceeds(
+      setDoc(doc(db(ME), `users/${ME}/entries/e3`), { keepPrivate: true }, { merge: true }),
+    );
+    await assertFails(
+      setDoc(doc(db(ME), `users/${ME}/entries/e3`), { keepPrivate: 'yes' }, { merge: true }),
+    );
+    // 합쳐진 문서를 보므로, 없는 문서에 표식만 쓰는 것은 형태가 모자라 거절된다.
+    await assertFails(
+      setDoc(doc(db(ME), `users/${ME}/entries/e4`), { keepPrivate: true }, { merge: true }),
+    );
+  });
 });
 
 describe('accounts / debts / pins', () => {

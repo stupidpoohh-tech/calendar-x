@@ -17,13 +17,13 @@ import {
 import { LENSES, LENS_BY_ID } from '../domain/constants';
 import { endOfMonth, fmtMonthTitle, startOfMonth, toISO } from '../domain/date';
 import { convertKind, displayTitle, newEntry, withDerived } from '../domain/entry';
-import { INVITE_PARAM, isShareableTask } from '../domain/shared';
+import { INVITE_PARAM, isShareableTask, sharedTitle } from '../domain/shared';
 import { formatAmount } from '../domain/money';
 import { applyFilters, collectTags, emptyFilters, hasActiveFilter } from '../domain/filters';
 import { baseIdOf, materialize } from '../domain/recurrence';
 import { isRecoveryEntry } from '../domain/recovery';
 import type {
-  Account, Entry, Filters, LensId, SharedInvite, TaskStatus, ViewId, YearMonth,
+  Account, Entry, Filters, LensId, SharedInvite, SharedTodoItem, TaskStatus, ViewId, YearMonth,
 } from '../domain/types';
 import { Auth } from '../ui/Auth';
 import { BrandFooter } from '../ui/BrandFooter';
@@ -353,6 +353,39 @@ function Workspace({ uid, user, onSignOut }: WorkspaceProps) {
     persist(e);
     closeModal();
   }, [persist, closeModal]);
+
+  /**
+   * 내가 올린 항목을 보드에서 내린다.
+   *
+   * 감추기로는 모자란 자리가 있다. 상대에게 보이기 싫은 항목이 이미 올라가 있다면
+   * 필요한 것은 내 화면에서 접는 것이 아니라 **상대 화면에서 없애는 것**이다.
+   *
+   * 공유 항목만 지우면 다음 맞추기가 같은 것을 다시 올린다. 그래서 원본에 '나만 보기'
+   * (`keepPrivate`)를 켜는 쓰기를 함께 보낸다 — 그 표식이 맞추기와 저장 양쪽에서
+   * 공유 대상을 가르는 값이다. 두 건을 한 배치로 묶지 않는 이유는 평소 저장과 같다.
+   *
+   * 원본 전체가 아니라 표식 한 칸만 쓴다. 이 화면은 원본을 들고 있지 않고, 창 밖의
+   * 달에 있는 항목이면 메모리에도 없다.
+   */
+  const unshareItem = useCallback(async (item: SharedTodoItem) => {
+    if (isAnon || !uid) { void promptLogin(); return; }
+    const entryId = item.sourceEntryId;
+    if (!entryId) return;
+    const ok = await dialog.confirm({
+      title: '이 항목을 공유에서 내릴까요?',
+      body: '상대 화면에서 사라집니다. 내 TODO 에는 그대로 남고, 여기서 고쳐 둔 내용은 함께 지워집니다.'
+        + ' 다시 올리려면 내 TODO 에서 이 항목의 \'나만 보기\' 를 끄면 됩니다.',
+      confirmLabel: '내리기',
+      danger: true,
+    });
+    if (!ok) return;
+    commit({
+      kind: 'entryPrivate', label: '나만 보기',
+      summary: sharedTitle(item), payload: { id: entryId, keepPrivate: true },
+    });
+    shared.removeEntry(entryId);
+    dialog.toast('공유에서 내렸습니다.');
+  }, [uid, isAnon, promptLogin, dialog, commit, shared]);
 
   /** 잔고 저장. 전체 렌즈(오늘 카드)와 가계부 렌즈(며칠 버티나 카드)가 같이 쓴다. */
   const saveBalance = useCallback((a: Account) => {
@@ -952,6 +985,7 @@ function Workspace({ uid, user, onSignOut }: WorkspaceProps) {
             onBack={() => setSharedOpen(false)}
             onOpenInvite={() => setSharedSheet('settings')}
             onSaveItem={shared.saveItem}
+            onUnshareItem={(item) => { void unshareItem(item); }}
             onDeleteItem={shared.removeItem}
             onSaveMemo={shared.saveMemo}
             onSaveDday={shared.saveDday}

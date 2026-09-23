@@ -63,6 +63,13 @@ interface Props {
   onBack: () => void;
   onOpenInvite: () => void;
   onSaveItem: (item: SharedTodoItem) => void;
+  /**
+   * 내가 올린 항목을 보드에서 내린다 (원본에 '나만 보기' 를 켜고 공유 항목을 지운다).
+   *
+   * 감추기와 다른 일이다 — 감추기는 내 화면에서만 접는 것이라 상대는 그대로 본다.
+   * 상대에게 보이기 싫은 항목에 필요한 것은 이쪽이다.
+   */
+  onUnshareItem: (item: SharedTodoItem) => void;
   onDeleteItem: (item: SharedTodoItem) => void;
   onSaveMemo: (text: string) => void;
   onSaveDday: (d: SharedDday) => void;
@@ -79,7 +86,8 @@ const NO_ENTRIES: Entry[] = [];
 export function SharedScreen({
   board, partner, myUid, items, ddays, memoText, contentReady, todayISO,
   cursor, onCursorChange, view, onViewChange, weekStart,
-  onBack, onOpenInvite, onSaveItem, onDeleteItem, onSaveMemo, onSaveDday, onDeleteDday,
+  onBack, onOpenInvite, onSaveItem, onUnshareItem, onDeleteItem,
+  onSaveMemo, onSaveDday, onDeleteDday,
 }: Props) {
   const [editing, setEditing] = useState<{ item: SharedTodoItem; mode: 'create' | 'edit' } | null>(null);
   const [showHidden, setShowHidden] = useState(false);
@@ -328,6 +336,7 @@ export function SharedScreen({
           hiddenForMe={isHiddenFor(editingNow, myUid)}
           mode={editing?.mode ?? 'edit'}
           onSave={(next) => { onSaveItem(next); setEditing(null); }}
+          onUnshare={(item) => { onUnshareItem(item); setEditing(null); }}
           onHide={(item) => {
             onSaveItem(setHiddenFor(item, myUid, !isHiddenFor(item, myUid)));
             setEditing(null);

@@ -31,8 +31,13 @@ const board: SharedBoard = {
 const task = (patch: Partial<Entry> = {}): Entry =>
   newEntry('task', { id: 'task-a', title: '병원 예약', startDate: '2026-09-25', ...patch });
 
+/** 상대가 올린 항목. 내가 내릴 수 없고, 할 수 있는 것은 내 화면에서 접는 것뿐이다. */
 const mirrored = (e: Entry): SharedTodoItem =>
   withSource(null, e.id, sourceOf(e), OWNER, '2026-09-01T00:00:00.000Z');
+
+/** 내가 올린 항목. 보드에서 내릴 수 있다. */
+const mine = (e: Entry): SharedTodoItem =>
+  withSource(null, e.id, sourceOf(e), ME, '2026-09-01T00:00:00.000Z');
 
 function mount(over: {
   items?: SharedTodoItem[];
@@ -46,6 +51,7 @@ function mount(over: {
   view?: 'calendar' | 'list';
   cursor?: Date;
   onSaveItem?: (i: SharedTodoItem) => void;
+  onUnshareItem?: (i: SharedTodoItem) => void;
   onDeleteItem?: (i: SharedTodoItem) => void;
   onSaveMemo?: (t: string) => void;
   onSaveDday?: Parameters<typeof SharedScreen>[0]['onSaveDday'];
@@ -71,6 +77,7 @@ function mount(over: {
     onBack: over.onBack ?? vi.fn(),
     onOpenInvite: vi.fn(),
     onSaveItem: over.onSaveItem ?? vi.fn(),
+    onUnshareItem: over.onUnshareItem ?? vi.fn(),
     onDeleteItem: over.onDeleteItem ?? vi.fn(),
     onSaveMemo: over.onSaveMemo ?? vi.fn(),
     onSaveDday: over.onSaveDday ?? vi.fn(),
@@ -191,9 +198,15 @@ describe('항목 편집', () => {
   }
 
   it('원본을 고치지 않는다는 것을 편집 화면이 말한다', () => {
-    mount({ items: [mirrored(task())] });
+    mount({ items: [mine(task())] });
     const dialog = open('병원 예약');
     expect(within(dialog).getByText(/내 TODO 에 반영되지 않고/)).toBeInTheDocument();
+  });
+
+  it('상대가 올린 항목은 상대의 원본이라고 적는다', () => {
+    mount({ items: [mirrored(task())] });
+    const dialog = open('병원 예약');
+    expect(within(dialog).getByText(/상대의 원본에 반영되지 않고/)).toBeInTheDocument();
   });
 
   it('색을 고르면 색만 override 가 된다', () => {
@@ -254,16 +267,42 @@ describe('항목 편집', () => {
     expect(within(dialog).queryByRole('button', { name: /원본대로 되돌리기/ })).not.toBeInTheDocument();
   });
 
-  it('원본이 있는 항목은 삭제가 아니라 감추기다', () => {
+  /*
+    감추기로는 모자란 자리가 있다.
+
+    상대에게 보이기 싫은 항목이 올라가 있을 때 필요한 것은 내 화면에서 접는 것이 아니라
+    상대 화면에서 없애는 것이다. 그래서 내가 올린 항목의 자리에는 '공유에서 내리기' 가
+    있어야 하고, 내릴 수 없는 남의 항목에만 감추기가 남는다.
+  */
+  it('내가 올린 항목은 감추기가 아니라 공유에서 내린다', () => {
+    const onUnshareItem = vi.fn();
     const onSaveItem = vi.fn();
     const onDeleteItem = vi.fn();
-    mount({ items: [mirrored(task())], onSaveItem, onDeleteItem });
+    mount({ items: [mine(task())], onUnshareItem, onSaveItem, onDeleteItem });
+    const dialog = open('병원 예약');
+
+    expect(within(dialog).queryByRole('button', { name: /감추기/ })).not.toBeInTheDocument();
+    expect(within(dialog).queryByRole('button', { name: /삭제/ })).not.toBeInTheDocument();
+    fireEvent.click(within(dialog).getByRole('button', { name: /공유에서 내리기/ }));
+
+    expect(onUnshareItem.mock.calls[0]![0].id).toBe('task-a');
+    expect(onSaveItem).not.toHaveBeenCalled();
+    expect(onDeleteItem).not.toHaveBeenCalled();
+  });
+
+  it('상대가 올린 항목은 삭제도 내리기도 못 하고 내 화면에서만 감춘다', () => {
+    const onSaveItem = vi.fn();
+    const onDeleteItem = vi.fn();
+    const onUnshareItem = vi.fn();
+    mount({ items: [mirrored(task())], onSaveItem, onDeleteItem, onUnshareItem });
     const dialog = open('병원 예약');
 
     expect(within(dialog).queryByRole('button', { name: /삭제/ })).not.toBeInTheDocument();
-    fireEvent.click(within(dialog).getByRole('button', { name: /나에게만 감추기/ }));
+    expect(within(dialog).queryByRole('button', { name: /공유에서 내리기/ })).not.toBeInTheDocument();
+    fireEvent.click(within(dialog).getByRole('button', { name: /내 화면에서만 감추기/ }));
 
     expect(onDeleteItem).not.toHaveBeenCalled();
+    expect(onUnshareItem).not.toHaveBeenCalled();
     const saved = onSaveItem.mock.calls[0]![0] as SharedTodoItem;
     // 내 uid 만 들어간다 — 상대 화면은 그대로다.
     expect(saved.hiddenBy).toEqual([ME]);

@@ -16,7 +16,7 @@
 import { useState } from 'react';
 import { COLORS, STATUSES } from '../domain/constants';
 import {
-  applyOverrides, canRevert, revertToSource, sharedView,
+  applyOverrides, canRevert, ownsMirror, revertToSource, sharedView,
 } from '../domain/shared';
 import type { ColorId, SharedOverridableField, SharedOverrides, SharedTodoItem } from '../domain/types';
 import { Icon } from './Icon';
@@ -31,7 +31,13 @@ interface Props {
   hiddenForMe: boolean;
   mode: 'create' | 'edit';
   onSave: (item: SharedTodoItem) => void;
-  /** 나에게만 감춘다. 상대 화면과 원본은 그대로다. */
+  /**
+   * 내가 올린 항목을 보드에서 내린다. 원본은 내 TODO 에 그대로 남는다.
+   *
+   * 남의 항목에는 주지 않는다 — 내릴 수 있는 것은 그 원본의 주인뿐이다.
+   */
+  onUnshare: (item: SharedTodoItem) => void;
+  /** 남이 올린 항목을 내 화면에서만 접는다. 상대 화면과 원본은 그대로다. */
   onHide: (item: SharedTodoItem) => void;
   /** 공유 화면에서만 만든 항목을 지운다. 원본이 있는 항목에는 주지 않는다. */
   onDelete: (item: SharedTodoItem) => void;
@@ -50,7 +56,7 @@ interface Form {
 }
 
 export function SharedItemSheet({
-  item, myUid, hiddenForMe, mode, onSave, onHide, onDelete, onClose,
+  item, myUid, hiddenForMe, mode, onSave, onUnshare, onHide, onDelete, onClose,
 }: Props) {
   const view = sharedView(item);
   /*
@@ -105,8 +111,9 @@ export function SharedItemSheet({
           )}
           {!item.localOnly && (
             <p className="mod-hint">
-              내 TODO 의 항목입니다. 여기서 고친 값은 <b>내 TODO 에 반영되지 않고</b>,
-              고치지 않은 칸은 계속 원본을 따라갑니다.
+              {ownsMirror(item, myUid)
+                ? <>내 TODO 의 항목입니다. 여기서 고친 값은 <b>내 TODO 에 반영되지 않고</b>, 고치지 않은 칸은 계속 원본을 따라갑니다.</>
+                : <>상대의 TODO 에서 온 항목입니다. 여기서 고친 값은 <b>상대의 원본에 반영되지 않고</b>, 고치지 않은 칸은 계속 원본을 따라갑니다.</>}
             </p>
           )}
 
@@ -215,14 +222,26 @@ export function SharedItemSheet({
         </div>
 
         <footer className="mod-foot">
+          {/*
+            내 항목과 남의 항목은 할 수 있는 일이 다르다.
+
+            내가 올린 것은 **보드에서 내릴 수 있다** — 상대에게 보이기 싫은 항목이
+            여기까지 왔다면 필요한 것은 내 화면에서 접는 것이 아니라 상대 화면에서
+            없애는 것이다. 남이 올린 것은 내릴 수 없으므로(규칙이 주인만 허용한다)
+            할 수 있는 일은 내 화면에서 접는 것뿐이고, 그렇게 적는다.
+          */}
           {mode === 'edit' && (
             item.localOnly ? (
               <button className="btn danger ghost" onClick={() => onDelete(item)}>
                 <Icon.Trash size={14} /> 삭제
               </button>
+            ) : ownsMirror(item, myUid) ? (
+              <button className="btn danger ghost" onClick={() => onUnshare(item)}>
+                <Icon.Lock size={14} /> 공유에서 내리기
+              </button>
             ) : (
               <button className="btn ghost" onClick={() => onHide(item)}>
-                <Icon.EyeOff size={14} /> {hiddenForMe ? '다시 보이기' : '나에게만 감추기'}
+                <Icon.EyeOff size={14} /> {hiddenForMe ? '다시 보이기' : '내 화면에서만 감추기'}
               </button>
             )
           )}

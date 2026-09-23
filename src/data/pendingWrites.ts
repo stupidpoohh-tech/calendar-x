@@ -40,7 +40,7 @@ import {
 import { boardDoc, boardSubDoc, COL, docIn, inviteDoc, SHARED, userDoc } from './paths';
 
 export type PendingKind =
-  | 'entry' | 'entryDelete'
+  | 'entry' | 'entryDelete' | 'entryPrivate'
   | 'account'
   | 'debt' | 'debtDelete'
   | 'pin' | 'pinDelete'
@@ -55,7 +55,7 @@ export type PendingKind =
   | 'sharedDday' | 'sharedDdayDelete';
 
 const KINDS: readonly PendingKind[] = [
-  'entry', 'entryDelete', 'account', 'debt', 'debtDelete',
+  'entry', 'entryDelete', 'entryPrivate', 'account', 'debt', 'debtDelete',
   'pin', 'pinDelete', 'budget', 'budgetDelete', 'reserve', 'reserveDelete',
   'taskOrder', 'recoveryRule', 'recoveryPatch', 'recoveryCommit',
   'sharedBoard', 'sharedInvite', 'sharedInviteDelete',
@@ -86,6 +86,7 @@ export interface SharedSourcePayload {
 export type PendingPayload =
   | Entry | Account | Debt | Pin | Budget | Reserve | RecoveryRule
   | { id: string }
+  | { id: string; keepPrivate: boolean }
   | { ordered: { id: string; order: number }[] }
   | Partial<RecoveryRule>
   | RecoveryCommitPayload
@@ -133,6 +134,17 @@ export function sendPending(db: Firestore, uid: string, op: CommitInput): Promis
       return setDoc(docIn(db, uid, COL.entries, asEntry(op.payload).id), entryToDoc(asEntry(op.payload)));
     case 'entryDelete':
       return deleteDoc(docIn(db, uid, COL.entries, asId(op.payload)));
+    /*
+      비공개 표식만 바꾼다.
+
+      항목 전체를 다시 쓰지 않는 이유는, 이 쓰기가 같이 보기 화면에서 나가는데 그 화면은
+      원본을 들고 있지 않기 때문이다. 창 밖의 달에 있는 항목이라 메모리에 없을 수도 있다.
+      merge 라 규칙은 **합쳐진 문서 전체**를 보므로 검사는 그대로 걸린다.
+    */
+    case 'entryPrivate': {
+      const p = op.payload as { id: string; keepPrivate: boolean };
+      return setDoc(docIn(db, uid, COL.entries, p.id), { keepPrivate: p.keepPrivate }, { merge: true });
+    }
     case 'account': {
       const a = op.payload as Account;
       return setDoc(docIn(db, uid, COL.accounts, a.id), accountToDoc(a));
@@ -282,6 +294,8 @@ function targetOf(op: PendingOp, uid: string): { path: string[]; base: string } 
     // 삭제에는 값이 없다. 실패한 시각을 기준으로 본다 — 그 뒤에 다시 쓰였다면
     // 사용자가 같은 자리를 새로 채운 것이므로 지우면 안 된다.
     case 'entryDelete': return mine(COL.entries, asId(op.payload), op.at);
+    // 비공개 표식도 값에 시각이 없다. 그 뒤에 원본이 다시 쓰였다면 사용자에게 묻는다.
+    case 'entryPrivate': return mine(COL.entries, asId(op.payload), op.at);
     case 'debtDelete': return mine(COL.debts, asId(op.payload), op.at);
     case 'pinDelete': return mine(COL.pins, asId(op.payload), op.at);
     case 'budget': {
