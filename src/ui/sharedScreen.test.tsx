@@ -460,3 +460,26 @@ describe('D-Day', () => {
     expect(onSaveDday).not.toHaveBeenCalled();
   });
 });
+
+/*
+  같이 보기는 "내 TODO 를 상대에게 보여 주는" 자리다. 초대받은 사람의 개인 TODO 는
+  올라가지 않으므로, 그쪽 화면의 안내가 "내 TODO 가 여기로 온다" 고 말하면 거짓이 된다.
+*/
+describe('초대받은 사람의 화면', () => {
+  it('누구의 TODO 가 오는지 갈라 적는다', () => {
+    mount({ myUid: ME, partner: 'owner' });
+    expect(screen.getByText(/owner 의 TODO 가 여기에 따라옵니다/)).toBeInTheDocument();
+
+    cleanup();
+    mount({ myUid: OWNER, partner: 'member' });
+    expect(screen.getByText(/내 TODO 에 적은 오늘 이후의 할 일/)).toBeInTheDocument();
+  });
+
+  it('보드를 만든 사람과 같은 자리에서 같은 것을 한다', () => {
+    // 상대에게도 달력·리스트·추가·설정이 그대로 있다. 읽기 전용 화면이 아니다.
+    mount({ myUid: ME, items: [mirrored(task())] });
+    expect(screen.getByRole('button', { name: '추가' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '공유 설정' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '병원 예약 완료' })).toBeInTheDocument();
+  });
+});

@@ -83,6 +83,11 @@ export function SharedScreen({
   const [editing, setEditing] = useState<{ item: SharedTodoItem; mode: 'create' | 'edit' } | null>(null);
   const [showHidden, setShowHidden] = useState(false);
 
+  /*
+    원본을 올리는 것은 보드를 만든 사람뿐이다. 초대받은 사람에게는 "내 TODO 가 여기로
+    온다" 가 거짓이므로, 빈 화면의 안내도 갈라 적는다.
+  */
+  const isOwner = board.ownerUid === myUid;
   const hiddenCount = items.filter((i) => i.hidden).length;
   const shown = useMemo(
     () => items.filter((i) => showHidden || !i.hidden),
@@ -254,7 +259,12 @@ export function SharedScreen({
       ) : groups.length === 0 ? (
         <div className="empty">
           <p className="empty-t">이 달에는 같이 볼 TODO 가 없습니다.</p>
-          <p className="empty-s">내 TODO 에 적은 할 일이 여기에 따라옵니다. 이 화면에서만 쓸 항목은 '추가' 로 만듭니다.</p>
+          <p className="empty-s">
+            {isOwner
+              ? '내 TODO 에 적은 오늘 이후의 할 일이 여기에 따라옵니다.'
+              : `${partner ?? '상대'} 의 TODO 가 여기에 따라옵니다.`}
+            {' '}이 화면에서만 쓸 항목은 '추가' 로 만듭니다.
+          </p>
         </div>
       ) : (
         <div className="lst sh-lst">

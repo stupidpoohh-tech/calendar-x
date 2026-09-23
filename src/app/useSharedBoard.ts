@@ -223,8 +223,20 @@ export function useSharedBoard({ uid, todayISO, accountName, open, onError, comm
     const blocked = !uid || dataUid !== uid;
     const activeBoard = blocked ? null : board;
 
+    /*
+      원본을 올리는 것은 **보드를 만든 사람뿐이다.**
+
+      같이 보기는 "내 TODO 를 상대에게 보여 주는" 자리다. 초대받은 사람의 개인 TODO 는
+      올라가지 않는다 — 그쪽이 보드에 더하는 것은 이 화면에서 만든 항목뿐이다.
+
+      이 검사가 없으면 초대받은 사람의 TODO 도 올라갔다가, 소유자가 화면을 열 때 맞추기
+      (`planOwnerSync`)가 "원본이 없는 항목" 으로 보고 지운다. 적은 것이 잠깐 보이다
+      말없이 사라지는 것이 이 앱에서 가장 하면 안 되는 일이다.
+    */
+    const mirrors = !!activeBoard && !!uid && activeBoard.ownerUid === uid;
+
     const pushEntry = (e: Entry) => {
-      if (!activeBoard || !uid) return;
+      if (!activeBoard || !uid || !mirrors) return;
       if (!isShareableTask(e, todayISO)) return;
       commit({
         kind: 'sharedSource', label: '같이 보기',
@@ -250,7 +262,8 @@ export function useSharedBoard({ uid, todayISO, accountName, open, onError, comm
       pushEntry,
 
       removeEntry: (entryId) => {
-        if (!activeBoard) return;
+        // 올리지 않는 사람은 지울 것도 없다. 같은 이유로 소유자만 지난다.
+        if (!activeBoard || !mirrors) return;
         commit({
           kind: 'sharedItemDelete', label: '같이 보기 항목 삭제',
           summary: entryId, payload: { boardId: activeBoard.id, id: entryId },
