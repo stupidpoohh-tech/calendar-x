@@ -957,6 +957,27 @@ function Workspace({ uid, user, onSignOut }: WorkspaceProps) {
           ))}
         </nav>
 
+        <div className="mobile-actions">
+          {!sharedOpen && <button className="add-btn" aria-label="일정 추가" onClick={() => openCreate()}><Icon.Plus size={16} /></button>}
+          <details className="mobile-more" onKeyDown={(e) => {
+            if (e.key === 'Escape') { e.currentTarget.open = false; e.currentTarget.querySelector('summary')?.focus(); }
+          }}>
+            <summary aria-label="더보기">···</summary>
+            <div className="mobile-more-panel" onClick={(e) => {
+              if ((e.target as HTMLElement).closest('button')) e.currentTarget.closest('details')?.removeAttribute('open');
+            }}>
+              {!sharedOpen && <>
+                <button onClick={() => set('view', 'calendar')} aria-pressed={view === 'calendar'}><Icon.Calendar size={16} />캘린더 보기</button>
+                <button onClick={() => set('view', 'list')} aria-pressed={view === 'list'}><Icon.List size={16} />리스트 보기</button>
+                <button onClick={() => setShowFilters((x) => !x)} aria-expanded={showFilters}><Icon.Filter size={16} />필터{hasActiveFilter(filters) ? ' · 적용 중' : ''}</button>
+              </>}
+              {!isAnon && <button disabled={!shared.ready} onClick={() => shared.board ? setSharedOpen(true) : setSharedSheet('start')}><Icon.Users size={16} />같이 보기</button>}
+              {isAnon
+                ? <button onClick={() => setShowAuth(true)}>로그인 · 가입</button>
+                : <button onClick={() => setShowSettings(true)}><Icon.Settings size={16} />설정</button>}
+            </div>
+          </details>
+        </div>
         <div className="header-right">
           {!sharedOpen && (
         <div className="tool-r">
