@@ -13,8 +13,9 @@ import { render, screen, cleanup, within } from '@testing-library/react';
 import { afterEach, beforeAll, afterAll, describe, expect, it, vi } from 'vitest';
 import { entryFromDoc, entryToDoc } from '../data/converters';
 import { monthWindow, tideWindow } from '../data/repo';
+import { newBudget, newReserve } from '../domain/budget';
 import { endOfMonth, startOfMonth, toISO } from '../domain/date';
-import { newEntry, setRecurrence } from '../domain/entry';
+import { newEntry, newMoney, setRecurrence } from '../domain/entry';
 import { applyFilters, emptyFilters } from '../domain/filters';
 import { materialize } from '../domain/recurrence';
 import { TideInputError } from '../domain/tide';
@@ -42,7 +43,7 @@ const money = (
     title: extra.title ?? '',
     startDate,
     endDate: extra.endDate ?? null,
-    money: { type, amountMinor, currency: 'KRW', linkedEntryId: null },
+    money: newMoney({ type, amountMinor }),
   });
 
 /** Firestore 왕복을 거친 모양. 앱이 실제로 손에 쥐는 값이다. */
@@ -294,5 +295,110 @@ describe('달력 — 통화가 섞이면 셀에도 적지 않는다', () => {
       />,
     );
     expect(screen.queryByLabelText('2026-09-15 한도')).toBeNull();
+  });
+});
+
+describe('생활비 · 세이브 배선', () => {
+  const BUDGET = newBudget({
+    id: 'b1', name: '9월 생활비',
+    startDate: '2026-09-01', endDate: '2026-09-30', amountMinor: 200_000,
+  });
+  const RESERVE = newReserve({ id: 'r1', name: '비상금', amountMinor: 100_000 });
+  /** 생활비에서 나간 지출 한 건. 예산 안이라 한도를 더 깎지 않아야 한다. */
+  const LUNCH = stored(newEntry('money', {
+    id: 'lunch', title: '점심', startDate: '2026-09-12',
+    money: newMoney({ type: 'expense', amountMinor: 12_000, budgetId: 'b1' }),
+  }));
+
+  it('카드가 예산과 세이브를 한도에서 뺀다', () => {
+    wrap(
+      <TideBar
+        todayISO={TODAY}
+        accounts={ACCOUNTS}
+        entries={[...RAW, LUNCH]}
+        budgets={[BUDGET]}
+        reserves={[RESERVE]}
+        hasBalance
+        onSaveAccount={() => {}}
+        collapsed={false}
+        onToggleCollapsed={() => {}}
+      />,
+    );
+    const card = screen.getByLabelText('며칠 버티나');
+    // 980,000 (주간 지출 두 번) − 예산 200,000 − 세이브 100,000 = 680,000.
+    // 생활비에서 나간 12,000 은 예산 몫 안에 있으므로 더 빠지지 않는다.
+    expect(within(card).getByLabelText('잔고 고치기')).toHaveTextContent('680,000');
+  });
+
+  it('오늘 카드도 같은 숫자를 낸다 — 두 카드가 어긋나지 않는다', () => {
+    wrap(
+      <TodayPanel
+        todayISO={TODAY}
+        entries={materialize([...RAW, LUNCH], '2026-09-01', '2026-09-30')}
+        tideEntries={[...RAW, LUNCH]}
+        budgets={[BUDGET]}
+        reserves={[RESERVE]}
+        accounts={ACCOUNTS}
+        hasBalance
+        collapsed={false}
+        onToggleCollapsed={() => {}}
+        moneyCollapsed={false}
+        onToggleMoneyCollapsed={() => {}}
+        onEntryClick={() => {}}
+        onStatusChange={() => {}}
+        onPromote={() => {}}
+        onQuickIdea={() => {}}
+        onSaveAccount={() => {}}
+      />,
+    );
+    const panel = screen.getByLabelText('오늘');
+    expect(within(panel).getByLabelText('잔고 고치기')).toHaveTextContent('680,000');
+  });
+
+  it('달력 셀도 카드와 같은 예약을 본다', () => {
+    wrap(
+      <MonthCalendar
+        cursor={SEPTEMBER}
+        onCursorChange={() => {}}
+        entries={applyFilters(materialize([...RAW, LUNCH], '2026-09-01', '2026-09-30'), 'money', emptyFilters())}
+        tideEntries={[...RAW, LUNCH]}
+        budgets={[BUDGET]}
+        reserves={[RESERVE]}
+        tideMonths={tideWindow(TODAY)}
+        accounts={ACCOUNTS}
+        hasBalance
+        lens="money"
+        weekStart="mon"
+        todayISO={TODAY}
+        onEntryClick={() => {}}
+        onDayOpen={() => {}}
+        onDayCreate={() => {}}
+      />,
+    );
+    // 09-14: 잔고 100만 − 예산 20만 − 세이브 10만 = 70만.
+    expect(screen.getByLabelText('2026-09-14 한도')).toHaveTextContent('70만');
+  });
+
+  it('화면용 목록을 예산 계산에 넘기면 렌더링이 실패한다', () => {
+    /*
+      §18 의 재발 방지. 예산 지출을 세느라 `materialize()` 결과를 tide 로 돌리면
+      반복 항목이 한 번 더 전개돼 같은 입출금을 여러 번 센다. 배선 실수는 여기서 터진다.
+    */
+    const shown = materialize([...RAW, LUNCH], '2026-09-01', '2026-09-30');
+    const boom = vi.spyOn(console, 'error').mockImplementation(() => {});
+    expect(() => wrap(
+      <TideBar
+        todayISO={TODAY}
+        accounts={ACCOUNTS}
+        entries={shown}
+        budgets={[BUDGET]}
+        reserves={[RESERVE]}
+        hasBalance
+        onSaveAccount={() => {}}
+        collapsed={false}
+        onToggleCollapsed={() => {}}
+      />,
+    )).toThrow(TideInputError);
+    boom.mockRestore();
   });
 });

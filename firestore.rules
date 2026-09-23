@@ -89,6 +89,26 @@ service cloud.firestore {
           && (data().rate == null || data().rate is number);
       }
 
+      match /budgets/{budgetId} {
+        allow read, delete: if isOwner(uid);
+        allow create, update: if isOwner(uid)
+          && withinSize()
+          && data().name is string && data().name.size() <= 100
+          && data().amountMinor is int
+          && data().currency is string
+          && isDateISO(data().startDate)
+          && isDateISO(data().endDate);
+      }
+
+      match /reserves/{reserveId} {
+        allow read, delete: if isOwner(uid);
+        allow create, update: if isOwner(uid)
+          && withinSize()
+          && data().name is string && data().name.size() <= 100
+          && data().amountMinor is int
+          && data().currency is string;
+      }
+
       match /pins/{pinId} {
         allow read, delete: if isOwner(uid);
         allow create, update: if isOwner(uid)

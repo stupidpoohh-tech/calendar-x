@@ -21,21 +21,29 @@
  * | legacy | `version: 1` 또는 버전 없음 + `items` 배열 | 이관 전 단일 컬렉션. 변환 시 제외·절단 항목을 함께 보고한다 |
  * | v2 | `version: 2` | entries · accounts · debts · pins **네 배열 모두 필수** |
  * | v3 | `version: 3` | v2 + `recovery` (null 허용) |
+ * | v4 | `version: 4` | v3 + `budgets` · `reserves` **두 배열 모두 필수** |
  *
  * 없는 컬렉션을 빈 배열로 넘겨 짚지 않는다. v2·v3 파일에 `debts` 가 없다면 그건
  * 빈 백업이 아니라 깨진 파일이다.
+ *
+ * `budgets` · `reserves` 만 예외다. v2·v3 은 그 구조가 **없던** 시절의 파일이라 없는
+ * 것이 정상이고 빈 배열로 읽는다. 그래도 들어 있으면 검증은 한다 — 손으로 고친 파일이
+ * 검사 없이 새어 들어가지 않게. v4 에서는 없으면 잘린 파일로 본다.
  */
 import { COLORS, MONEY_TYPES, STATUSES } from '../domain/constants';
 import { isValidDate } from '../domain/date';
 import type { BackupCollection } from '../domain/types';
 import type { BackupData } from './backup';
-import { accountFromDoc, debtFromDoc, entryFromDoc, pinFromDoc, recoveryRuleFromDoc } from './converters';
+import {
+  accountFromDoc, budgetFromDoc, debtFromDoc, entryFromDoc, pinFromDoc,
+  recoveryRuleFromDoc, reserveFromDoc,
+} from './converters';
 import { convertLegacyItems } from './migrate';
 
-export const SUPPORTED_VERSIONS = [1, 2, 3] as const;
-export const LATEST_VERSION = 3;
+export const SUPPORTED_VERSIONS = [1, 2, 3, 4] as const;
+export const LATEST_VERSION = 4;
 
-export type BackupFormat = 'legacy' | 'v2' | 'v3';
+export type BackupFormat = 'legacy' | 'v2' | 'v3' | 'v4';
 
 /** 파일 한 곳이 왜 들어갈 수 없는지. */
 export interface FileProblem {
@@ -253,8 +261,14 @@ function checkEntryRaw(c: Collector, where: string, e: Raw): void {
         + `쓸 수 있는 값: ${MONEY_TYPE_IDS.join(' · ')}`,
       );
     }
-    if (m.linkedEntryId !== undefined && m.linkedEntryId !== null && typeof m.linkedEntryId !== 'string') {
-      c.add(`${where}.money.linkedEntryId`, `문자열이 아닙니다: ${describe(m.linkedEntryId)}`);
+    for (const ref of ['linkedEntryId', 'budgetId', 'debtId'] as const) {
+      const v = m[ref];
+      if (v !== undefined && v !== null && typeof v !== 'string') {
+        c.add(`${where}.money.${ref}`, `문자열이 아닙니다: ${describe(v)}`);
+      }
+    }
+    if (m.priority !== undefined && m.priority !== null && typeof m.priority !== 'boolean') {
+      c.add(`${where}.money.priority`, `참·거짓이 아닙니다: ${describe(m.priority)}`);
     }
   }
 
@@ -311,11 +325,43 @@ function checkPinRaw(c: Collector, where: string, p: Raw): void {
   optInt(c, `${where}.order`, p.order);
 }
 
+function checkBudgetRaw(c: Collector, where: string, b: Raw): void {
+  reqStr(c, `${where}.name`, b.name, LIMITS.name);
+  reqInt(c, `${where}.amountMinor`, b.amountMinor);
+  if (isIntNum(b.amountMinor) && b.amountMinor < 0) {
+    c.add(`${where}.amountMinor`, `음수입니다: ${b.amountMinor} — 예산은 0 이상이어야 합니다.`);
+  }
+  reqStr(c, `${where}.currency`, b.currency);
+  reqDate(c, `${where}.startDate`, b.startDate);
+  reqDate(c, `${where}.endDate`, b.endDate);
+  // 기간이 뒤집힌 예산은 어떤 지출도 품지 못한다. 조용히 바로잡으면 연결된 지출이
+  // 전부 일반 지출로 떨어져 한도가 두 번 깎인다.
+  if (typeof b.startDate === 'string' && typeof b.endDate === 'string'
+      && isValidDate(b.startDate) && isValidDate(b.endDate) && b.endDate < b.startDate) {
+    c.add(`${where}.endDate`, `종료일이 시작일보다 앞섭니다: ${b.endDate} < ${b.startDate}`);
+  }
+  optStr(c, `${where}.createdAt`, b.createdAt, LIMITS.checkedAt);
+  optStr(c, `${where}.updatedAt`, b.updatedAt, LIMITS.checkedAt);
+}
+
+function checkReserveRaw(c: Collector, where: string, r: Raw): void {
+  reqStr(c, `${where}.name`, r.name, LIMITS.name);
+  reqInt(c, `${where}.amountMinor`, r.amountMinor);
+  if (isIntNum(r.amountMinor) && r.amountMinor < 0) {
+    c.add(`${where}.amountMinor`, `음수입니다: ${r.amountMinor} — 세이브는 0 이상이어야 합니다.`);
+  }
+  reqStr(c, `${where}.currency`, r.currency);
+  optStr(c, `${where}.createdAt`, r.createdAt, LIMITS.checkedAt);
+  optStr(c, `${where}.updatedAt`, r.updatedAt, LIMITS.checkedAt);
+}
+
 const CHECKERS: Record<BackupCollection, (c: Collector, where: string, v: Raw) => void> = {
   entries: checkEntryRaw,
   accounts: checkAccountRaw,
   debts: checkDebtRaw,
   pins: checkPinRaw,
+  budgets: checkBudgetRaw,
+  reserves: checkReserveRaw,
 };
 
 /** 컬렉션 하나를 통째로 본다. 없으면 그 자체가 문제다 (v2·v3 명세). */
@@ -338,6 +384,17 @@ function checkCollection(c: Collector, name: BackupCollection, value: unknown): 
     rows.push(item);
   });
   return rows;
+}
+
+/**
+ * v2·v3 파일의 `budgets` · `reserves`.
+ *
+ * 없는 것이 정상이다 (그 구조가 없던 시절의 파일이다). 있으면 v4 와 똑같이 검증한다 —
+ * 손으로 고친 파일이 검사 없이 통과하면 잘못된 예산이 한도를 조용히 깎는다.
+ */
+function checkOptionalCollection(c: Collector, name: BackupCollection, value: unknown): Raw[] {
+  if (value === undefined || value === null) return [];
+  return checkCollection(c, name, value);
 }
 
 // ---------- 파일 읽기 ----------
@@ -413,13 +470,19 @@ export function readBackupFile(text: string): ReadResult {
     return { ok: false, problems: [{ where: 'version', reason: '버전이 없습니다. 백업 파일이 맞는지 확인해 주세요.' }] };
   }
 
-  const format: BackupFormat = version >= 3 ? 'v3' : 'v2';
+  const format: BackupFormat = version >= 4 ? 'v4' : version === 3 ? 'v3' : 'v2';
 
   // ---- 컬렉션 ----
   const entries = checkCollection(c, 'entries', obj.entries);
   const accounts = checkCollection(c, 'accounts', obj.accounts);
   const debts = checkCollection(c, 'debts', obj.debts);
   const pins = checkCollection(c, 'pins', obj.pins);
+  const budgets = format === 'v4'
+    ? checkCollection(c, 'budgets', obj.budgets)
+    : checkOptionalCollection(c, 'budgets', obj.budgets);
+  const reserves = format === 'v4'
+    ? checkCollection(c, 'reserves', obj.reserves)
+    : checkOptionalCollection(c, 'reserves', obj.reserves);
 
   // v2 에는 recovery 가 없다. v3 에서는 있어도 되고 null 이어도 된다.
   if (format === 'v2' && obj.recovery !== undefined && obj.recovery !== null) {
@@ -443,6 +506,8 @@ export function readBackupFile(text: string): ReadResult {
         accounts: accounts.map((r) => accountFromDoc(r.id as string, r)),
         debts: debts.map((r) => debtFromDoc(r.id as string, r)),
         pins: pins.map((r) => pinFromDoc(r.id as string, r)),
+        budgets: budgets.map((r) => budgetFromDoc(r.id as string, r)),
+        reserves: reserves.map((r) => reserveFromDoc(r.id as string, r)),
         recovery: isObj(obj.recovery) ? recoveryRuleFromDoc(obj.recovery) : null,
       },
     },
@@ -478,7 +543,9 @@ function readLegacy(c: Collector, items: unknown[]): ReadResult {
         accounts: converted.accounts,
         debts: converted.debts,
         pins: converted.pins,
-        // 이관 전 구조에는 회복이 없었다.
+        // 이관 전 구조에는 예산·세이브·회복이 없었다.
+        budgets: [],
+        reserves: [],
         recovery: null,
       },
     },

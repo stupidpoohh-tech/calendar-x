@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { newEntry } from './entry';
+import { newEntry, newMoney } from './entry';
 import { applyFilters, collectTags, emptyFilters, hasActiveFilter, matchesFilters, matchesLens, normalizeTag } from './filters';
 import type { Entry, Filters } from './types';
 
@@ -8,7 +8,7 @@ const f = (p: Partial<Filters> = {}): Filters => ({ ...emptyFilters(), ...p });
 const task = (p: Partial<Entry> = {}) => newEntry('task', p);
 const idea = (p: Partial<Entry> = {}) => newEntry('idea', p);
 const spend = (p: Partial<Entry> = {}) =>
-  newEntry('money', { money: { type: 'expense', amountMinor: 1000, currency: 'KRW', linkedEntryId: null }, ...p });
+  newEntry('money', { money: newMoney({ type: 'expense', amountMinor: 1000 }), ...p });
 
 describe('matchesLens', () => {
   it("'all' 은 아무것도 거르지 않는다 — 세 축이 한 화면에 올라오는 근거", () => {

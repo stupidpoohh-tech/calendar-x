@@ -21,6 +21,7 @@ import type {
 } from '../domain/types';
 import { COLOR_BY_ID, STATUS_BY_ID } from '../domain/constants';
 import { COL, col } from './paths';
+import { newMoney } from '../domain/entry';
 
 export const BALANCE_TITLE = '::balance::';
 export const LOANS_TITLE = '::loans::';
@@ -89,6 +90,21 @@ function legacyRecurrence(raw: unknown): Recurrence | null {
 }
 
 /**
+ * 옛 제목이 달고 있는 자동 생성 접두들.
+ *
+ * `MONEY_TYPES` 의 지금 label 만 보면 안 된다. 이관 대상은 **그때 저장된 문자열**이라,
+ * 화면 문구를 고치는 순간 옛 접두를 못 알아보고 '예상 입금 2,500,000원' 이 통째로
+ * 사용자가 쓴 라벨로 남는다. 실제로 income 의 이름을 '들어올 돈' 으로 바꾸면서 났다.
+ * 그래서 지금 label 과 **지난 label** 을 함께 둔다.
+ */
+const PAST_TYPE_LABELS: readonly string[] = ['예상 입금'];
+
+const AUTO_PREFIXES: readonly string[] = [
+  ...MONEY_TYPES.map((t) => t.label),
+  ...PAST_TYPE_LABELS,
+];
+
+/**
  * 가계부 제목은 저장할 때 '나갈 돈 45,000원 · 전기요금' 처럼 자동 생성됐다.
  * 사용자가 실제로 쓴 라벨은 ' · ' 뒤에 있다. 앞부분은 이제 화면에서 파생하므로 떼어낸다.
  */
@@ -97,13 +113,13 @@ export function extractMoneyLabel(title: string, type: MoneyType): string {
   const sepIndex = title.indexOf(' · ');
   if (sepIndex >= 0) {
     const head = title.slice(0, sepIndex);
-    if (head.startsWith(typeLabel) || MONEY_TYPES.some((t) => head.startsWith(t.label))) {
+    if (head.startsWith(typeLabel) || AUTO_PREFIXES.some((l) => head.startsWith(l))) {
       return title.slice(sepIndex + 3).trim();
     }
     return title.trim();
   }
   // ' · ' 가 없고 자동 생성 형태 그대로면 라벨이 없었던 것이다.
-  if (/^.+ [\d,]+원$/.test(title) && MONEY_TYPES.some((t) => title.startsWith(t.label))) return '';
+  if (/^.+ [\d,]+원$/.test(title) && AUTO_PREFIXES.some((l) => title.startsWith(l))) return '';
   return title.trim();
 }
 
@@ -257,12 +273,7 @@ export function convertLegacyItems(items: readonly Raw[]): MigrationResult {
           }
         : null,
       money: kind === 'money'
-        ? {
-            type: moneyType,
-            amountMinor: Math.trunc(Math.abs(numOf(raw.amount))),
-            currency: DEFAULT_CURRENCY,
-            linkedEntryId: null,
-          }
+        ? newMoney({ type: moneyType, amountMinor: Math.trunc(Math.abs(numOf(raw.amount))) })
         : null,
       // 이관 전 구조에는 회복이 없었다. 표식 없이 그대로 온다.
       recovery: null,

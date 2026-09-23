@@ -26,9 +26,9 @@
 import {
   deleteDoc, doc, getDoc, setDoc, writeBatch, type Firestore,
 } from 'firebase/firestore';
-import type { Account, Debt, Entry, Pin, RecoveryRule } from '../domain/types';
+import type { Account, Budget, Debt, Entry, Pin, RecoveryRule, Reserve } from '../domain/types';
 import {
-  accountToDoc, debtToDoc, entryToDoc, pinToDoc, recoveryRuleToDoc,
+  accountToDoc, budgetToDoc, debtToDoc, entryToDoc, pinToDoc, recoveryRuleToDoc, reserveToDoc,
 } from './converters';
 import { COL, docIn, userDoc } from './paths';
 
@@ -37,12 +37,15 @@ export type PendingKind =
   | 'account'
   | 'debt' | 'debtDelete'
   | 'pin' | 'pinDelete'
+  | 'budget' | 'budgetDelete'
+  | 'reserve' | 'reserveDelete'
   | 'taskOrder'
   | 'recoveryRule' | 'recoveryPatch' | 'recoveryCommit';
 
 const KINDS: readonly PendingKind[] = [
   'entry', 'entryDelete', 'account', 'debt', 'debtDelete',
-  'pin', 'pinDelete', 'taskOrder', 'recoveryRule', 'recoveryPatch', 'recoveryCommit',
+  'pin', 'pinDelete', 'budget', 'budgetDelete', 'reserve', 'reserveDelete',
+  'taskOrder', 'recoveryRule', 'recoveryPatch', 'recoveryCommit',
 ];
 
 /** 회복은 항목과 규칙을 한 배치로 쓴다. 그 한 벌이 payload 다. */
@@ -53,7 +56,7 @@ export interface RecoveryCommitPayload {
 }
 
 export type PendingPayload =
-  | Entry | Account | Debt | Pin | RecoveryRule
+  | Entry | Account | Debt | Pin | Budget | Reserve | RecoveryRule
   | { id: string }
   | { ordered: { id: string; order: number }[] }
   | Partial<RecoveryRule>
@@ -112,6 +115,18 @@ export function sendPending(db: Firestore, uid: string, op: CommitInput): Promis
     }
     case 'pinDelete':
       return deleteDoc(docIn(db, uid, COL.pins, asId(op.payload)));
+    case 'budget': {
+      const b = op.payload as Budget;
+      return setDoc(docIn(db, uid, COL.budgets, b.id), budgetToDoc(b));
+    }
+    case 'budgetDelete':
+      return deleteDoc(docIn(db, uid, COL.budgets, asId(op.payload)));
+    case 'reserve': {
+      const r = op.payload as Reserve;
+      return setDoc(docIn(db, uid, COL.reserves, r.id), reserveToDoc(r));
+    }
+    case 'reserveDelete':
+      return deleteDoc(docIn(db, uid, COL.reserves, asId(op.payload)));
     case 'taskOrder':
       return sendTaskOrder(db, uid, (op.payload as { ordered: { id: string; order: number }[] }).ordered);
     case 'recoveryRule':
@@ -178,6 +193,16 @@ function targetOf(op: PendingOp): { col: string; id: string; base: string } | nu
     case 'entryDelete': return { col: COL.entries, id: asId(op.payload), base: op.at };
     case 'debtDelete': return { col: COL.debts, id: asId(op.payload), base: op.at };
     case 'pinDelete': return { col: COL.pins, id: asId(op.payload), base: op.at };
+    case 'budget': {
+      const b = op.payload as Budget;
+      return { col: COL.budgets, id: b.id, base: b.updatedAt };
+    }
+    case 'reserve': {
+      const r = op.payload as Reserve;
+      return { col: COL.reserves, id: r.id, base: r.updatedAt };
+    }
+    case 'budgetDelete': return { col: COL.budgets, id: asId(op.payload), base: op.at };
+    case 'reserveDelete': return { col: COL.reserves, id: asId(op.payload), base: op.at };
     default: return null;
   }
 }

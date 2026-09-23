@@ -31,8 +31,25 @@
 import { DEFAULT_CURRENCY, MONEY_TYPE_BY_ID } from './constants';
 import { addDaysISO, daysBetween, localDateOf, normalizeDate, parseDate, toISO } from './date';
 import { effectiveEndDate } from './entry';
+import { inAnyBudget, reservedOn } from './budget';
 import { isVirtualEntry } from './recurrence';
-import type { Account, DateISO, Entry } from './types';
+import type { Account, Budget, DateISO, Entry, Reserve } from './types';
+
+/**
+ * 한도에서 미리 빠져 있는 것들.
+ *
+ * 선택 인자로 둔다 — 예산도 세이브도 없는 계산(대부분의 테스트, `/tide` 이식 전 코드)이
+ * 그대로 돌아야 한다. 빈 값이면 예전과 완전히 같은 숫자가 나온다.
+ */
+export interface Reservations {
+  /** 생활비 예산. `max(총액, 쓴 돈)` 만큼 한도에서 자리를 잡는다. */
+  budgets?: readonly Budget[];
+  /** 세이브. 잔고는 그대로 두고 한도에서만 빠진다. */
+  reserves?: readonly Reserve[];
+}
+
+const NO_BUDGETS: readonly Budget[] = [];
+const NO_RESERVES: readonly Reserve[] = [];
 
 /**
  * 계산에 화면용 목록이 들어왔다.
@@ -374,15 +391,19 @@ export function unsettledAfter(accounts: readonly Account[], todayISO: DateISO):
  */
 export function limitOn(
   accounts: readonly Account[], entries: readonly Entry[],
-  date: DateISO, today: DateISO,
+  date: DateISO, today: DateISO, res: Reservations = {},
 ): number {
   assertOriginals(entries);
   // 오늘이 아니라 잔고 기준일 다음부터 센다. 오늘 적은 예정도 아직 잔고 밖이다.
   const from = unsettledAfter(accounts, today);
+  const budgets = res.budgets ?? NO_BUDGETS;
+  const reserves = res.reserves ?? NO_RESERVES;
   const balance = accounts.reduce((s, a) => s + a.balanceMinor, 0);
   let total = balance;
   for (const entry of entries) {
     if (!participates(entry)) continue;
+    // 예산에서 나가는 지출은 예산 몫 안에서 세어진다. 여기서 또 빼면 두 번 빠진다.
+    if (inAnyBudget(entry, budgets)) continue;
     if (isSpan(entry) && !entry.recurrence) {
       const end = normalizeDate(effectiveEndDate(entry));
       const start = normalizeDate(entry.startDate);
@@ -393,14 +414,16 @@ export function limitOn(
       total += netBetween([entry], from, date);
     }
   }
-  return total;
+  // 확보해 둔 돈(생활비 예산 · 세이브)은 쓸 수 있는 한도에서 미리 빠진다.
+  return total - reservedOn(budgets, reserves, entries, date, from);
 }
 
 /** 머리 숫자 — 다음 입금 전날(또는 30일 뒤)까지 남는 한도. */
 export function headlineLimit(
   accounts: readonly Account[], entries: readonly Entry[], today: DateISO,
+  res: Reservations = {},
 ): number {
-  return limitOn(accounts, entries, horizonOf(entries, today).end, today);
+  return limitOn(accounts, entries, horizonOf(entries, today).end, today, res);
 }
 
 /**
@@ -521,14 +544,18 @@ export function settle(
  */
 export function upcomingInHorizon(
   accounts: readonly Account[], entries: readonly Entry[], today: DateISO, horizon?: Horizon,
+  res: Reservations = {},
 ): Occurrence[] {
   assertOriginals(entries);
   const h = horizon ?? horizonOf(entries, today);
   // 머리 숫자와 같은 경계에서 세야 목록의 합과 숫자가 맞는다.
   const from = unsettledAfter(accounts, today);
+  const budgets = res.budgets ?? NO_BUDGETS;
   const out: Occurrence[] = [];
   for (const entry of entries) {
     if (!participates(entry)) continue;
+    // 예산에서 나가는 지출은 예산 줄에 들어간다. 여기에 또 세우면 두 번 보인다.
+    if (inAnyBudget(entry, budgets)) continue;
     if (isSpan(entry) && !entry.recurrence) {
       const start = normalizeDate(entry.startDate);
       const end = normalizeDate(effectiveEndDate(entry));

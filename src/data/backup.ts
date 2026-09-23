@@ -6,9 +6,16 @@
  * 쓰고 화면만 바꿔서 다음 스냅샷에 사라졌다. 여기서는 양쪽 다 Firestore 를 본다.
  */
 import { todayISO } from '../domain/date';
-import type { Account, Debt, Entry, Pin, RecoveryRule } from '../domain/types';
+import type { Account, Budget, Debt, Entry, Pin, RecoveryRule, Reserve } from '../domain/types';
 
-export const BACKUP_VERSION = 3;
+/**
+ * 4 부터 `budgets` · `reserves` 가 들어간다.
+ *
+ * 올린 이유는 **읽는 쪽이 둘을 구분해야 하기 때문**이다. v3 파일에 두 배열이 없는 것은
+ * 정상(그 구조가 없던 시절)이고, v4 파일에 없는 것은 망가진 파일이다. 버전을 그대로
+ * 두면 그 둘을 가를 수 없어 어느 쪽이든 빈 배열로 넘겨짚게 된다.
+ */
+export const BACKUP_VERSION = 4;
 
 export interface BackupPayload {
   app: 'Dada Calendar';
@@ -18,6 +25,8 @@ export interface BackupPayload {
   accounts: Account[];
   debts: Debt[];
   pins: Pin[];
+  budgets: Budget[];
+  reserves: Reserve[];
   /**
    * 회복 규칙. 항목이 아니라 설정이라 개수에 세지 않는다.
    * 빼 두면 "전체 데이터를 한 파일로" 라고 적어 두고 회복 간격과 밀린 횟수를
@@ -31,6 +40,8 @@ export interface BackupData {
   accounts: Account[];
   debts: Debt[];
   pins: Pin[];
+  budgets: Budget[];
+  reserves: Reserve[];
   recovery: RecoveryRule | null;
 }
 
@@ -43,6 +54,8 @@ export function buildBackup(data: BackupData): BackupPayload {
     accounts: data.accounts,
     debts: data.debts,
     pins: data.pins,
+    budgets: data.budgets,
+    reserves: data.reserves,
     recovery: data.recovery,
   };
 }
@@ -77,7 +90,8 @@ export function downloadJSON(payload: unknown, filename: string): void {
 
 /** 항목 수. 회복 규칙은 항목이 아니라 설정이라 세지 않는다. */
 export function countBackup(d: Omit<BackupData, 'recovery'>): number {
-  return d.entries.length + d.accounts.length + d.debts.length + d.pins.length;
+  return d.entries.length + d.accounts.length + d.debts.length + d.pins.length
+    + d.budgets.length + d.reserves.length;
 }
 
 /** 병합. 같은 id 는 원본을 남기고 새 항목만 더한다. */
@@ -91,6 +105,8 @@ export function mergeBackup(current: BackupData, incoming: BackupData): BackupDa
     accounts: merge(current.accounts, incoming.accounts),
     debts: merge(current.debts, incoming.debts),
     pins: merge(current.pins, incoming.pins),
+    budgets: merge(current.budgets, incoming.budgets),
+    reserves: merge(current.reserves, incoming.reserves),
     // 설정은 병합할 수 없다. 쓰고 있는 규칙을 남긴다.
     recovery: current.recovery ?? incoming.recovery,
   };

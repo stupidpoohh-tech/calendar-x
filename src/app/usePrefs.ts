@@ -11,6 +11,7 @@ const DEFAULTS: Prefs = {
   weekStart: 'mon',
   pinCollapsed: {},
   debtsCollapsed: false,
+  budgetsCollapsed: false,
   todayCollapsed: false,
   todayMoneyCollapsed: false,
   moneyCardCollapsed: false,

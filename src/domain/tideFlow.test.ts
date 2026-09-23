@@ -18,7 +18,7 @@
  */
 import { describe, expect, it } from 'vitest';
 import { entryFromDoc, entryToDoc } from '../data/converters';
-import { newEntry, setRecurrence } from './entry';
+import { newEntry, newMoney, setRecurrence } from './entry';
 import { isVirtualEntry, materialize } from './recurrence';
 import {
   headlineLimit, horizonOf, limitOn, netBetween, occurrences, settle,
@@ -40,7 +40,7 @@ const money = (
     title: extra.title ?? '',
     startDate,
     endDate: extra.endDate ?? null,
-    money: { type, amountMinor, currency: 'KRW', linkedEntryId: null },
+    money: newMoney({ type, amountMinor }),
   });
 
 const repeating = (e: Entry, r: Recurrence): Entry => setRecurrence(e, r);

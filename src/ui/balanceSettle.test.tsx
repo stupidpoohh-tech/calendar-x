@@ -8,7 +8,7 @@
  */
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { newEntry } from '../domain/entry';
+import { newEntry, newMoney } from '../domain/entry';
 import type { Account, Entry } from '../domain/types';
 import { CALC_ERROR, CALC_LOADING, CALC_READY, CALC_UNCONFIRMED, type CalcState } from './calcState';
 import { DialogHost } from './Dialog';
@@ -26,7 +26,7 @@ const account = (over: Partial<Account> = {}): Account => ({
 const expense = (amountMinor: number, startDate: string, title: string): Entry =>
   newEntry('money', {
     title, startDate,
-    money: { type: 'expense', amountMinor, currency: 'KRW', linkedEntryId: null },
+    money: newMoney({ amountMinor }),
   });
 
 function mount(props: {

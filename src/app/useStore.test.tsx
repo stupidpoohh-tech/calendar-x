@@ -5,7 +5,7 @@
  *   1. 달력을 넘겨도 **계산 구독**은 다시 붙지 않는다 (화면용만 갈아탄다)
  *   2. 계정이 바뀌면 앞 계정의 자료가 한 렌더도 남지 않는다
  *   3. "아직 못 받았다" 와 "비어 있다" 와 "실패했다" 를 다른 상태로 내놓는다
- *   4. 계산 상태는 **세 구독**(계산용 월 항목 · 반복 항목 · 잔고)을 종합한다
+ *   4. 계산 상태는 **다섯 구독**(계산용 월 항목 · 반복 항목 · 잔고 · 생활비 · 세이브)을 종합한다
  *
  * 4번이 없던 동안에는 월 자료만 도착하면 "다 받았다" 로 굴었다. 2025년에 시작한 반복
  * 지출이 아직 오지 않은 사이에 그 지출이 빠진 한도가 확정값처럼 떴다.
@@ -16,7 +16,7 @@ import type { Entry } from '../domain/types';
 import { newEntry } from '../domain/entry';
 import type { SnapMeta } from '../data/repo';
 
-type Kind = 'entries' | 'recurring' | 'accounts' | 'debts' | 'pins';
+type Kind = 'entries' | 'recurring' | 'accounts' | 'debts' | 'pins' | 'budgets' | 'reserves';
 
 interface Sub {
   kind: Kind;
@@ -56,6 +56,10 @@ vi.mock('../data/repo', async (importOriginal) => {
       record('debts', uid, [], cb, onError),
     subscribePins: (_db: unknown, uid: string, cb: unknown, onError: unknown) =>
       record('pins', uid, [], cb, onError),
+    subscribeBudgets: (_db: unknown, uid: string, cb: unknown, onError: unknown) =>
+      record('budgets', uid, [], cb, onError),
+    subscribeReserves: (_db: unknown, uid: string, cb: unknown, onError: unknown) =>
+      record('reserves', uid, [], cb, onError),
   };
 });
 
@@ -108,7 +112,7 @@ describe('달력을 넘길 때', () => {
     );
     rerender({ cursor: '2026-12-15' });
 
-    for (const kind of ['recurring', 'accounts', 'debts', 'pins'] as const) {
+    for (const kind of ['recurring', 'accounts', 'debts', 'pins', 'budgets', 'reserves'] as const) {
       const of = subs.filter((s) => s.kind === kind);
       expect(of, kind).toHaveLength(1);
       expect(of[0]!.alive, kind).toBe(true);
@@ -158,6 +162,8 @@ describe('월 경계 — 계산 창이 바뀔 때', () => {
       calcSubs()[0]!.push([entryAt('m', '2026-09-20')], LIVE);
       one('recurring').push([], LIVE);
       one('accounts').push([{ id: 'a1' }], LIVE);
+      one('budgets').push([], LIVE);
+      one('reserves').push([], LIVE);
     });
     expect(result.current.calc.status).toBe('live');
 
@@ -236,10 +242,26 @@ describe('계정이 바뀔 때', () => {
   });
 });
 
-describe('계산 상태는 세 구독을 종합한다', () => {
-  const mount = () => renderHook(() => useStore('u1', '2026-09-15', TODAY));
+describe('계산 상태는 다섯 구독을 종합한다', () => {
+  /** 구독만 붙인다. 아무것도 도착하지 않은 상태. */
+  const mountBare = () => renderHook(() => useStore('u1', '2026-09-15', TODAY));
 
-  /** 계산에 필요한 세 갈래를 원하는 만큼만 채운다. */
+  /**
+   * 예산·세이브까지 비어 있는 채로 **받아 둔** 상태에서 시작한다.
+   *
+   * 이 두 갈래를 매번 손으로 채우면 아래 시험들이 원래 보려던 것(월·반복·잔고 셋의
+   * 조합)을 가린다. 둘이 준비 상태에 실제로 끼어드는지는 바로 아래 두 시험이 본다.
+   */
+  const mount = () => {
+    const h = mountBare();
+    act(() => {
+      one('budgets').push([], LIVE);
+      one('reserves').push([], LIVE);
+    });
+    return h;
+  };
+
+  /** 계산에 필요한 갈래를 원하는 만큼만 채운다. */
   const deliver = (which: { month?: boolean; recurring?: boolean; accounts?: boolean }, meta = LIVE) => {
     act(() => {
       if (which.month) calcSubs()[0]!.push([entryAt('m', '2026-09-20')], meta);
@@ -247,6 +269,35 @@ describe('계산 상태는 세 구독을 종합한다', () => {
       if (which.accounts) one('accounts').push([{ id: 'a1' }], meta);
     });
   };
+
+  it('생활비 구독이 아직이면 준비되지 않았다', () => {
+    // 예산은 한도를 **깎는** 값이다. 아직 안 온 사이에 확정으로 내보내면 실제보다
+    // 큰 한도가 떴다가 잠시 뒤 줄어든다.
+    const { result } = mountBare();
+    act(() => { one('reserves').push([], LIVE); });
+    deliver({ month: true, recurring: true, accounts: true });
+
+    expect(result.current.calc.ready).toBe(false);
+    expect(result.current.calc.status).toBe('loading');
+  });
+
+  it('세이브 구독이 아직이면 준비되지 않았다', () => {
+    const { result } = mountBare();
+    act(() => { one('budgets').push([], LIVE); });
+    deliver({ month: true, recurring: true, accounts: true });
+
+    expect(result.current.calc.ready).toBe(false);
+  });
+
+  it('생활비 구독만 실패해도 계산은 error 다', () => {
+    const boom = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const { result } = mount();
+    deliver({ month: true, recurring: true, accounts: true });
+    act(() => { one('budgets').fail('budgets', new Error('네트워크')); });
+
+    expect(result.current.calc.status).toBe('error');
+    boom.mockRestore();
+  });
 
   it('처음에는 화면용도 계산용도 loading 이다', () => {
     const { result } = mount();
@@ -393,6 +444,19 @@ describe('계산 상태는 세 구독을 종합한다', () => {
 
     expect(result.current.calc.pending).toBe(true);
     expect(result.current.calc.status).toBe('live');
+  });
+
+  it('예산과 세이브가 도착하면 화면이 그대로 받는다', () => {
+    const { result } = mountBare();
+    act(() => {
+      one('budgets').push([{ id: 'b1', name: '9월 생활비', amountMinor: 700_000 }], LIVE);
+      one('reserves').push([{ id: 'r1', name: '비상금', amountMinor: 100_000 }], LIVE);
+    });
+    deliver({ month: true, recurring: true, accounts: true });
+
+    expect(result.current.calc.ready).toBe(true);
+    expect(result.current.budgets.map((b) => b.id)).toEqual(['b1']);
+    expect(result.current.reserves.map((r) => r.id)).toEqual(['r1']);
   });
 
   it('로그아웃 상태에서는 구독하지 않는다', () => {

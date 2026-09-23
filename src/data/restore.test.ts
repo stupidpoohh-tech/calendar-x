@@ -7,7 +7,8 @@
  *   2. 전체 교체는 "먼저 쓰고, 다 됐을 때만 지운다". 지우는 목록은 네 컬렉션 모두에서 뽑는다
  */
 import { describe, expect, it } from 'vitest';
-import { newEntry } from '../domain/entry';
+import { newBudget, newReserve } from '../domain/budget';
+import { newEntry, newMoney } from '../domain/entry';
 import { defaultRecoveryRule } from '../domain/recovery';
 import type { Account, BackupCollection, Debt, Entry, Pin } from '../domain/types';
 import type { BackupData } from './backup';
@@ -32,7 +33,7 @@ const pin = (p: Partial<Pin> = {}): Pin => ({
   id: 'p1', lens: 'task', text: '이번 분기 목표', order: 0, createdAt: '', updatedAt: '', ...p,
 });
 const data = (p: Partial<BackupData> = {}): BackupData => ({
-  entries: [], accounts: [], debts: [], pins: [], recovery: null, ...p,
+  entries: [], accounts: [], debts: [], pins: [], budgets: [], reserves: [], recovery: null, ...p,
 });
 
 describe('검증 — 온전한 파일은 통과한다', () => {
@@ -40,7 +41,7 @@ describe('검증 — 온전한 파일은 통과한다', () => {
     const ok = data({
       entries: [newEntry('task', { id: 't1', title: '치과' }), newEntry('money', {
         id: 'm1', startDate: '2026-09-12',
-        money: { type: 'expense', amountMinor: 65_000, currency: 'KRW', linkedEntryId: null },
+        money: newMoney({ type: 'expense', amountMinor: 65_000 }),
       })],
       accounts: [account()], debts: [debt()], pins: [pin()],
     });
@@ -122,7 +123,7 @@ describe('검증 — 잘못된 값은 조용히 바뀌지 않고 보고된다', 
     const bad = data({
       entries: [newEntry('money', {
         id: 'm1', startDate: '2026-09-01',
-        money: { type: 'expense', amountMinor: 1234.5, currency: 'KRW', linkedEntryId: null },
+        money: newMoney({ type: 'expense', amountMinor: 1234.5 }),
       })],
     });
     expect(firstReason(bad)).toContain('정수');
@@ -132,7 +133,7 @@ describe('검증 — 잘못된 값은 조용히 바뀌지 않고 보고된다', 
     const bad = data({
       entries: [newEntry('money', {
         id: 'm1', startDate: '2026-09-01',
-        money: { type: 'expense', amountMinor: -1000, currency: 'KRW', linkedEntryId: null },
+        money: newMoney({ type: 'expense', amountMinor: -1000 }),
       })],
     });
     expect(firstReason(bad)).toContain('음수');
@@ -207,6 +208,47 @@ describe('병합 계획', () => {
   });
 });
 
+describe('생활비 · 세이브 — 병합과 검증', () => {
+  it('파일에만 있는 예산·세이브를 더하고 같은 id 는 지금 것을 남긴다', () => {
+    const mine = newBudget({ id: 'b1', name: '내 것', amountMinor: 700_000 });
+    const current = data({ budgets: [mine] });
+    const incoming = data({
+      budgets: [newBudget({ id: 'b1', name: '파일 것', amountMinor: 1 }), newBudget({ id: 'b2' })],
+      reserves: [newReserve({ id: 'r1', amountMinor: 500_000 })],
+    });
+    const add = planMerge(current, incoming);
+    expect(add.budgets.map((b) => b.id)).toEqual(['b2']);
+    expect(add.reserves.map((r) => r.id)).toEqual(['r1']);
+  });
+
+  it('건수에 예산·세이브가 들어간다 — 총계가 맞아야 보고가 읽힌다', () => {
+    const d = data({
+      budgets: [newBudget({ id: 'b1' }), newBudget({ id: 'b2' })],
+      reserves: [newReserve({ id: 'r1' })],
+    });
+    expect(countDocs(d)).toBe(3);
+  });
+
+  it('기간이 뒤집힌 예산은 저장소를 건드리기 전에 걸러진다', () => {
+    const bad = data({
+      budgets: [newBudget({ id: 'b1', startDate: '2026-09-30', endDate: '2026-09-01' })],
+    });
+    const problems = validateBackup(bad);
+    expect(problems[0]?.collection).toBe('budgets');
+    expect(problems[0]?.reason).toContain('종료일이 시작일보다 앞섭니다');
+  });
+
+  it('음수 세이브는 걸러진다', () => {
+    const bad = data({ reserves: [newReserve({ id: 'r1', amountMinor: -1 })] });
+    expect(validateBackup(bad)[0]?.reason).toContain('음수입니다');
+  });
+
+  it('id 가 겹치는 예산은 걸러진다', () => {
+    const bad = data({ budgets: [newBudget({ id: 'b1' }), newBudget({ id: 'b1' })] });
+    expect(validateBackup(bad)[0]?.reason).toContain('겹칩니다');
+  });
+});
+
 describe('무결성 — Entry 가 아닌 값', () => {
   it('가계부 항목에 금액이 없으면 거른다', () => {
     const bad = data({ entries: [{ ...newEntry('task', { id: 'm1' }), kind: 'money' } as Entry] });
@@ -230,10 +272,11 @@ describe('무결성 — Entry 가 아닌 값', () => {
 function fakeStore(seed: BackupData, opts: { failWrites?: Set<string> } = {}) {
   const state: BackupData = {
     entries: [...seed.entries], accounts: [...seed.accounts],
-    debts: [...seed.debts], pins: [...seed.pins], recovery: seed.recovery,
+    debts: [...seed.debts], pins: [...seed.pins],
+    budgets: [...seed.budgets], reserves: [...seed.reserves], recovery: seed.recovery,
   };
   const log: string[] = [];
-  const keys: BackupCollection[] = ['entries', 'accounts', 'debts', 'pins'];
+  const keys: BackupCollection[] = ['entries', 'accounts', 'debts', 'pins', 'budgets', 'reserves'];
 
   const io: RestoreIO = {
     fetchAll: async () => {
@@ -241,6 +284,7 @@ function fakeStore(seed: BackupData, opts: { failWrites?: Set<string> } = {}) {
       return {
         entries: [...state.entries], accounts: [...state.accounts],
         debts: [...state.debts], pins: [...state.pins],
+        budgets: [...state.budgets], reserves: [...state.reserves],
       };
     },
     createIfAbsent: async (payload) => {

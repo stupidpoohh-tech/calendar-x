@@ -2,11 +2,11 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { describeFirestoreError, isPermissionDenied } from '../data/errors';
 import { getFirebase } from '../data/firebase';
 import {
-  monthWindow, subscribeAccounts, subscribeDebts, subscribeEntriesForMonths,
-  subscribePins, subscribeRecurringEntries, tideWindow,
+  monthWindow, subscribeAccounts, subscribeBudgets, subscribeDebts, subscribeEntriesForMonths,
+  subscribePins, subscribeRecurringEntries, subscribeReserves, tideWindow,
   type SnapMeta,
 } from '../data/repo';
-import type { Account, Debt, Entry, Pin, YearMonth } from '../domain/types';
+import type { Account, Budget, Debt, Entry, Pin, Reserve, YearMonth } from '../domain/types';
 
 export interface StoreState {
   /**
@@ -30,6 +30,10 @@ export interface StoreState {
   accounts: Account[];
   debts: Debt[];
   pins: Pin[];
+  /** 생활비 예산. 한도 계산에 들어가므로 `calc` 가 이 구독까지 종합한다. */
+  budgets: Budget[];
+  /** 세이브. 마찬가지로 한도를 깎는다. */
+  reserves: Reserve[];
   /**
    * 화면용 자료의 상태. `loading` 은 이 값에서 나온다.
    */
@@ -96,8 +100,8 @@ const feedFrom = (count: number, meta: SnapMeta): FeedState => ({
 /**
  * 여러 구독을 하나의 상태로 합친다.
  *
- * 금액 계산에 필요한 자료는 **셋**이다 — 계산용 월 항목, 반복 항목, 잔고. 셋 중 하나만
- * 늦어도 숫자는 틀린다. 예전에는 월 구독 하나만 보고 있어서, 2025년에 시작한 반복 지출이
+ * 금액 계산에 필요한 자료는 **다섯**이다 — 계산용 월 항목, 반복 항목, 잔고, 생활비 예산,
+ * 세이브. 하나만 늦어도 숫자는 틀린다. 예전에는 월 구독 하나만 보고 있어서, 2025년에 시작한 반복 지출이
  * 아직 도착하지 않은 사이에 그 지출이 빠진 한도를 확정값처럼 보여 줬다.
  *
  * 규칙은 가장 나쁜 갈래를 따른다.
@@ -134,7 +138,7 @@ const NO_ENTRIES: Entry[] = [];
 
 const EMPTY: StoreState = {
   entries: [], tideEntries: [], tideMonths: [],
-  accounts: [], debts: [], pins: [],
+  accounts: [], debts: [], pins: [], budgets: [], reserves: [],
   display: FEED_LOADING, calc: FEED_LOADING,
   loading: false, error: null, rulesBlocked: false,
 };
@@ -170,6 +174,10 @@ export function useStore(uid: string | null, cursorISO: string, todayISO: string
   const [accountsFeed, setAccountsFeed] = useState<FeedState>(FEED_LOADING);
   const [debts, setDebts] = useState<Debt[]>([]);
   const [pins, setPins] = useState<Pin[]>([]);
+  const [budgets, setBudgets] = useState<Budget[]>([]);
+  const [budgetsFeed, setBudgetsFeed] = useState<FeedState>(FEED_LOADING);
+  const [reserves, setReserves] = useState<Reserve[]>([]);
+  const [reservesFeed, setReservesFeed] = useState<FeedState>(FEED_LOADING);
   const [error, setError] = useState<string | null>(null);
   const [rulesBlocked, setRulesBlocked] = useState(false);
 
@@ -191,6 +199,8 @@ export function useStore(uid: string | null, cursorISO: string, todayISO: string
     setRecurring(NO_ENTRIES); setRecurringFeed(FEED_LOADING);
     setAccounts([]); setAccountsFeed(FEED_LOADING);
     setDebts([]); setPins([]);
+    setBudgets([]); setBudgetsFeed(FEED_LOADING);
+    setReserves([]); setReservesFeed(FEED_LOADING);
     setError(null); setRulesBlocked(false);
   }
 
@@ -286,6 +296,16 @@ export function useStore(uid: string | null, cursorISO: string, todayISO: string
       ),
       subscribeDebts(db, uid, own(uid, setDebts), own(uid, onError)),
       subscribePins(db, uid, own(uid, setPins), own(uid, onError)),
+      subscribeBudgets(
+        db, uid,
+        own(uid, (items, meta) => { setBudgets(items); setBudgetsFeed(feedFrom(items.length, meta)); }),
+        own(uid, (scope, err) => failWith(setBudgetsFeed, scope, err)),
+      ),
+      subscribeReserves(
+        db, uid,
+        own(uid, (items, meta) => { setReserves(items); setReservesFeed(feedFrom(items.length, meta)); }),
+        own(uid, (scope, err) => failWith(setReservesFeed, scope, err)),
+      ),
     ];
     return () => {
       unsubs.forEach((u) => u());
@@ -310,12 +330,17 @@ export function useStore(uid: string | null, cursorISO: string, todayISO: string
   const tideEntries = useMemo(() => mergeById(tideRaw, recurring), [tideRaw, recurring]);
 
   /*
-    계산 상태는 세 구독을 종합한다. 월 항목만 도착해도 반복 지출과 잔고가 없으면
+    계산 상태는 다섯 구독을 종합한다. 월 항목만 도착해도 반복 지출·잔고가 없으면
     한도는 틀린다 — 그 상태를 "준비됨" 으로 내보내지 않는다.
+
+    예산과 세이브도 같은 자리에 있다. 둘 다 한도를 **깎는** 값이라, 아직 안 온 사이에
+    확정으로 내보내면 실제보다 큰 한도가 확정값처럼 떴다가 잠시 뒤 줄어든다.
   */
   const calc = useMemo(
-    () => combineFeeds([tideNow?.feed ?? FEED_LOADING, recurringFeed, accountsFeed]),
-    [tideNow?.feed, recurringFeed, accountsFeed],
+    () => combineFeeds([
+      tideNow?.feed ?? FEED_LOADING, recurringFeed, accountsFeed, budgetsFeed, reservesFeed,
+    ]),
+    [tideNow?.feed, recurringFeed, accountsFeed, budgetsFeed, reservesFeed],
   );
 
   // 계정이 막 바뀐 렌더에서는 아직 앞 계정의 값이 상태에 남아 있다. 내보내지 않는다.
@@ -323,7 +348,7 @@ export function useStore(uid: string | null, cursorISO: string, todayISO: string
 
   return {
     entries, tideEntries, tideMonths,
-    accounts, debts, pins,
+    accounts, debts, pins, budgets, reserves,
     display, calc,
     loading: !display.ready, error, rulesBlocked,
   };

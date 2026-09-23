@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { newEntry, setRecurrence } from './entry';
+import { newEntry, newMoney, setRecurrence } from './entry';
 import { baseIdOf, describeRecurrence, expandEntry, materialize, occurrenceDateOf } from './recurrence';
 import type { Entry, Recurrence } from './types';
 
@@ -89,7 +89,7 @@ describe('materialize', () => {
 
   it('가계부 항목도 반복한다 — 월세·구독료', () => {
     const rent = setRecurrence(
-      newEntry('money', { startDate: '2026-01-05', money: { type: 'expense', amountMinor: 700_000, currency: 'KRW', linkedEntryId: null } }),
+      newEntry('money', { startDate: '2026-01-05', money: newMoney({ type: 'expense', amountMinor: 700_000 }) }),
       rule({ freq: 'monthly' }),
     );
     const out = materialize([rent], '2026-01-01', '2026-03-31');

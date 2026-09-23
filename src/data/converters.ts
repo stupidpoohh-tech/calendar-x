@@ -7,7 +7,7 @@
 import { DEFAULT_COLOR, DEFAULT_CURRENCY, MONEY_TYPE_BY_ID, STATUS_BY_ID } from '../domain/constants';
 import { normalizeDate, todayISO, ymRange } from '../domain/date';
 import type {
-  Account, ColorId, Debt, Entry, EntryKind, MoneyType, Pin,
+  Account, Budget, ColorId, Debt, Entry, EntryKind, MoneyType, Pin, Reserve,
   RecoveryFields, RecoveryOption, RecoveryRule, RecoveryWindowId,
   Recurrence, RepeatFreq, TaskStatus,
 } from '../domain/types';
@@ -168,6 +168,11 @@ export function entryFromDoc(id: string, raw: Raw): Entry {
           amountMinor: Math.trunc(num(moneyRaw?.amountMinor)),
           currency: str(moneyRaw?.currency, DEFAULT_CURRENCY),
           linkedEntryId: typeof moneyRaw?.linkedEntryId === 'string' ? moneyRaw.linkedEntryId : null,
+          // 아래 셋은 나중에 생긴 필드다. 예전 문서에는 없으므로 기본값으로 채운다.
+          budgetId: typeof moneyRaw?.budgetId === 'string' ? moneyRaw.budgetId : null,
+          debtId: typeof moneyRaw?.debtId === 'string' ? moneyRaw.debtId : null,
+          // legacy `priority` 유형은 그 자체가 우선 표시였다. 뜻을 잃지 않게 옮겨 읽는다.
+          priority: moneyRaw?.priority === true || moneyRaw?.type === 'priority',
         }
       : null,
     // 회복 표식은 할 일 위에만 얹힌다.
@@ -267,4 +272,59 @@ export function pinFromDoc(id: string, raw: Raw): Pin {
 
 export function pinToDoc(p: Pin): Raw {
   return { lens: p.lens, text: p.text, order: p.order, createdAt: p.createdAt, updatedAt: p.updatedAt };
+}
+
+/**
+ * 생활비 예산.
+ *
+ * 기간이 뒤집혀 있으면 종료일을 시작일로 맞춘다 — 하루짜리 예산이 된다. 읽기 계층이
+ * 던지면 문서 하나 때문에 화면 전체가 비어 버린다.
+ */
+export function budgetFromDoc(id: string, raw: Raw): Budget {
+  const startDate = normalizeDate(str(raw.startDate)) || todayISO();
+  const endRaw = normalizeDate(str(raw.endDate));
+  return {
+    id,
+    name: str(raw.name),
+    startDate,
+    endDate: endRaw && endRaw >= startDate ? endRaw : startDate,
+    amountMinor: Math.trunc(num(raw.amountMinor)),
+    currency: str(raw.currency, DEFAULT_CURRENCY),
+    createdAt: str(raw.createdAt),
+    updatedAt: str(raw.updatedAt),
+  };
+}
+
+export function budgetToDoc(b: Budget): Raw {
+  return {
+    name: b.name,
+    startDate: b.startDate,
+    endDate: b.endDate,
+    amountMinor: b.amountMinor,
+    currency: b.currency,
+    createdAt: b.createdAt,
+    updatedAt: b.updatedAt,
+  };
+}
+
+/** 세이브. 날짜가 없다 — 특정 날의 사건이 아니라 지금 묶여 있는 상태다. */
+export function reserveFromDoc(id: string, raw: Raw): Reserve {
+  return {
+    id,
+    name: str(raw.name),
+    amountMinor: Math.trunc(num(raw.amountMinor)),
+    currency: str(raw.currency, DEFAULT_CURRENCY),
+    createdAt: str(raw.createdAt),
+    updatedAt: str(raw.updatedAt),
+  };
+}
+
+export function reserveToDoc(r: Reserve): Raw {
+  return {
+    name: r.name,
+    amountMinor: r.amountMinor,
+    currency: r.currency,
+    createdAt: r.createdAt,
+    updatedAt: r.updatedAt,
+  };
 }

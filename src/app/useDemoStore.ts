@@ -8,7 +8,7 @@
 import { useMemo } from 'react';
 import { tideWindow } from '../data/repo';
 import { addDaysISO, todayISO } from '../domain/date';
-import { newEntry, setRecurrence } from '../domain/entry';
+import { newEntry, newMoney, setRecurrence } from '../domain/entry';
 import { FEED_DEMO, type StoreState } from './useStore';
 
 export function useDemoStore(): StoreState {
@@ -64,17 +64,18 @@ export function useDemoStore(): StoreState {
       newEntry('money', {
         id: 'demo-money-1', title: '급여',
         startDate: salary,
-        money: { type: 'income', amountMinor: 3_000_000, currency: 'KRW', linkedEntryId: null },
+        money: newMoney({ type: 'income', amountMinor: 3_000_000 }),
       }),
       newEntry('money', {
         id: 'demo-money-2', title: '전기요금',
         startDate: soon,
-        money: { type: 'expense', amountMinor: 65_000, currency: 'KRW', linkedEntryId: null },
+        money: newMoney({ type: 'expense', amountMinor: 65_000 }),
       }),
+      // 생활비에서 나간 지출. 예산 안이라 한도를 더 깎지 않는다 — 예산이 이미 잡아 뒀다.
       newEntry('money', {
-        id: 'demo-money-3', title: '생활비',
-        startDate: spanStart, endDate: spanEnd,
-        money: { type: 'living', amountMinor: 620_000, currency: 'KRW', linkedEntryId: null },
+        id: 'demo-money-3', title: '점심',
+        startDate: today,
+        money: newMoney({ type: 'expense', amountMinor: 12_000, budgetId: 'demo-budget-1' }),
       }),
     ];
 
@@ -91,6 +92,17 @@ export function useDemoStore(): StoreState {
         order: 0, createdAt: '', updatedAt: '',
       }],
       debts: [],
+      budgets: [{
+        id: 'demo-budget-1', name: '이번 달 생활비',
+        startDate: spanStart, endDate: spanEnd,
+        amountMinor: 620_000, currency: 'KRW',
+        createdAt: '', updatedAt: '',
+      }],
+      reserves: [{
+        id: 'demo-reserve-1', name: '비상금',
+        amountMinor: 100_000, currency: 'KRW',
+        createdAt: '', updatedAt: '',
+      }],
       pins: [{
         id: 'demo-pin-1', lens: 'task',
         text: '이번 분기 목표: 상용화',

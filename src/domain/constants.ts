@@ -1,4 +1,6 @@
-import type { ColorId, EntryKind, LensId, MoneyType, RepeatFreq, TaskStatus } from './types';
+import type {
+  ColorId, EntryKind, LensId, MoneyType, NewMoneyType, RepeatFreq, TaskStatus,
+} from './types';
 
 export interface ColorDef { id: ColorId; hex: string; label: string }
 
@@ -63,17 +65,38 @@ export interface MoneyTypeDef {
   ranged: boolean;
   defaultColor: ColorId;
   hint: string;
+  /**
+   * 새 입력 화면에서 고를 수 없는 옛 종류.
+   *
+   * **계산에서는 빼지 않는다.** 이미 저장된 문서가 이 값을 들고 있고, 목록에서 지우면
+   * `converters` 가 모르는 값을 'expense' 로 떨어뜨려 입금이 지출이 되거나
+   * (`save` · `free`) 잔고에 영향이 없던 항목이 잔고를 깎는다.
+   * 사라지는 것은 고르는 자리뿐이다.
+   */
+  legacy?: true;
 }
 
 export const MONEY_TYPES: readonly MoneyTypeDef[] = [
-  { id: 'income',   label: '예상 입금', color: '#22c55e', sign:  1, ranged: false, defaultColor: 'green',  hint: '들어올 돈' },
+  { id: 'income',   label: '들어올 돈', color: '#22c55e', sign:  1, ranged: false, defaultColor: 'green',  hint: '입금 예정' },
   { id: 'expense',  label: '나갈 돈',   color: '#ef4444', sign: -1, ranged: false, defaultColor: 'red',    hint: '지출 예정' },
-  { id: 'repay',    label: '갚을 거',   color: '#f97316', sign: -1, ranged: false, defaultColor: 'orange', hint: '상환 예정' },
-  { id: 'priority', label: '우선 상환', color: '#8b5cf6', sign: -1, ranged: false, defaultColor: 'violet', hint: '먼저 갚을 것' },
-  { id: 'living',   label: '생활비',    color: '#3b82f6', sign: -1, ranged: true,  defaultColor: 'blue',   hint: '기간에 걸쳐 나가는 돈' },
-  { id: 'save',     label: '세이브',    color: '#06b6d4', sign:  0, ranged: false, defaultColor: 'cyan',   hint: '떼어 두는 돈 — 잔고에서 빠지지 않음' },
-  { id: 'free',     label: '가용',      color: '#6b7280', sign:  0, ranged: true,  defaultColor: 'blue',   hint: '쓸 수 있는 여유 — 참고용' },
+  { id: 'repay',    label: '갚을 거',   color: '#f97316', sign: -1, ranged: false, defaultColor: 'orange', hint: '상환 예정', legacy: true },
+  { id: 'priority', label: '우선 상환', color: '#8b5cf6', sign: -1, ranged: false, defaultColor: 'violet', hint: '먼저 갚을 것', legacy: true },
+  { id: 'living',   label: '생활비',    color: '#3b82f6', sign: -1, ranged: true,  defaultColor: 'blue',   hint: '기간에 걸쳐 나가는 돈', legacy: true },
+  { id: 'save',     label: '세이브',    color: '#06b6d4', sign:  0, ranged: false, defaultColor: 'cyan',   hint: '떼어 두는 돈 — 잔고에서 빠지지 않음', legacy: true },
+  { id: 'free',     label: '가용',      color: '#6b7280', sign:  0, ranged: true,  defaultColor: 'blue',   hint: '쓸 수 있는 여유 — 참고용', legacy: true },
 ];
+
+/**
+ * 새로 만들 때 고를 수 있는 것. 흐름 두 갈래뿐이다.
+ *
+ * 나머지 뜻(생활비 · 세이브 · 대출 상환)은 종류가 아니라 **연결**로 표현한다 —
+ * `budgetId` · Reserve 문서 · `debtId`. 종류 하나에 여러 뜻을 욱여넣으면
+ * "생활비이면서 대출 상환" 같은 것을 적을 자리가 없어진다.
+ */
+export const NEW_MONEY_TYPES: readonly MoneyTypeDef[] =
+  MONEY_TYPES.filter((t) => !t.legacy);
+
+export const NEW_MONEY_TYPE_IDS: readonly NewMoneyType[] = ['income', 'expense'];
 
 export const MONEY_TYPE_BY_ID: Record<MoneyType, MoneyTypeDef> =
   Object.fromEntries(MONEY_TYPES.map((t) => [t.id, t])) as Record<MoneyType, MoneyTypeDef>;
