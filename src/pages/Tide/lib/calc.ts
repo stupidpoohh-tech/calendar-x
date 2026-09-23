@@ -10,6 +10,7 @@ import {
   toISODate,
 } from './date';
 import type { Entry, State } from './types';
+import { inAnyBudget, reservedOn } from './budget';
 
 /**
  * 예정 한 건의 하루 발생분. amount는 그 날 몫(양수)이다.
@@ -173,6 +174,7 @@ export function limitOn(state: State, date: ISODate, today: ISODate): number {
   const from = unsettledAfter(state, today);
   let total = state.balance.amount;
   for (const entry of state.entries) {
+    if (inAnyBudget(entry, state.budgets ?? [])) continue;
     const s = entry.schedule;
     if (s.type === 'span') {
       if (compareDate(s.start, date) <= 0) {
@@ -182,7 +184,7 @@ export function limitOn(state: State, date: ISODate, today: ISODate): number {
       total += netBetween([entry], from, date);
     }
   }
-  return total;
+  return total - reservedOn(state, date, from).total;
 }
 
 /** 머리 숫자 — 다음 입금 전날(또는 30일 뒤)까지 남는 한도. */
@@ -235,6 +237,7 @@ export function upcomingInHorizon(state: State, today: ISODate): Occurrence[] {
   const from = unsettledAfter(state, today);
   const out: Occurrence[] = [];
   for (const entry of state.entries) {
+    if (inAnyBudget(entry, state.budgets ?? [])) continue;
     const s = entry.schedule;
     if (s.type === 'span') {
       if (compareDate(s.start, h.end) <= 0) {

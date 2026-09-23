@@ -11,6 +11,7 @@ import {
 } from '../lib/date';
 import {
   type Entry,
+  type Budget,
   type EntryKind,
   type Schedule,
   type SpanColor,
@@ -18,6 +19,8 @@ import {
   SPAN_COLOR_LABEL,
   newId,
   spanColorOf,
+  isISODate,
+  isMoney,
 } from '../lib/types';
 import { Modal, ModalHeader } from './Modal';
 import { MoneyInput } from './MoneyInput';
@@ -32,6 +35,8 @@ export type DayContext = {
 type Repeat = Schedule['type'];
 
 type Props = {
+  budgets?: Budget[];
+  defaultBudgetId?: string;
   day?: DayContext;
   today: ISODate;
   /** 있으면 수정 모드 — 폼이 이 항목으로 채워진다. */
@@ -45,6 +50,8 @@ type Props = {
 };
 
 export function EntryDialog({
+  budgets = [],
+  defaultBudgetId,
   day,
   today,
   initial,
@@ -64,6 +71,7 @@ export function EntryDialog({
   const [kind, setKind] = useState<EntryKind>(initial?.kind ?? 'expense');
   const [name, setName] = useState(initial?.name ?? '');
   const [amount, setAmount] = useState(initial?.amount ?? 0);
+  const [budgetId, setBudgetId] = useState(initial?.budgetId ?? defaultBudgetId ?? '');
   const [repeat, setRepeat] = useState<Repeat>(initial?.schedule.type ?? 'once');
   const [everyDays, setEveryDays] = useState(
     initial?.schedule.type === 'every' ? initial.schedule.days : 7,
@@ -83,7 +91,10 @@ export function EntryDialog({
   // 날짜에 하한을 두지 않는다. 지난 날짜 항목은 한도(오늘, d]에 애초에 안 들어가서
   // 계산을 흔들지 않고, 잘못 적은 과거를 남겨두는 것보다 적을 수 있는 편이 낫다.
   const spanBroken = repeat === 'span' && (spanEnd === '' || compareDate(date, spanEnd) > 0);
-  const canSubmit = name.trim().length > 0 && amount > 0 && date !== '' && !spanBroken;
+  const eligibleBudgets = budgets.filter((b) => date >= b.start && date <= b.end);
+  const linked = kind === 'expense' && repeat === 'once' && eligibleBudgets.some((b) => b.id === budgetId);
+  const canSubmit = name.trim().length > 0 && isMoney(amount) && amount > 0
+    && isISODate(date) && !spanBroken && (repeat !== 'span' || isISODate(spanEnd));
 
   const dayOfMonth = date === '' ? 1 : fromISODate(date).getDate();
 
@@ -103,6 +114,7 @@ export function EntryDialog({
       amount,
       kind,
       schedule,
+      ...(budgetId ? { budgetId } : {}),
       ...(repeat === 'span' ? { color } : {}),
     };
     if (initial) onUpdate?.(entry);
@@ -210,6 +222,9 @@ export function EntryDialog({
 
       <form
         className="dialog-form"
+        onKeyDown={(e) => {
+          if (e.key === 'Enter' && e.nativeEvent.isComposing) e.preventDefault();
+        }}
         onSubmit={(e) => {
           e.preventDefault();
           submit();
@@ -235,7 +250,7 @@ export function EntryDialog({
 
         <label className="dialog-row">
           <span className="dialog-row__label">금액</span>
-          <MoneyInput value={amount} onChange={setAmount} placeholder="금액 입력" />
+          <MoneyInput aria-label="금액" value={amount} onChange={setAmount} placeholder="금액 입력" />
         </label>
 
         <label className="dialog-row">
@@ -282,6 +297,20 @@ export function EntryDialog({
           </div>
         )}
 
+        {kind === 'expense' && (
+          <label className="dialog-row">
+            <span className="dialog-row__label">사용처</span>
+            <select aria-label="사용처" value={budgetId} onChange={(e) => setBudgetId(e.target.value)}>
+              <option value="">별도 지출</option>
+              {budgets.filter((b) => b.id === budgetId || (repeat === 'once' && eligibleBudgets.includes(b))).map((b) => (
+                <option key={b.id} value={b.id}>{b.name}에서 사용</option>
+              ))}
+              {budgetId && !budgets.some((b) => b.id === budgetId) && <option value={budgetId}>삭제된 예산</option>}
+            </select>
+          </label>
+        )}
+        {budgetId && !linked && <p className="muted" role="status">예산 기간 안의 한 번짜리 지출만 연결됩니다. 현재 항목은 별도 입출금으로 계산됩니다.</p>}
+
         {repeat === 'span' && (
           <>
             <div className="dialog-row">
@@ -317,7 +346,7 @@ export function EntryDialog({
           <input
             type="text"
             value={name}
-            placeholder={repeat === 'span' ? '예: 생활비' : '내용을 적어보세요…'}
+            placeholder={repeat === 'span' ? '예: 여행 기간 지출' : '내용을 적어보세요…'}
             onChange={(e) => setName(e.target.value)}
           />
         </label>

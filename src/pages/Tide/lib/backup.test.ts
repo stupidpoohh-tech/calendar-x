@@ -9,6 +9,8 @@ import {
 import type { State } from './types';
 
 const sample: State = {
+  budgets: [],
+  reserves: [],
   balance: { amount: 1_900_000, checkedAt: '2026-03-07T09:00:00.000Z' },
   entries: [
     { id: 'a', name: '월세', amount: 600_000, kind: 'expense', schedule: { type: 'monthly', day: 10 } },

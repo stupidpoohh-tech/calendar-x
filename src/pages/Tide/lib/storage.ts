@@ -1,6 +1,6 @@
 import { type State, isState, newId } from './types';
 
-export const SCHEMA_VERSION = 4;
+export const SCHEMA_VERSION = 5;
 
 const SCHEMA_KEY = 'tideover.schema';
 const STATE_KEY = 'tideover.state';
@@ -44,7 +44,8 @@ export function loadState(): LoadResult {
   const raw = store.getItem(STATE_KEY);
   if (raw === null) return { status: 'empty' };
 
-  const version = Number(store.getItem(SCHEMA_KEY) ?? SCHEMA_VERSION);
+  // 버전 키가 없는 기존 데이터는 예산 도입 전 형식으로 읽는다.
+  const version = Number(store.getItem(SCHEMA_KEY) ?? 4);
   if (!Number.isInteger(version) || version < 1) {
     return { status: 'corrupt', reason: '스키마 버전을 읽을 수 없습니다.' };
   }
@@ -74,10 +75,12 @@ const MIGRATIONS: Record<number, (data: unknown) => unknown> = {
    * v2: entries[] — 입금/출금 구분과 특정일자 예약이 생겼다.
    */
   1: (data) => {
-    const old = data as { payday?: unknown; balance?: unknown; fixed?: unknown };
+    const old = data as { payday?: unknown; balance?: unknown; fixed?: unknown; budgets?: unknown; reserves?: unknown };
     const fixed = Array.isArray(old.fixed) ? old.fixed : [];
     return {
       payday: old.payday,
+      budgets: old.budgets,
+      reserves: old.reserves,
       balance: old.balance,
       entries: fixed.map((f: Record<string, unknown>) => ({
         id: f.id,
@@ -95,7 +98,7 @@ const MIGRATIONS: Record<number, (data: unknown) => unknown> = {
    * 주기(다음 입금 전날까지)만 이전과 똑같이 유지해 준다.
    */
   2: (data) => {
-    const old = data as { payday?: unknown; balance?: unknown; entries?: unknown };
+    const old = data as { payday?: unknown; balance?: unknown; entries?: unknown; budgets?: unknown; reserves?: unknown };
     const entries = Array.isArray(old.entries) ? [...old.entries] : [];
     const day = old.payday;
 
@@ -121,7 +124,7 @@ const MIGRATIONS: Record<number, (data: unknown) => unknown> = {
       });
     }
 
-    return { balance: old.balance, entries };
+    return { balance: old.balance, entries, budgets: old.budgets, reserves: old.reserves };
   },
   /**
    * v4: 스케줄에 span(기간 예산)이 추가됐다. 기존 데이터의 모양은 그대로라
@@ -129,6 +132,11 @@ const MIGRATIONS: Record<number, (data: unknown) => unknown> = {
    * "더 최신 버전"으로 정중히 거절하도록 버전만 올린다.
    */
   3: (data) => data,
+  // 기존 기간 지출은 예산인지 판단할 수 없으므로 변환하지 않는다.
+  4: (data) => {
+    const old = data as State;
+    return { ...old, budgets: old.budgets ?? [], reserves: old.reserves ?? [] };
+  },
 };
 
 /**
@@ -137,20 +145,36 @@ const MIGRATIONS: Record<number, (data: unknown) => unknown> = {
  * 그대로 열려야 하기 때문이다.
  */
 export function migrateToCurrent(data: unknown, fromVersion: number): State | null {
-  let current = data;
-  for (let v = fromVersion; v < SCHEMA_VERSION; v += 1) {
-    const step = MIGRATIONS[v];
-    if (!step) return null;
-    current = step(current);
+  if (!Number.isInteger(fromVersion) || fromVersion < 1 || fromVersion > SCHEMA_VERSION) return null;
+  if (typeof data !== 'object' || data === null || Array.isArray(data)) return null;
+  const raw = data as Record<string, unknown>;
+  // v5에서 빠진 배열은 빈 데이터가 아니라 잘린 백업이다.
+  if (fromVersion >= 5 && (!Array.isArray(raw.budgets) || !Array.isArray(raw.reserves))) return null;
+  // 이전 버전에도 새 필드가 있으면 검증한다. null을 빈 배열로 보정하지 않는다.
+  if (!isState({
+    ...raw,
+    entries: fromVersion === 1 ? [] : raw.entries,
+  })) return null;
+  if (fromVersion === 1 && !Array.isArray(raw.fixed)) return null;
+  let current: unknown = data;
+  try {
+    for (let v = fromVersion; v < SCHEMA_VERSION; v += 1) {
+      const step = MIGRATIONS[v];
+      if (!step) return null;
+      current = step(current);
+    }
+  } catch {
+    return null;
   }
   return isState(current) ? current : null;
 }
 
 export function saveState(state: State): boolean {
+  if (!isState(state)) return false;
   const store = ls();
   if (!store) return false;
   try {
-    store.setItem(STATE_KEY, JSON.stringify(state));
+    store.setItem(STATE_KEY, JSON.stringify({ ...state, budgets: state.budgets ?? [], reserves: state.reserves ?? [] }));
     store.setItem(SCHEMA_KEY, String(SCHEMA_VERSION));
     return true;
   } catch {

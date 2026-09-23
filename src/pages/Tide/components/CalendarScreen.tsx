@@ -11,7 +11,9 @@ import {
   totalIn,
   totalOut,
   upcomingInHorizon,
+  unsettledAfter,
 } from '../lib/calc';
+import { reservedOn } from '../lib/budget';
 import {
   type ISODate,
   addDays,
@@ -25,7 +27,8 @@ import {
   fromISODate,
   toISODate,
 } from '../lib/date';
-import { type Entry, type State, spanColorOf } from '../lib/types';
+import { type Budget, type Entry, type State, spanColorOf } from '../lib/types';
+import { BudgetPanel } from './BudgetPanel';
 import { type DayContext, EntryDialog } from './EntryDialog';
 import { SettleDialog } from './SettleDialog';
 
@@ -50,12 +53,14 @@ export function CalendarScreen({ state, today, onSave }: Props) {
   const [selected, setSelected] = useState<ISODate | null>(null);
   const [editingBalance, setEditingBalance] = useState(false);
   const [editingEntry, setEditingEntry] = useState<Entry | null>(null);
+  const [spendingBudget, setSpendingBudget] = useState<Budget | null>(null);
 
   const horizon = useMemo(() => horizonOf(state.entries, today), [state.entries, today]);
   const headline = useMemo(() => headlineLimit(state, today), [state, today]);
   const upcoming = useMemo(() => upcomingInHorizon(state, today), [state, today]);
   const upcomingIn = totalIn(upcoming);
   const upcomingOut = totalOut(upcoming);
+  const reservation = reservedOn(state, horizon.end, unsettledAfter(state, today));
   const daysLeft = diffDays(today, horizon.end);
 
   const cells = useMemo(
@@ -80,7 +85,7 @@ export function CalendarScreen({ state, today, onSave }: Props) {
   );
 
   const step = (n: number) => setMonth((m) => addMonths(m.year, m.month0, n));
-  const swipe = useSwipe(step);
+  const { moved, ...swipe } = useSwipe(step);
 
   function addEntry(entry: Entry) {
     onSave({ ...state, entries: [...state.entries, entry] });
@@ -156,7 +161,10 @@ export function CalendarScreen({ state, today, onSave }: Props) {
             <dt>남은 예정 출금</dt>
             <dd>{upcomingOut === 0 ? '없음' : `− ${formatWon(upcomingOut)}`}</dd>
           </div>
+          {reservation.budgets > 0 && <div><dt>생활비 예약</dt><dd>− {formatWon(reservation.budgets)}</dd></div>}
+          {reservation.reserves > 0 && <div><dt>세이브</dt><dd>− {formatWon(reservation.reserves)}</dd></div>}
         </dl>
+        <BudgetPanel state={state} today={today} onSave={onSave} onSpend={setSpendingBudget} onEditEntry={setEditingEntry} />
       </section>
 
       <section className="card">
@@ -211,7 +219,7 @@ export function CalendarScreen({ state, today, onSave }: Props) {
                   .filter(Boolean)
                   .join(' ')}
                 onClick={() => {
-                  if (swipe.moved()) return; // 밀어서 달을 넘기는 중이었다
+                  if (moved()) return; // 밀어서 달을 넘기는 중이었다
                   pick(cell);
                 }}
                 aria-label={`${formatDate(cell.date)}${
@@ -306,6 +314,7 @@ export function CalendarScreen({ state, today, onSave }: Props) {
 
       {selectedDay && (
         <EntryDialog
+          budgets={state.budgets}
           day={selectedDay}
           today={today}
           onAdd={addEntry}
@@ -321,11 +330,27 @@ export function CalendarScreen({ state, today, onSave }: Props) {
 
       {editingEntry && (
         <EntryDialog
+          budgets={state.budgets}
           today={today}
           initial={editingEntry}
           onUpdate={updateEntry}
           onRemove={removeEntry}
           onClose={() => setEditingEntry(null)}
+        />
+      )}
+
+      {spendingBudget && (
+        <EntryDialog
+          today={today}
+          budgets={state.budgets}
+          defaultBudgetId={spendingBudget.id}
+          day={{
+            date: today >= spendingBudget.start && today <= spendingBudget.end ? today : spendingBudget.start,
+            limit: headline, items: [],
+          }}
+          onAdd={addEntry}
+          onRemove={removeEntry}
+          onClose={() => setSpendingBudget(null)}
         />
       )}
 
