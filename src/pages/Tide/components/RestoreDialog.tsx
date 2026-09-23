@@ -75,6 +75,8 @@ function Summary({
             <dt>예정 항목</dt>
             <dd>{state.entries.length}건</dd>
           </div>
+          <div><dt>생활비 예산</dt><dd>{state.budgets?.length ?? 0}건</dd></div>
+          <div><dt>세이브</dt><dd>{state.reserves?.length ?? 0}건</dd></div>
         </dl>
       )}
     </div>

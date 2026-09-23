@@ -40,7 +40,12 @@ export type Entry = {
   schedule: Schedule;
   /** 기간(span)에서만 쓴다. 없으면 기본색. */
   color?: SpanColor;
+  /** 기간 안의 한 번짜리 지출만 예산에서 사용한다. */
+  budgetId?: string;
 };
+
+export type Budget = { id: string; name: string; amount: number; start: ISODate; end: ISODate };
+export type Reserve = { id: string; name: string; amount: number };
 
 export type Balance = {
   amount: number;
@@ -55,6 +60,9 @@ export type Balance = {
 export type State = {
   balance: Balance;
   entries: Entry[];
+  /** v1~v4 호출부도 계산 가능. v5 저장·백업에는 두 배열을 반드시 기록한다. */
+  budgets?: Budget[];
+  reserves?: Reserve[];
 };
 
 /** 입금은 +, 출금은 −. 계산은 전부 이 부호를 통해서만 한다. */
@@ -66,6 +74,8 @@ export function makeInitialState(amount: number, entries: Entry[] = [], now = ne
   return {
     balance: { amount, checkedAt: now.toISOString() },
     entries,
+    budgets: [],
+    reserves: [],
   };
 }
 
@@ -76,27 +86,60 @@ export function isState(value: unknown): value is State {
 
   const balance = s.balance as Record<string, unknown> | undefined;
   if (typeof balance !== 'object' || balance === null) return false;
-  if (typeof balance.amount !== 'number' || !Number.isFinite(balance.amount)) return false;
-  if (typeof balance.checkedAt !== 'string' || Number.isNaN(Date.parse(balance.checkedAt))) {
+  if (!isMoney(balance.amount, true)) return false;
+  if (!isInstant(balance.checkedAt)) {
     return false;
   }
 
-  if (!Array.isArray(s.entries)) return false;
-  return s.entries.every(isEntry);
+  if (!validList(s.entries, isEntry)) return false;
+  if (s.budgets !== undefined && !validList(s.budgets, isBudget)) return false;
+  if (s.reserves !== undefined && !validList(s.reserves, isReserve)) return false;
+  return true;
+}
+
+function validList(value: unknown, check: (v: unknown) => boolean): boolean {
+  if (!Array.isArray(value) || !value.every(check)) return false;
+  return new Set(value.map((v: { id: string }) => v.id)).size === value.length;
+}
+
+export function isMoney(value: unknown, signed = false): value is number {
+  return typeof value === 'number' && Number.isSafeInteger(value) && (signed || value >= 0);
+}
+
+export function isInstant(value: unknown): value is string {
+  return typeof value === 'string'
+    && /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})$/.test(value)
+    && isISODate(value.slice(0, 10)) && Number.isFinite(Date.parse(value));
+}
+
+function isId(value: unknown): value is string {
+  return typeof value === 'string' && value.trim().length > 0 && value === value.trim();
+}
+
+export function isBudget(value: unknown): value is Budget {
+  if (typeof value !== 'object' || value === null) return false;
+  const b = value as Record<string, unknown>;
+  return isId(b.id) && typeof b.name === 'string' && b.name.trim().length > 0
+    && isMoney(b.amount) && isISODate(b.start) && isISODate(b.end) && b.start <= b.end;
+}
+
+export function isReserve(value: unknown): value is Reserve {
+  if (typeof value !== 'object' || value === null) return false;
+  const r = value as Record<string, unknown>;
+  return isId(r.id) && typeof r.name === 'string' && r.name.trim().length > 0 && isMoney(r.amount);
 }
 
 function isEntry(value: unknown): value is Entry {
   if (typeof value !== 'object' || value === null) return false;
   const e = value as Record<string, unknown>;
   return (
-    typeof e.id === 'string' &&
-    e.id.length > 0 &&
+    isId(e.id) &&
     typeof e.name === 'string' &&
-    typeof e.amount === 'number' &&
-    Number.isFinite(e.amount) &&
+    isMoney(e.amount) &&
     (e.kind === 'income' || e.kind === 'expense') &&
     isSchedule(e.schedule) &&
-    (e.color === undefined || SPAN_COLORS.includes(e.color as SpanColor))
+    (e.color === undefined || SPAN_COLORS.includes(e.color as SpanColor)) &&
+    (e.budgetId === undefined || isId(e.budgetId))
   );
 }
 
@@ -120,8 +163,14 @@ function isSchedule(value: unknown): value is Schedule {
   return false;
 }
 
-function isISODate(value: unknown): value is string {
-  return typeof value === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(value);
+export function isISODate(value: unknown): value is string {
+  if (typeof value !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(value)) return false;
+  const y = Number(value.slice(0, 4));
+  const m = Number(value.slice(5, 7));
+  const d = Number(value.slice(8, 10));
+  if (y < 1 || m < 1 || m > 12 || d < 1) return false;
+  const leap = y % 4 === 0 && (y % 100 !== 0 || y % 400 === 0);
+  return d <= ([31, leap ? 29 : 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31][m - 1] ?? 0);
 }
 
 function isDay(value: unknown): value is number {
