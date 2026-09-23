@@ -85,6 +85,8 @@ describe('migrateToCurrent', () => {
 
   it('현재 버전 데이터는 그대로 통과한다 (N일마다 포함)', () => {
     const current = {
+      budgets: [],
+      reserves: [],
       balance: { amount: 0, checkedAt: '2026-03-07T09:00:00.000Z' },
       entries: [
         {
@@ -124,7 +126,7 @@ describe('migrateToCurrent', () => {
   });
 
   it('span 스케줄을 검증한다 — 끝이 시작보다 앞서면 거부', () => {
-    const base = { balance: { amount: 0, checkedAt: '2026-03-07T09:00:00.000Z' } };
+    const base = { balance: { amount: 0, checkedAt: '2026-03-07T09:00:00.000Z' }, budgets: [], reserves: [] };
     const mk = (start: string, end: string) => ({
       ...base,
       entries: [

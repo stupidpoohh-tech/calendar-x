@@ -1,5 +1,5 @@
 import { SCHEMA_VERSION, migrateToCurrent } from './storage';
-import type { State } from './types';
+import { type State, isState } from './types';
 
 /** 해시 파라미터 이름. 링크가 `#b=...` 로 끝난다. */
 const HASH_KEY = 'b';
@@ -17,7 +17,11 @@ export type DecodeResult =
   | { ok: false; reason: string };
 
 export function encodeBackup(state: State, now: Date = new Date()): string {
-  const envelope: Envelope = { v: SCHEMA_VERSION, t: now.toISOString(), s: state };
+  if (!isState(state)) throw new Error('백업할 데이터의 날짜·금액·ID를 확인해 주세요.');
+  const envelope: Envelope = {
+    v: SCHEMA_VERSION, t: now.toISOString(),
+    s: { ...state, budgets: state.budgets ?? [], reserves: state.reserves ?? [] },
+  };
   return base64UrlEncode(JSON.stringify(envelope));
 }
 

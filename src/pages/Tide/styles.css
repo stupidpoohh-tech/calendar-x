@@ -18,6 +18,17 @@
   color-scheme: light dark;
 }
 
+.tide-budgets { border-top: 1px solid var(--line); margin-top: 12px; padding-top: 12px; }
+.tide-budgets summary { cursor: pointer; }
+.tide-budgets__actions, .tide-budgets__heading { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.tide-budgets__heading { justify-content: space-between; }
+.tide-budgets__heading strong { overflow-wrap: anywhere; }
+.tide-budgets__actions { margin-top: 8px; }
+.tide-budgets__item { border-top: 1px solid var(--line); padding: 12px 0; margin-top: 8px; font-size: 0.875rem; }
+.tide-budgets__item p { margin: 4px 0; }
+.tide-budgets__item details { margin-top: 8px; }
+.dialog-row select { min-width: 0; max-width: 100%; padding: 8px; color: var(--text); background: var(--surface); border: 1px solid var(--line); border-radius: 8px; font: inherit; }
+
 @media (prefers-color-scheme: dark) {
   :root {
     --bg: #0f1720;

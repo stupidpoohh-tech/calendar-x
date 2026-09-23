@@ -53,6 +53,7 @@ export function MoneyInput({
         onChange={(e) => {
           const raw = e.target.value;
           const next = parseWon(raw);
+          if (!Number.isSafeInteger(next)) return;
           const clamped = !allowNegative && next < 0 ? -next : next;
           setText(clamped === 0 && raw.replace(/[^0-9-−]/g, '') === '' ? '' : format(clamped));
           onChange(clamped);

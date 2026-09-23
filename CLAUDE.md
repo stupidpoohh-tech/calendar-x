@@ -67,7 +67,7 @@ src/ui/         화면 컴포넌트 (App: 렌즈 화면, TideBar: 며칠 버티�
                 Recovery*: 회복 상세 · 밀린 회복 줄 · 설정 그룹 ·
                 OFF 항목 목록 관리(상세와 설정이 같은 조각을 쓴다))
 src/pages/Tide/ /tide 잔고캘린더. tide-over 저장소의 앱을 화면째로 옮겨 왔다.
-                lib/ · components/ · styles.css 전부 원본. 캘린더X 코드를 쓰지 않는다
+                원본 화면을 유지한 독립 앱. 캘린더X 코드를 런타임에 쓰지 않는다
 src/app/        셸과 상태 훅
 src/styles/     tokens.css (디자인 토큰) + app.css (전 컴포넌트 스타일)
 firestore.rules 보안 규칙
@@ -527,7 +527,8 @@ npm run emulators      # Auth + Firestore 에뮬레이터
   캘린더X 토큰으로 새로 그렸던 이식판이 있었는데, 그래서 '달력' 탭에 달력이 없었다 —
   월 그리드도, 날짜별 한도도, 기간 예산 띠도 원본에만 있었다. 지금은
   `src/pages/Tide/` 아래에 `lib/` · `components/` · `store.ts` · `styles.css` 를
-  원본 그대로 두고, 캘린더X 코드는 한 줄도 import 하지 않는다.
+  독립적으로 두고, 캘린더X 런타임 코드를 import 하지 않는다.
+  계산 호환 테스트에서만 본앱 함수를 불러 같은 입력의 결과를 비교한다.
 
   **HTML 도 번들도 CSS 도 따로다** (`tide/index.html` + `src/pages/Tide/main.tsx`,
   vite `rollupOptions.input` 에 두 엔트리). 예전에는 앱 하나가 `location.pathname` 을
@@ -544,6 +545,19 @@ npm run emulators      # Auth + Firestore 에뮬레이터
   **`domain/tide.ts` 와 `pages/Tide/lib/calc.ts` 는 같은 규칙의 두 벌이다.** 전자는
   캘린더X 의 `Entry` 를, 후자는 원본의 `Entry` 를 본다. 한쪽 규칙을 고치면 다른 쪽도
   봐야 한다. 합치지 않은 이유는 데이터 모델이 다르고 두 앱이 따로 돌기 때문이다.
+
+  **생활비·세이브도 /tide에 반영했다.** 로컬 State의 budgets/reserves와
+  Entry.budgetId를 사용한다. 기간 안의 한 번짜리 출금만 예산에 연결되고,
+  기간 밖·반복·입금·삭제된 예산 참조는 일반 입출금으로 계산한다.
+  예산 삭제는 지출을 지우지 않는다. 한도는 본앱처럼
+  max(예산, 사용액)에서 이미 잔고에 반영된 사용액을 뺀 금액을 예약한다.
+  정산은 실제 입출금을 그대로 보고, 일반 예정 목록은 연결 지출을 중복 표시하지 않는다.
+
+  **/tide 저장·백업은 v5다 (본앱 JSON 백업 v4와 별개).** v1~v4는 빈
+  budgets/reserves를 추가하고 기존 기간 지출을 자동 변환하지 않는다.
+  v5에 두 배열이 빠져 있으면 잘린 데이터로 거절한다. 이미 포함된 필드는 옛 버전에서도
+  검증한다. 실존 날짜·안전한 정수 금액·컬렉션 내 중복 ID를 확인한 뒤 복원한다.
+  지출 금액은 0 이상, 잔고는 음수 정수도 허용한다. 저장이 거절된 기존 원문은 보존한다.
 - **clear-week** — 종이 주간 플래너. `entries` 컬렉션에 `kind === 'task'` 로 새 항목만
   오간다. clear-week 의 `CAL.entryDoc()` 이 이쪽 firestore.rules 요구사항을 이미 채운다.
 
