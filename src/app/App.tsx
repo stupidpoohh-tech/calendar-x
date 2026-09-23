@@ -14,7 +14,7 @@ import {
 import {
   MERGE_SKIPS_RECOVERY, REPLACE_DISABLED_REASON, safeMerge, type RestoreIO,
 } from '../data/restore';
-import { LENSES, LENS_BY_ID } from '../domain/constants';
+import { LENSES, LENS_BY_ID, SHARED_TABS } from '../domain/constants';
 import { endOfMonth, fmtMonthTitle, startOfMonth, toISO } from '../domain/date';
 import { convertKind, displayTitle, newEntry, uid as newId, withDerived } from '../domain/entry';
 import {
@@ -983,21 +983,44 @@ function Workspace({ uid, user, onSignOut }: WorkspaceProps) {
         </div>
           )}
         </div>
-        <nav className="lenses" role="tablist" aria-label="렌즈">
-          {LENSES.map((l) => (
-            <button
-              key={l.id}
-              role="tab"
-              aria-selected={lens === l.id}
-              className={'lens' + (lens === l.id ? ' on' : '')}
-              style={{ ['--ac' as string]: `var(${l.accentVar})` }}
-              // 렌즈는 1차 네비게이션이다. 누르면 같이 보기 화면에서 나온다.
-              onClick={() => { set('lens', l.id); setFilters(emptyFilters()); setSharedOpen(false); }}
-            >
-              <span className="lens-dot" />{l.id === 'idea' ? '아이디어' : l.label}
-            </button>
-          ))}
-        </nav>
+        {/*
+          **두 공간이 같은 탭 줄을 쓴다.**
+
+          공유에 있을 때 그 보드의 탭을 화면 안쪽에 한 줄 더 그리면, 탭처럼 생긴 줄이
+          둘이 되고 공간을 옮길 때마다 본문이 위아래로 튄다. 자리는 하나고 내용만
+          바뀐다 — 지금 어느 공간인지는 위의 👤 / 👥 가 말한다.
+        */}
+        {sharedOpen ? (
+          <nav className="lenses" role="tablist" aria-label="같이 보기">
+            {SHARED_TABS.map((t) => (
+              <button
+                key={t.id}
+                role="tab"
+                aria-selected={prefs.sharedTab === t.id}
+                className={'lens' + (prefs.sharedTab === t.id ? ' on' : '')}
+                style={{ ['--ac' as string]: `var(${t.accentVar})` }}
+                onClick={() => set('sharedTab', t.id)}
+              >
+                <span className="lens-dot" />{t.label}
+              </button>
+            ))}
+          </nav>
+        ) : (
+          <nav className="lenses" role="tablist" aria-label="렌즈">
+            {LENSES.map((l) => (
+              <button
+                key={l.id}
+                role="tab"
+                aria-selected={lens === l.id}
+                className={'lens' + (lens === l.id ? ' on' : '')}
+                style={{ ['--ac' as string]: `var(${l.accentVar})` }}
+                onClick={() => { set('lens', l.id); setFilters(emptyFilters()); }}
+              >
+                <span className="lens-dot" />{l.label}
+              </button>
+            ))}
+          </nav>
+        )}
 
         <div className="mobile-actions">
           {!sharedOpen && <button className="add-btn" aria-label="일정 추가" onClick={() => openCreate()}><Icon.Plus size={16} /></button>}

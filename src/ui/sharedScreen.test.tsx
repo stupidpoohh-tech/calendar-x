@@ -69,6 +69,7 @@ function mount(over: {
   onPinNote?: P['onPinNote'];
   onAdoptLegacyMemo?: () => void;
   tab?: P['tab'];
+  onTabChange?: P['onTabChange'];
   onBack?: () => void;
   onViewChange?: (v: 'calendar' | 'list') => void;
   onCursorChange?: (d: Date) => void;
@@ -107,16 +108,23 @@ function mount(over: {
     onPinNote: over.onPinNote ?? vi.fn(),
     onAdoptLegacyMemo: over.onAdoptLegacyMemo ?? vi.fn(),
   };
+  const onTabChange = over.onTabChange ?? vi.fn();
   /*
     탭은 위(앱)가 들고 있다 — 공간마다 마지막 탭을 따로 기억하기 때문이다. 시험에서는
     그 자리를 작은 껍데기가 대신한다. 상태를 넘겨주지 않으면 탭을 눌러도 안 바뀐다.
   */
   function Harness() {
     const [tab, setTab] = useState<P['tab']>(over.tab ?? 'calendar');
-    return <SharedScreen {...props} tab={tab} onTabChange={setTab} />;
+    return (
+      <SharedScreen
+        {...props}
+        tab={tab}
+        onTabChange={(next) => { setTab(next); onTabChange(next); }}
+      />
+    );
   }
   render(<Harness />);
-  return props;
+  return { ...props, onTabChange };
 }
 
 describe('돌아가기와 머리글', () => {
@@ -461,7 +469,11 @@ describe('달력', () => {
   그래서 이 자리의 시험은 '메모 탭에서 글을 쓰고 고정하는가' 다.
 */
 describe('메모', () => {
-  const openNotes = () => fireEvent.click(screen.getByRole('tab', { name: '노트' }));
+  /*
+    탭 줄은 이 화면에 없다 — 렌즈와 같은 자리(최상단)를 쓰므로 셸이 그린다. 그래서
+    시험도 누르지 않고 **받는 값**으로 연다.
+  */
+  const openNotes = (over: Parameters<typeof mount>[0] = {}) => mount({ ...over, tab: 'notes' });
 
   const note = (over: Partial<P['notes'][number]> = {}): P['notes'][number] => ({
     id: 'n1', title: '제주도 준비', body: '렌터카 확인\n호텔 체크인 15:00',
@@ -470,8 +482,7 @@ describe('메모', () => {
 
   it('글을 쓰면 본문과 함께 저장한다', () => {
     const onSaveNote = vi.fn();
-    mount({ onSaveNote });
-    openNotes();
+    openNotes({ onSaveNote });
 
     fireEvent.click(screen.getByRole('button', { name: '글쓰기' }));
     fireEvent.change(screen.getByPlaceholderText('제목 (선택)'), { target: { value: '여행 전에 읽어줘' } });
@@ -489,8 +500,7 @@ describe('메모', () => {
 
   it('본문이 비면 글을 만들지 않는다', () => {
     const onSaveNote = vi.fn();
-    mount({ onSaveNote });
-    openNotes();
+    openNotes({ onSaveNote });
     fireEvent.click(screen.getByRole('button', { name: '글쓰기' }));
     fireEvent.change(screen.getByPlaceholderText('제목 (선택)'), { target: { value: '제목만' } });
     fireEvent.click(screen.getByRole('button', { name: '저장' }));
@@ -498,8 +508,7 @@ describe('메모', () => {
   });
 
   it('제목이 없으면 본문 첫 줄을 제목 자리에 쓴다', () => {
-    mount({ notes: [note({ title: null })] });
-    openNotes();
+    openNotes({ notes: [note({ title: null })] });
     expect(screen.getByText('렌터카 확인')).toBeInTheDocument();
   });
 
@@ -510,16 +519,16 @@ describe('메모', () => {
     expect(screen.getByText(/렌터카 확인 · 호텔 체크인 15:00/)).toBeInTheDocument();
   });
 
-  it('고정 줄을 누르면 메모 탭이 열린다', () => {
-    mount({ notes: [note({ pinned: true })] });
+  it('고정 줄을 누르면 노트 탭으로 보낸다', () => {
+    const props = mount({ notes: [note({ pinned: true })] });
     fireEvent.click(screen.getByText('제주도 준비'));
-    expect(screen.getByRole('tab', { name: '노트' })).toHaveAttribute('aria-selected', 'true');
+    // 탭 줄이 셸에 있으므로 여기서는 "노트로 가 달라" 고 말하는 것까지가 이 화면의 몫이다.
+    expect(props.onTabChange).toHaveBeenCalledWith('notes');
   });
 
   it('고정을 누르면 그 글만 올린다', () => {
     const onPinNote = vi.fn();
-    mount({ notes: [note()], onPinNote });
-    openNotes();
+    openNotes({ notes: [note()], onPinNote });
     fireEvent.click(screen.getByRole('button', { name: '위에 고정' }));
     expect(onPinNote).toHaveBeenCalledWith(expect.objectContaining({ id: 'n1' }), true);
   });
@@ -530,8 +539,7 @@ describe('메모', () => {
   */
   it('옛 고정메모가 있으면 옮길 자리를 준다', () => {
     const onAdoptLegacyMemo = vi.fn();
-    mount({ legacyMemo: '토요일 장보기', onAdoptLegacyMemo });
-    openNotes();
+    openNotes({ legacyMemo: '토요일 장보기', onAdoptLegacyMemo });
     expect(screen.getByText('토요일 장보기')).toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: '메모로 옮기기' }));
     expect(onAdoptLegacyMemo).toHaveBeenCalled();
@@ -652,7 +660,8 @@ describe('초대받은 사람의 화면', () => {
   적게 되고, 맞지 않는 것은 아예 안 적는다.
 */
 describe('함께 할 것', () => {
-  const openWish = () => fireEvent.click(screen.getByRole('tab', { name: '리스트' }));
+  /** 탭 줄은 셸에 있다. 여기서는 받은 값으로 연다. */
+  const openWish = (over: Parameters<typeof mount>[0] = {}) => mount({ ...over, tab: 'list' });
 
   const list = (over: Partial<P['collections'][number]> = {}): P['collections'][number] => ({
     id: 'c1', title: '갈 곳', order: 0, createdBy: ME, createdAt: '', updatedAt: '', ...over,
@@ -663,7 +672,6 @@ describe('함께 할 것', () => {
   });
 
   it('기본 목록을 만들어 두지 않는다', () => {
-    mount();
     openWish();
     expect(screen.getByText('아직 목록이 없습니다.')).toBeInTheDocument();
     expect(screen.queryByText('게임')).not.toBeInTheDocument();
@@ -671,8 +679,7 @@ describe('함께 할 것', () => {
 
   it('목록을 만들면 이름 그대로 저장한다', () => {
     const onSaveCollection = vi.fn();
-    mount({ onSaveCollection });
-    openWish();
+    openWish({ onSaveCollection });
 
     fireEvent.click(screen.getByRole('button', { name: /목록 만들기/ }));
     fireEvent.change(screen.getByPlaceholderText('목록 이름 (갈 곳)'), { target: { value: '보고 싶은 것' } });
@@ -682,18 +689,16 @@ describe('함께 할 것', () => {
   });
 
   it('진행을 n/m 으로 적는다', () => {
-    mount({
+    openWish({
       collections: [list()],
       collectionItems: [wish({ id: 'a', completed: true }), wish({ id: 'b', title: '제주도' })],
     });
-    openWish();
     expect(screen.getByText('1/2')).toBeInTheDocument();
   });
 
   it('완료를 누르면 그 항목만 바뀐다', () => {
     const onSaveCollectionItem = vi.fn();
-    mount({ collections: [list()], collectionItems: [wish()], onSaveCollectionItem });
-    openWish();
+    openWish({ collections: [list()], collectionItems: [wish()], onSaveCollectionItem });
 
     fireEvent.click(screen.getByRole('button', { name: '에버랜드 완료' }));
     const saved = onSaveCollectionItem.mock.calls[0]![0];
@@ -708,8 +713,7 @@ describe('함께 할 것', () => {
   it('일정으로 만들면 공유 일정이 늘고 원래 항목은 그대로다', () => {
     const onSaveItem = vi.fn();
     const onSaveCollectionItem = vi.fn();
-    mount({ collections: [list()], collectionItems: [wish()], onSaveItem, onSaveCollectionItem });
-    openWish();
+    openWish({ collections: [list()], collectionItems: [wish()], onSaveItem, onSaveCollectionItem });
 
     fireEvent.click(screen.getByRole('button', { name: '에버랜드 일정으로 만들기' }));
 
@@ -724,11 +728,10 @@ describe('함께 할 것', () => {
   it('항목을 지우는 것과 목록을 지우는 것은 다른 길이다', () => {
     const onDeleteItem = vi.fn();
     const onDeleteCollection = vi.fn();
-    mount({
+    openWish({
       collections: [list()], collectionItems: [wish()],
       onDeleteCollectionItem: onDeleteItem, onDeleteCollection,
     });
-    openWish();
 
     fireEvent.click(screen.getByRole('button', { name: '에버랜드 삭제' }));
     expect(onDeleteItem).toHaveBeenCalled();
@@ -743,14 +746,19 @@ describe('함께 할 것', () => {
   탭은 정확히 셋이다. 일정과 TODO 를 나누지 않는다 — 공유 보드에서 "해야 하는 것" 은
   하나이고, 두 자리로 나누면 어디에 적어야 하는지가 매번 애매해진다.
 */
+/*
+  **탭 줄은 이 화면에 없다.** 렌즈와 같은 자리(최상단 한 줄)를 쓰므로 셸이 그린다 —
+  두 공간이 탭을 각각 다른 높이에 그리면 탭처럼 생긴 줄이 둘이 되고, 공간을 옮길 때마다
+  본문이 위아래로 튄다.
+*/
 describe('보드 안의 탭', () => {
-  it('캘린더 · 리스트 · 노트 셋뿐이다', () => {
+  it('탭 줄을 화면 안에 그리지 않는다', () => {
     mount();
-    expect(screen.getAllByRole('tab').map((t) => t.textContent)).toEqual(['캘린더', '리스트', '노트']);
+    expect(screen.queryAllByRole('tab')).toHaveLength(0);
   });
 
   it('위가 넘겨준 탭을 그대로 연다 — 마지막 자리로 돌아온다', () => {
     mount({ tab: 'notes' });
-    expect(screen.getByRole('tab', { name: '노트' })).toHaveAttribute('aria-selected', 'true');
+    expect(screen.getByRole('button', { name: '글쓰기' })).toBeInTheDocument();
   });
 });

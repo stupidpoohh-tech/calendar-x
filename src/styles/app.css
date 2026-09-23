@@ -1544,18 +1544,6 @@
 .sh-pinned b { color: var(--ink-2); font-weight: 600; }
 .sh-pinned span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
-/*
-  2차 탭. 1차 렌즈보다 **위계가 낮아야 한다** — 같은 크기로 그리면 축이 일곱 개처럼
-  보인다. 밑줄 하나로 고르고, 배경을 칠하지 않는다.
-*/
-.sh-tabs { display: flex; gap: 2px; border-bottom: 1px solid var(--line); margin-bottom: 10px; }
-.sh-tab {
-  padding: 7px 12px; font-size: 0.8125rem; color: var(--ink-3);
-  border-bottom: 2px solid transparent; margin-bottom: -1px;
-}
-.sh-tab:hover { color: var(--ink-2); }
-.sh-tab.on { color: var(--ink); font-weight: 600; border-bottom-color: var(--ink); }
-
 .sh-when { color: var(--ink-3); }
 
 .sh-done-h {

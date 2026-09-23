@@ -1,5 +1,5 @@
 import type {
-  ColorId, EntryKind, LensId, MoneyType, NewMoneyType, RepeatFreq, TaskStatus,
+  ColorId, EntryKind, LensId, MoneyType, NewMoneyType, RepeatFreq, SharedTabId, TaskStatus,
 } from './types';
 
 export interface ColorDef { id: ColorId; hex: string; label: string }
@@ -51,6 +51,21 @@ export const LENSES: readonly LensDef[] = [
   { id: 'task',  label: '캘린더', title: '캘린더',    accentVar: '--lens-task',  kind: 'task' },
   { id: 'idea',  label: '노트',   title: '노트',      accentVar: '--lens-idea',  kind: 'idea' },
   { id: 'money', label: '가계부', title: '가계부',    accentVar: '--lens-money', kind: 'money' },
+];
+
+/**
+ * 공유 공간의 탭. 정확히 셋이다.
+ *
+ * 이름은 내 공간과 짝이 맞게 적는다 — 저쪽도 캘린더 · 노트다. 같은 말이 두 공간에서
+ * 같은 것을 가리켜야 어느 쪽에 있는지가 그림(👤 · 👥) 하나로 읽힌다.
+ *
+ * 렌즈와 **같은 자리**(최상단 한 줄)에 그린다. 두 공간이 탭을 각각 다른 높이에 두면
+ * 공간을 옮길 때마다 본문이 위아래로 튄다.
+ */
+export const SHARED_TABS: readonly { id: SharedTabId; label: string; accentVar: string }[] = [
+  { id: 'calendar', label: '캘린더', accentVar: '--lens-task' },
+  { id: 'list',     label: '리스트', accentVar: '--lens-all' },
+  { id: 'notes',    label: '노트',   accentVar: '--lens-idea' },
 ];
 
 export const LENS_BY_ID: Record<LensId, LensDef> =
