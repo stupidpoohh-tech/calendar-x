@@ -1324,3 +1324,183 @@
   white-space: pre-wrap; word-break: break-word;
 }
 .crash-a { display: flex; gap: 8px; }
+
+/* ============ 같이 보기 ============
+ *
+ * 글씨 크기는 전부 rem 이다. px 로 적으면 설정의 '글씨 크기' 가 그 규칙만 비껴간다.
+ *
+ * 톤은 기존 화면을 그대로 쓴다 — 공유 기능 때문에 화면을 새로 디자인하지 않는다.
+ * 목록·모달·칩은 있는 클래스(`lst-*` · `mod-*` · `chip`)를 재사용하고, 여기서는
+ * 없던 조각만 더한다.
+ */
+
+/* ---- 진입점 (TODO 렌즈 안쪽) ----
+ *
+ * 카드가 아니다. 테두리도 배경도 없는 한 줄이라, 상단 렌즈보다 시각 위계가 낮다.
+ */
+.shb { display: flex; align-items: center; gap: 8px; padding: 2px 2px 0; }
+.shb-l { font-size: 0.6875rem; font-weight: 700; letter-spacing: .04em; color: var(--ink-4); }
+.shb-btn {
+  appearance: none; margin-left: auto; cursor: pointer;
+  display: inline-flex; align-items: center; gap: 5px;
+  padding: 5px 10px; border: 1px solid var(--line); border-radius: 999px;
+  background: var(--bg); color: var(--ink-2);
+  font-size: 0.75rem; font-weight: 600;
+  transition: border-color .12s, color .12s;
+}
+.shb-btn:hover { border-color: var(--ink-4); color: var(--ink); }
+.shb-btn.on { color: var(--lens-task); border-color: color-mix(in oklab, var(--lens-task) 32%, var(--line)); }
+
+/* ---- 화면 ---- */
+.sh { display: flex; flex-direction: column; gap: 10px; }
+.sh-top {
+  display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+  padding-bottom: 10px; border-bottom: 1px solid var(--line);
+}
+.sh-back {
+  appearance: none; border: none; background: transparent; cursor: pointer;
+  display: inline-flex; align-items: center; gap: 3px; padding: 4px 2px;
+  font-size: 0.8125rem; font-weight: 600; color: var(--ink-2);
+}
+.sh-back:hover { color: var(--ink); }
+.sh-who { display: flex; align-items: baseline; gap: 6px; min-width: 0; flex-wrap: wrap; }
+.sh-who > svg { color: var(--ink-4); align-self: center; }
+.sh-name { font-size: 0.9375rem; font-weight: 700; letter-spacing: -.01em; }
+.sh-partner { font-size: 0.75rem; color: var(--ink-3); }
+.sh-partner.pending { color: var(--ink-4); }
+.sh-top .ico-btn { margin-left: auto; }
+
+/* ---- D-Day ----
+ *
+ * TODO 보다 부가 기능이라 카드가 얇다. 두 건까지만 보이고 나머지는 접힌다.
+ */
+.shd { display: flex; flex-direction: column; gap: 6px; }
+.shd-card {
+  display: flex; align-items: stretch; gap: 0;
+  border: 1px solid var(--line); border-radius: var(--radius-sm);
+  background: var(--bg); overflow: hidden;
+}
+.shd-main {
+  appearance: none; border: none; background: transparent; cursor: pointer;
+  flex: 1; min-width: 0; text-align: left;
+  display: grid; grid-template-columns: 1fr auto; align-items: baseline;
+  gap: 2px 10px; padding: 9px 11px;
+}
+.shd-main:hover { background: var(--bg-soft); }
+.shd-t {
+  font-size: 0.8125rem; font-weight: 600; color: var(--ink);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.shd-n {
+  font-size: 0.9375rem; font-weight: 700; letter-spacing: -.02em;
+  font-variant-numeric: tabular-nums; color: var(--lens-task);
+}
+.shd-d { font-size: 0.71875rem; color: var(--ink-3); grid-column: 1 / -1; }
+/* 지난 날짜는 세지만 강조하지 않는다. 오늘은 강조색을 그대로 쓴다. */
+.shd-card[data-phase="after"] .shd-n { color: var(--ink-3); }
+.shd-card[data-phase="today"] .shd-n { color: var(--good); }
+.shd-x {
+  appearance: none; border: none; background: transparent; cursor: pointer;
+  color: var(--ink-4); padding: 0 9px; display: flex; align-items: center;
+}
+.shd-x:hover { color: var(--bad); }
+.shd-add, .shd-more, .shm-add, .sh-ghost {
+  appearance: none; border: none; background: transparent; cursor: pointer;
+  align-self: flex-start;
+  display: inline-flex; align-items: center; gap: 4px; padding: 4px 2px;
+  font-size: 0.75rem; font-weight: 600; color: var(--ink-3);
+}
+.shd-add:hover, .shd-more:hover, .shm-add:hover, .sh-ghost:hover { color: var(--ink); }
+.shd-form { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; }
+.shd-in {
+  flex: 1 1 8rem; min-width: 0;
+  padding: 7px 9px; border: 1px solid var(--line); border-radius: var(--radius-sm);
+  background: var(--bg); color: var(--ink); font-size: 0.8125rem; font-family: inherit;
+}
+.shd-in:focus { outline: none; border-color: var(--ink-4); }
+.shd-in.date { flex: 0 1 9.5rem; }
+
+/* ---- 고정메모 ---- */
+.shm {
+  display: flex; flex-direction: column; gap: 6px;
+  padding: 10px 11px; border: 1px solid var(--line); border-radius: var(--radius-sm);
+  background: var(--bg-soft);
+}
+.shm-h { display: flex; align-items: center; gap: 5px; }
+.shm-h > svg { color: var(--ink-4); }
+.shm-l { font-size: 0.6875rem; font-weight: 700; letter-spacing: .04em; color: var(--ink-3); }
+.shm-edit {
+  appearance: none; border: none; background: transparent; cursor: pointer;
+  margin-left: auto; font-size: 0.71875rem; font-weight: 600; color: var(--ink-3);
+  text-decoration: underline;
+}
+.shm-edit:hover { color: var(--ink); }
+.shm-b {
+  margin: 0; font-size: 0.8125rem; line-height: 1.6; color: var(--ink-2);
+  white-space: pre-wrap; word-break: break-word;
+}
+.shm-in {
+  width: 100%; box-sizing: border-box; resize: vertical;
+  padding: 8px 9px; border: 1px solid var(--line); border-radius: var(--radius-sm);
+  background: var(--bg); color: var(--ink);
+  font-size: 0.8125rem; line-height: 1.6; font-family: inherit;
+}
+.shm-in:focus { outline: none; border-color: var(--ink-4); }
+.shm-actions { display: flex; gap: 6px; justify-content: flex-end; }
+
+/* ---- TODO 목록 ---- */
+.sh-listh { display: flex; align-items: center; gap: 8px; margin-top: 4px; }
+.sh-listt { margin: 0; font-size: 0.8125rem; font-weight: 700; color: var(--ink-2); }
+.sh-n {
+  font-size: 0.71875rem; font-weight: 600; color: var(--ink-3);
+  background: var(--accent-soft); border-radius: 999px; padding: 1px 7px;
+}
+.sh-empty { margin: 10px 0; font-size: 0.78125rem; color: var(--ink-4); }
+.sh-lst { margin-top: 2px; }
+.sh-row {
+  display: flex; align-items: flex-start; gap: 9px;
+  padding: 9px 11px; border: 1px solid var(--line); border-radius: var(--radius-sm);
+  background: var(--bg);
+}
+.sh-row:hover { border-color: var(--ink-4); }
+.sh-row .tp-check { margin-top: 1px; flex-shrink: 0; }
+.sh-row-main {
+  appearance: none; border: none; background: transparent; cursor: pointer;
+  flex: 1; min-width: 0; text-align: left;
+  display: flex; flex-direction: column; gap: 3px; padding: 0;
+}
+.sh-row-t {
+  font-size: 0.8125rem; font-weight: 500; color: var(--ink);
+  display: flex; align-items: center; gap: 5px;
+}
+.sh-row-t.done { text-decoration: line-through; color: var(--ink-3); }
+.sh-row-m {
+  display: flex; align-items: center; flex-wrap: wrap; gap: 6px;
+  font-size: 0.71875rem; color: var(--ink-3);
+}
+.sh-row-m > svg { color: var(--ink-4); }
+/* '공유 화면에서 수정됨' 같은 상태 한 줄. 색으로 소리치지 않는다. */
+.sh-tag {
+  font-size: 0.65625rem; font-weight: 600; color: var(--ink-3);
+  background: var(--accent-soft); border-radius: 3px; padding: 1px 5px;
+}
+.sh-tag.local { color: var(--lens-task); background: color-mix(in oklab, var(--lens-task) 10%, var(--bg-soft)); }
+.lst-row.sh-hidden .sh-row { opacity: .55; border-style: dashed; }
+
+/* ---- 공유 모달 ---- */
+.shi-head { font-size: 0.9375rem; font-weight: 700; letter-spacing: -.01em; }
+/* 라벨이 없는 안내문은 라벨 폭만큼 들여쓰지 않는다. */
+.sh-mod .mod-hint { margin-left: 0; }
+.shi-mark {
+  margin-left: 5px; font-size: 0.625rem; font-weight: 600;
+  color: var(--lens-task); letter-spacing: 0;
+}
+.sh-members { list-style: none; margin: 0; padding: 0; flex: 1; display: flex; flex-direction: column; gap: 4px; }
+.sh-members li { display: flex; align-items: center; gap: 5px; font-size: 0.8125rem; color: var(--ink-2); }
+.sh-invite { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 6px; }
+.sh-invite .mod-input { font-size: 0.75rem; }
+.sh-invite-a { display: flex; gap: 6px; flex-wrap: wrap; }
+
+/* 작은 버튼. 확인창의 기본 버튼과 같은 모양이고 여백만 줄인다. */
+.btn.sm { padding: 6px 10px; font-size: 0.75rem; }
+.add-btn.sm { padding: 6px 10px; font-size: 0.75rem; }

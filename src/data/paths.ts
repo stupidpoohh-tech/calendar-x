@@ -30,3 +30,42 @@ export function col(db: Firestore, uid: string, name: string): CollectionReferen
 export function docIn(db: Firestore, uid: string, name: string, id: string): DocumentReference {
   return doc(db, 'users', uid, name, id);
 }
+
+/**
+ * 공유 보드 경로.
+ *
+ * `users/{uid}` 아래가 아니라 **최상위**다. 개인 경로 아래에 두면 상대에게 읽기를 열려면
+ * 그 사용자 영역을 열어야 하고, 그러면 TODO 하나를 보여 주려고 아이디어·가계부·회복까지
+ * 함께 열린다. 공유는 격리를 약화시키지 않는 자리에 둔다.
+ *
+ * 초대장은 보드와 또 다른 컬렉션이다 — 초대받은 사람은 아직 보드를 읽을 수 없으므로,
+ * "어느 보드로 가면 되는가" 만 담긴 문서가 따로 있어야 한다.
+ */
+export const SHARED = {
+  boards: 'sharedBoards',
+  invites: 'sharedInvites',
+  /** 보드 하위 컬렉션. */
+  items: 'items',
+  pins: 'pins',
+  ddays: 'ddays',
+} as const;
+
+export function boardsCol(db: Firestore): CollectionReference {
+  return collection(db, SHARED.boards);
+}
+
+export function boardDoc(db: Firestore, boardId: string): DocumentReference {
+  return doc(db, SHARED.boards, boardId);
+}
+
+export function boardSubCol(db: Firestore, boardId: string, name: string): CollectionReference {
+  return collection(db, SHARED.boards, boardId, name);
+}
+
+export function boardSubDoc(db: Firestore, boardId: string, name: string, id: string): DocumentReference {
+  return doc(db, SHARED.boards, boardId, name, id);
+}
+
+export function inviteDoc(db: Firestore, code: string): DocumentReference {
+  return doc(db, SHARED.invites, code);
+}

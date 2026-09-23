@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, type KeyboardEvent } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   COLORS, DEFAULT_CURRENCY, KIND_LABEL, MONEY_TYPE_BY_ID, NEW_MONEY_TYPES,
   REPEAT_OPTIONS, STATUSES,
@@ -12,6 +12,7 @@ import type {
   Budget, Debt, Entry, EntryKind, NewMoneyType, RepeatFreq, TaskStatus,
 } from '../domain/types';
 import { Icon } from './Icon';
+import { isComposingEnter } from './ime';
 
 interface Props {
   open: boolean;
@@ -26,14 +27,6 @@ interface Props {
   onSave: (e: Entry) => void;
   onDelete: (e: Entry) => void;
   onClose: () => void;
-}
-
-/**
- * 한글 IME 안전 Enter.
- * isComposing 체크가 없으면 조합 중 Enter 가 두 번 발화해 입력이 사라진다.
- */
-function isComposingEnter(e: KeyboardEvent): boolean {
-  return e.nativeEvent.isComposing || e.key === 'Process' || e.keyCode === 229;
 }
 
 /**

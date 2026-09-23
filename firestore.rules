@@ -125,6 +125,176 @@ service cloud.firestore {
       }
     }
 
+    /* ==========================================================================
+       같이 보기 (공유 보드)
+       ==========================================================================
+
+       개인 경로 **밖**에 둔다. `users/{uid}` 아래에 두면 TODO 하나를 보여 주려고 그
+       사용자 영역을 열어야 하고, 그러면 아이디어 · 가계부 · 대출 · 잔고 · 회복까지
+       함께 열린다. 위의 `users/{uid}` 규칙은 이 기능을 넣으면서 **한 글자도 느슨해지지
+       않았다** — 상대는 여전히 남의 `users/{uid}` 를 읽지도 쓰지도 못한다.
+
+       초대는 세 걸음이다.
+         1. 소유자가 `sharedInvites/{code}` 를 만든다 (code 는 100비트 난수).
+         2. 링크를 받은 사람이 **로그인**해서 그 문서를 읽는다 — 코드를 모르면 찾을 수
+            없다 (목록 조회는 소유자에게만 열려 있다).
+         3. 보드에 자기 uid 하나를 더한다. 규칙이 그 코드의 초대장이 이 보드의 것인지
+            확인한다.
+    */
+
+    function boardData(boardId) {
+      return get(/databases/$(database)/documents/sharedBoards/$(boardId)).data;
+    }
+
+    function isBoardMember(boardId) {
+      return signedIn()
+        && exists(/databases/$(database)/documents/sharedBoards/$(boardId))
+        && request.auth.uid in boardData(boardId).memberUids;
+    }
+
+    /** 이 코드의 초대장이 이 보드로 가는 것인가. 코드를 아는 것이 초대장의 전부다. */
+    function invitedTo(boardId, code) {
+      return code is string
+        && exists(/databases/$(database)/documents/sharedInvites/$(code))
+        && get(/databases/$(database)/documents/sharedInvites/$(code)).data.boardId == boardId;
+    }
+
+    /** 보드 하나에 들어갈 수 있는 사람 수. `MAX_BOARD_MEMBERS` 와 같은 값이다. */
+    function memberLimit() { return 4; }
+
+    match /sharedBoards/{boardId} {
+
+      /*
+        수락 — **자기 uid 하나만** 더한다.
+
+        아직 member 가 아니므로 보드를 읽을 수 없고, 그래서 클라이언트는 `arrayUnion` 과
+        점 표기법으로 두 칸만 쓴다. 소유자 · 이름 · 만든 시각은 건드릴 수 없고, 소유자의
+        이름표도 그대로여야 한다.
+      */
+      function joinsSelf() {
+        return signedIn()
+          && !(request.auth.uid in resource.data.memberUids)
+          && request.resource.data.diff(resource.data).affectedKeys()
+               .hasOnly(['memberUids', 'memberNames', 'joinCode', 'updatedAt'])
+          && request.resource.data.memberUids.hasAll(resource.data.memberUids)
+          && request.resource.data.memberUids
+               .hasOnly(resource.data.memberUids.concat([request.auth.uid]))
+          && request.auth.uid in request.resource.data.memberUids
+          && request.resource.data.memberUids.size() <= memberLimit()
+          && request.resource.data.memberNames.get(resource.data.ownerUid, '')
+               == resource.data.memberNames.get(resource.data.ownerUid, '')
+          && invitedTo(boardId, request.resource.data.joinCode);
+      }
+
+      /** 나가기 — 자기만 뺀다. 소유자는 이 길을 쓰지 않는다 (보드를 지운다). */
+      function leavesSelf() {
+        return signedIn()
+          && request.auth.uid in resource.data.memberUids
+          && request.auth.uid != resource.data.ownerUid
+          && request.resource.data.diff(resource.data).affectedKeys()
+               .hasOnly(['memberUids', 'memberNames', 'updatedAt'])
+          && !(request.auth.uid in request.resource.data.memberUids)
+          && resource.data.memberUids.hasAll(request.resource.data.memberUids);
+      }
+
+      /*
+        소유자의 수정. 소유자는 바뀌지 않고, 자기를 목록에서 뺄 수도 없다 —
+        빼면 자기 보드를 읽지 못하는 문서가 남는다.
+      */
+      function ownerEdits() {
+        return request.auth.uid == resource.data.ownerUid
+          && request.resource.data.ownerUid == resource.data.ownerUid
+          && request.auth.uid in request.resource.data.memberUids
+          && request.resource.data.memberUids.size() <= memberLimit()
+          && request.resource.data.name is string
+          && request.resource.data.name.size() <= 100;
+      }
+
+      // member 만 읽는다. `array-contains` 조회와 같은 모양이라 목록 조회도 통과한다.
+      allow read: if signedIn() && request.auth.uid in resource.data.memberUids;
+
+      allow create: if signedIn()
+        && withinSize()
+        && data().ownerUid == request.auth.uid
+        // 만들 때는 혼자다. 남을 끼워 넣은 보드를 만들 수 없다.
+        && data().memberUids == [request.auth.uid]
+        && data().memberNames is map
+        && data().name is string && data().name.size() <= 100
+        && data().createdAt is string && data().updatedAt is string;
+
+      allow update: if signedIn() && withinSize()
+        && (ownerEdits() || joinsSelf() || leavesSelf());
+
+      allow delete: if signedIn() && request.auth.uid == resource.data.ownerUid;
+
+      /*
+        공유 TODO.
+
+        갱신 쓰기는 `overrides` · `hidden` · `localOnly` 를 **담지 않는다** (merge).
+        그래서 그 필드가 없는 문서가 정상이고, 규칙도 있을 때만 형태를 본다.
+        `money` · `recovery` 같은 개인 자료는 애초에 이 문서에 오지 않는다.
+      */
+      match /items/{itemId} {
+        allow read, delete: if isBoardMember(boardId);
+        allow create, update: if isBoardMember(boardId)
+          && withinSize()
+          && (!('source' in data()) || data().source == null || (
+               data().source.title is string && data().source.title.size() <= 500
+               && isDateISO(data().source.startDate)
+             ))
+          && (!('overrides' in data()) || (
+               data().overrides is map
+               && data().overrides.get('title', '') is string
+               && data().overrides.get('title', '').size() <= 500
+               && data().overrides.get('note', '') is string
+               && data().overrides.get('note', '').size() <= 20000
+             ))
+          && (!('hidden' in data()) || data().hidden is bool)
+          && (!('localOnly' in data()) || data().localOnly is bool);
+      }
+
+      /** 공유 고정메모. 개인 `users/{uid}/pins` 와 다른 자료다. */
+      match /pins/{pinId} {
+        allow read, delete: if isBoardMember(boardId);
+        allow create, update: if isBoardMember(boardId)
+          && withinSize()
+          && data().text is string && data().text.size() <= 4000;
+      }
+
+      /** D-Day. 'D-23' 같은 문자열은 저장하지 않는다 — 날짜와 제목뿐이다. */
+      match /ddays/{ddayId} {
+        allow read, delete: if isBoardMember(boardId);
+        allow create, update: if isBoardMember(boardId)
+          && withinSize()
+          && data().title is string && data().title.size() <= 100
+          && isDateISO(data().date)
+          && data().order is number;
+      }
+    }
+
+    match /sharedInvites/{code} {
+      /*
+        **정확한 코드로 한 건만** 읽는다. 목록 조회는 소유자에게만 열려 있다 — 코드가
+        문서 id 라서 목록 없이는 자기가 뿌린 링크를 되찾아 끊을 수도 없다.
+        문서에는 보드 id 와 보드 이름만 있고, 소유자의 이메일도 보드 내용도 없다.
+      */
+      allow get: if signedIn();
+      allow list: if signedIn() && resource.data.ownerUid == request.auth.uid;
+
+      allow create: if signedIn()
+        && withinSize()
+        && data().ownerUid == request.auth.uid
+        && data().boardId is string
+        && data().boardName is string && data().boardName.size() <= 100
+        && data().createdAt is string
+        // 남의 보드로 가는 초대장은 낼 수 없다.
+        && boardData(data().boardId).ownerUid == request.auth.uid;
+
+      // 고칠 일이 없다. 바꾸려면 끊고 새로 만든다.
+      allow update: if false;
+      allow delete: if signedIn() && resource.data.ownerUid == request.auth.uid;
+    }
+
     // 명시하지 않은 경로는 전부 막는다.
     match /{document=**} {
       allow read, write: if false;

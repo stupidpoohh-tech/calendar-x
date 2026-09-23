@@ -374,3 +374,127 @@ export interface Filters {
   urgent: boolean;
   q: string;
 }
+
+// ---------- 같이 보기 (SharedBoard) ----------
+
+/**
+ * 공유 보드 — 내 TODO 를 상대와 함께 보는 자리.
+ *
+ * **개인 데이터를 직접 공유하지 않는다.** `users/{uid}` 아래에는 아이디어·가계부·회복이
+ * 함께 살고 있어, 그 경로를 상대에게 열면 TODO 하나를 보여 주려고 전부를 열게 된다.
+ * 그래서 공유용 자료는 최상위 `sharedBoards/{boardId}` 에 따로 둔다.
+ *
+ * `memberUids` 에는 **소유자도 들어 있다.** 읽기 규칙이 `uid in memberUids` 한 줄로
+ * 끝나고, 화면도 "내가 속한 보드" 를 `array-contains` 한 번으로 찾는다.
+ */
+export interface SharedBoard {
+  id: string;
+  ownerUid: string;
+  /** 소유자 + 초대를 수락한 사용자. */
+  memberUids: string[];
+  /**
+   * 화면에 보일 이름. 계정 정보에서 만든다 (`displayName` 또는 이메일).
+   * 관계(애인 · 가족)를 값으로 박아 두지 않는다 — 같은 구조를 누구와도 쓴다.
+   */
+  memberNames: Record<string, string>;
+  name: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+/**
+ * 초대장. `sharedInvites/{code}` 에 사는 **별도 문서**다.
+ *
+ * 초대받은 사람은 아직 member 가 아니라 보드 문서를 읽을 수 없다. 그래서 "어느 보드에
+ * 들어가면 되는가" 만 담은 문서를 따로 두고, 그 문서의 id 자체가 초대 코드가 된다.
+ * 로그인한 사용자만 읽을 수 있고, **코드를 모르면 찾을 수도 없다** (목록 조회는 막혀
+ * 있다). 보드 내용은 여기 들어가지 않는다.
+ */
+export interface SharedInvite {
+  code: string;
+  boardId: string;
+  ownerUid: string;
+  /** 초대 화면에 보일 보드 이름. 소유자의 이메일은 넣지 않는다. */
+  boardName: string;
+  createdAt: string;
+}
+
+/** 공유 항목이 원본에서 물려받는 값. 여기 없는 필드는 공유되지 않는다. */
+export interface SharedSource {
+  title: string;
+  note: string;
+  startDate: DateISO;
+  endDate: DateISO | null;
+  startTime: TimeHM | null;
+  status: TaskStatus;
+  important: boolean;
+  urgent: boolean;
+  /**
+   * 원본이 반복 항목인가.
+   *
+   * 공유 화면은 반복을 발생분으로 펼치지 않는다 — 표식만 보여 준다. 펼친 사본마다
+   * override 를 두면 "어느 회차를 고쳤는가" 가 생기고, 그것은 이 범위가 아니다.
+   */
+  recurring: boolean;
+}
+
+/** 공유 화면에서 고칠 수 있는 필드. `recurring` 은 원본의 성질이라 뺀다. */
+export type SharedOverridableField =
+  'title' | 'note' | 'startDate' | 'endDate' | 'startTime' | 'status' | 'important' | 'urgent';
+
+/**
+ * 공유 화면에서만 바뀐 값.
+ *
+ * **키가 있으면 덮고, 없으면 원본을 따라간다.** 그래서 `undefined` 를 값으로 넣지 않는다 —
+ * `endDate: null`("기간 없음으로 고쳤다")과 "안 고쳤다" 가 구분되어야 한다.
+ */
+export type SharedOverrides = Partial<Pick<SharedSource, SharedOverridableField>>;
+
+/**
+ * 공유 보드의 TODO 한 건.
+ *
+ * 원본을 복사해 두고 덮어쓰는 방식이 아니다. **원본 스냅샷(`source`) + 공유 화면에서
+ * 고친 값(`overrides`)** 으로 표시값을 만든다 (`sharedView`). 그래서 원본의 날짜가
+ * 바뀌면 제목만 고쳐 둔 항목도 새 날짜를 따라간다.
+ */
+export interface SharedTodoItem {
+  /** 원본이 있으면 **원본 entry 의 id 와 같다.** 그래야 갱신이 덮어쓰기 한 번으로 끝난다. */
+  id: string;
+  sourceEntryId: string | null;
+  /** 원본에서 마지막으로 받아 온 값. 공유 화면에서만 만든 항목은 null. */
+  source: SharedSource | null;
+  overrides: SharedOverrides;
+  /** 공유 화면에서만 만든 항목. 개인 TODO 에는 없다. */
+  localOnly: boolean;
+  /** 원본은 두고 공유 화면에서만 감췄다. */
+  hidden: boolean;
+  createdBy: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+/** 공유 보드의 고정메모. 개인 `Pin` 과 **다른 자료다** — 뜻도 경로도 권한도 다르다. */
+export interface SharedPin {
+  id: string;
+  text: string;
+  order: number;
+  createdBy: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+/**
+ * 공유 보드의 D-Day.
+ *
+ * 저장하는 것은 제목과 날짜뿐이다. 'D-23' 같은 문자열을 저장하면 다음 날 거짓이 된다
+ * (`domain/dday.ts` 가 표시할 때 계산한다).
+ */
+export interface SharedDday {
+  id: string;
+  title: string;
+  date: DateISO;
+  order: number;
+  createdBy: string;
+  createdAt: string;
+  updatedAt: string;
+}

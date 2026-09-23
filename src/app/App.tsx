@@ -17,11 +17,14 @@ import {
 import { LENSES, LENS_BY_ID } from '../domain/constants';
 import { endOfMonth, fmtMonthTitle, startOfMonth, toISO } from '../domain/date';
 import { convertKind, displayTitle, newEntry, withDerived } from '../domain/entry';
+import { INVITE_PARAM, isShareableTask } from '../domain/shared';
 import { formatAmount } from '../domain/money';
 import { applyFilters, collectTags, emptyFilters, hasActiveFilter } from '../domain/filters';
 import { baseIdOf, materialize } from '../domain/recurrence';
 import { isRecoveryEntry } from '../domain/recovery';
-import type { Account, Entry, Filters, LensId, TaskStatus, ViewId, YearMonth } from '../domain/types';
+import type {
+  Account, Entry, Filters, LensId, SharedInvite, TaskStatus, ViewId, YearMonth,
+} from '../domain/types';
 import { Auth } from '../ui/Auth';
 import { BrandFooter } from '../ui/BrandFooter';
 import { DaySheet } from '../ui/DaySheet';
@@ -39,6 +42,9 @@ import { FailedWrites } from '../ui/FailedWrites';
 import { PinnedSection } from '../ui/PinnedSection';
 import { RecoveryDebtBar } from '../ui/RecoveryDebtBar';
 import { RecoverySheet } from '../ui/RecoverySheet';
+import { SharedBar } from '../ui/SharedBar';
+import { SharedScreen } from '../ui/SharedScreen';
+import { SharedJoinSheet, SharedSettingsSheet, SharedStartSheet } from '../ui/SharedInvite';
 import { SettingsSheet } from '../ui/SettingsSheet';
 import { TodayPanel } from '../ui/TodayPanel';
 import { useDialog } from '../ui/Dialog';
@@ -46,6 +52,7 @@ import { useAuth } from './useAuth';
 import { usePrefs } from './usePrefs';
 import { useDemoStore } from './useDemoStore';
 import { useRecovery } from './useRecovery';
+import { useSharedBoard } from './useSharedBoard';
 import { useWriteQueue } from './useWriteQueue';
 import { useStore } from './useStore';
 import { useToday } from './useToday';
@@ -101,6 +108,20 @@ function Workspace({ uid, user, onSignOut }: WorkspaceProps) {
   const [legacy, setLegacy] = useState<{ count: number; migratedAt: string | null } | null>(null);
   /** 회복 상세를 띄운 항목의 id. 항목 자체가 아니라 id 를 들고 있어야 스냅샷을 따라간다. */
   const [recoveryId, setRecoveryId] = useState<string | null>(null);
+  /*
+    같이 보기.
+
+    렌즈를 하나 더 만들지 않는다 — 이것은 TODO 의 하위 기능이고, 열려 있는 동안만
+    본문 자리를 차지한다. 상단 렌즈는 그대로 남아 있고, 다른 렌즈를 누르면 닫힌다.
+  */
+  const [sharedOpen, setSharedOpen] = useState(false);
+  const [sharedSheet, setSharedSheet] = useState<'start' | 'settings' | null>(null);
+  const [invite, setInvite] = useState<SharedInvite | null>(null);
+  const [invitesReady, setInvitesReady] = useState(false);
+  /** `?join=` 로 들어온 초대. 코드는 주소에서 한 번만 읽고 그 뒤에는 상태가 든다. */
+  const [join, setJoin] = useState<
+    { code: string; state: 'loading' | 'ready' | 'not-found' | 'joining'; invite: SharedInvite | null } | null
+  >(null);
 
   // 자정을 넘기거나 백그라운드에서 돌아오면 다시 잰다. 이 값이 계산 창·한도·정산 기준을 정한다.
   const today = useToday();
@@ -126,6 +147,19 @@ function Workspace({ uid, user, onSignOut }: WorkspaceProps) {
   const recovery = useRecovery({
     uid,
     todayISO: today,
+    onError: (message) => dialog.toast(message, 'bad'),
+    commit,
+  });
+
+  /*
+    같이 보기. 보드 문서만 늘 구독하고, 항목·고정메모·D-Day 는 화면이 열려 있을 때만
+    받는다 (`open`). 이 훅이 들고 있는 보드가 "TODO 저장을 공유에도 보낼지" 를 정한다.
+  */
+  const accountName = user?.displayName || user?.email || '';
+  const shared = useSharedBoard({
+    uid,
+    accountName,
+    open: sharedOpen,
     onError: (message) => dialog.toast(message, 'bad'),
     commit,
   });
@@ -189,6 +223,84 @@ function Workspace({ uid, user, onSignOut }: WorkspaceProps) {
   */
   const calcState: CalcState = calcStateOf(store.calc);
 
+  /*
+    ── 초대 링크로 들어온 경우 ────────────────────────────────────
+
+    주소에서 코드를 **한 번만** 읽고 바로 지운다. 남겨 두면 새로고침마다 수락 창이 다시
+    뜨고, 그 주소를 누군가에게 보낼 때 초대 코드가 함께 나간다.
+  */
+  useEffect(() => {
+    const code = new URLSearchParams(window.location.search).get(INVITE_PARAM);
+    if (!code) return;
+    setJoin({ code, state: 'loading', invite: null });
+    const url = new URL(window.location.href);
+    url.searchParams.delete(INVITE_PARAM);
+    window.history.replaceState(null, '', url.toString());
+  }, []);
+
+  /*
+    같이 보기 API 는 자료가 바뀔 때마다 새 객체가 된다. effect 의 의존성에 넣으면 조회가
+    헛돌므로 ref 로 받는다 — 아래 effect 들은 "언제 물어볼지" 만 판정한다.
+  */
+  const sharedRef = useRef(shared);
+  sharedRef.current = shared;
+
+  // 초대장은 로그인해야 읽을 수 있다. 로그아웃 상태면 먼저 로그인 창을 띄운다.
+  useEffect(() => {
+    if (!join || join.state !== 'loading') return;
+    if (isAnon) { setShowAuth(true); return; }
+    let alive = true;
+    const code = join.code;
+    void sharedRef.current.peek(code).then((found) => {
+      if (!alive) return;
+      setJoin((j) => (j && j.code === code
+        ? { ...j, state: found ? 'ready' : 'not-found', invite: found }
+        : j));
+    });
+    return () => { alive = false; };
+  }, [join, isAnon]);
+
+  /*
+    초대 링크는 문서 id 가 코드라, 목록 조회 없이는 되찾을 수 없다. 설정 창을 열 때
+    한 번 읽어 온다 — 아직 못 읽은 동안 "링크 없음" 으로 보이지 않게 준비 상태를 따로 둔다.
+  */
+  useEffect(() => {
+    if (sharedSheet !== 'settings') return;
+    setInvitesReady(false);
+    let alive = true;
+    void sharedRef.current.listInvites().then((list) => {
+      if (!alive) return;
+      setInvite(list[0] ?? null);
+      setInvitesReady(true);
+    });
+    return () => { alive = false; };
+  }, [sharedSheet]);
+
+  const acceptJoin = useCallback(async () => {
+    if (!join) return;
+    const code = join.code;
+    setJoin((j) => (j ? { ...j, state: 'joining' } : j));
+    const result = await shared.accept(code);
+    if (result === 'ok') {
+      setJoin(null);
+      setSharedOpen(true);
+      dialog.toast('초대를 수락했습니다. 같이 보기가 열렸습니다.');
+      return;
+    }
+    // 실패해도 창을 닫지 않는다 — 무엇이 막혔는지 읽고 다시 시도할 수 있어야 한다.
+    setJoin((j) => (j ? { ...j, state: result === 'not-found' ? 'not-found' : 'ready' } : j));
+  }, [join, shared, dialog]);
+
+  const startShare = useCallback((name: string) => {
+    const created = shared.createBoard(name);
+    if (!created) return;
+    // 링크를 바로 보여 준다. 만들고 나서 어디서 찾는지 헤매지 않도록.
+    setInvite(created);
+    setInvitesReady(true);
+    setSharedSheet('settings');
+    setSharedOpen(true);
+  }, [shared]);
+
   // 이관 전 컬렉션이 남아 있는지, 이미 옮겼는지 한 번만 확인한다.
   const checkedLegacy = useRef(false);
   useEffect(() => {
@@ -217,10 +329,24 @@ function Workspace({ uid, user, onSignOut }: WorkspaceProps) {
 
   const closeModal = useCallback(() => setModal((m) => ({ ...m, open: false })), []);
 
+  /**
+   * 항목 저장 + 같이 보기 갱신.
+   *
+   * 공유 갱신은 **따로 한 건 더** 보낸다. 한 배치로 묶으면 공유 쪽이 규칙에 걸리는 순간
+   * 개인 TODO 저장까지 함께 실패한다 — 공유 기능 때문에 기존 CRUD 가 멈추는 것은 어떤
+   * 정합성보다 나쁘다. 실패한 공유 갱신은 다른 쓰기와 같은 목록에 남고, 남은 차이는
+   * 같이 보기 화면을 열 때 맞추기가 메운다.
+   *
+   * 공유 대상이 아닌 항목(아이디어 · 가계부)은 공유에서 **지운다.** 할 일을 아이디어로
+   * 강등하면 원본은 남아 있지만 공유할 대상이 아니므로, 그대로 두면 상대 화면에 뜻이
+   * 사라진 줄이 남는다. 보드가 없으면 두 호출 모두 아무것도 하지 않는다.
+   */
   const persist = useCallback((e: Entry) => {
     if (isAnon || !uid) { void promptLogin(); return; }
     commit({ kind: 'entry', label: '항목', summary: displayTitle(e), payload: e });
-  }, [uid, isAnon, promptLogin, commit]);
+    if (isShareableTask(e)) shared.pushEntry(e);
+    else if (e.kind !== 'task') shared.removeEntry(e.id);
+  }, [uid, isAnon, promptLogin, commit, shared]);
 
   const handleSave = useCallback((e: Entry) => {
     persist(e);
@@ -255,11 +381,21 @@ function Workspace({ uid, user, onSignOut }: WorkspaceProps) {
       dialog.toast('건너뛰었습니다. 밀린 회복이 하나 늘었습니다.');
       return;
     }
+    /*
+      같이 보기에서도 사라진다는 것을 먼저 말한다.
+
+      원본이 사라진 자리에 공유 항목을 남기면 뜻이 없는 줄이 상대 화면에 남는다 —
+      유령 항목을 만들지 않는 쪽을 골랐다. 공유 화면에서 고쳐 둔 값이 있었다면 그것도
+      함께 사라지므로, 그 사실을 삭제 전에 알린다.
+    */
+    const sharedNote = shared.board && isShareableTask(e)
+      ? ' 같이 보기에서도 사라집니다 — 거기서 고쳐 둔 내용이 있으면 함께 지워집니다.'
+      : '';
     const ok = await dialog.confirm({
       title: '이 항목을 삭제할까요?',
-      body: e.isRecurring
+      body: (e.isRecurring
         ? '반복 항목입니다. 모든 발생분이 함께 사라집니다.'
-        : '되돌릴 수 없습니다.',
+        : '되돌릴 수 없습니다.') + sharedNote,
       confirmLabel: '삭제',
       danger: true,
     });
@@ -279,8 +415,9 @@ function Workspace({ uid, user, onSignOut }: WorkspaceProps) {
       kind: 'entryDelete', label: '항목 삭제',
       summary: displayTitle(e), payload: { id: baseIdOf(e.id) },
     });
+    shared.removeEntry(baseIdOf(e.id));
     dialog.toast('삭제했습니다.');
-  }, [uid, isAnon, promptLogin, dialog, closeModal, recovery, commit]);
+  }, [uid, isAnon, promptLogin, dialog, closeModal, recovery, commit, shared]);
 
   const handleStatus = useCallback((e: Entry, status: TaskStatus) => {
     const base = store.entries.find((x) => x.id === baseIdOf(e.id)) ?? e;
@@ -704,7 +841,8 @@ function Workspace({ uid, user, onSignOut }: WorkspaceProps) {
               aria-selected={lens === l.id}
               className={'lens' + (lens === l.id ? ' on' : '')}
               style={{ ['--ac' as string]: `var(${l.accentVar})` }}
-              onClick={() => { set('lens', l.id); setFilters(emptyFilters()); }}
+              // 렌즈는 1차 네비게이션이다. 누르면 같이 보기 화면에서 나온다.
+              onClick={() => { set('lens', l.id); setFilters(emptyFilters()); setSharedOpen(false); }}
             >
               <span className="lens-dot" />{l.label}
             </button>
@@ -720,6 +858,52 @@ function Workspace({ uid, user, onSignOut }: WorkspaceProps) {
         )}
       </header>
 
+      {/*
+        저장하지 못한 것은 **어느 화면에서도** 보여야 한다. 그래서 같이 보기 화면으로
+        갈리는 자리보다 위에 둔다 — 공유 항목 저장이 거절당했는데 그 목록이 안 보이면,
+        적은 내용이 어디로 갔는지 알 방법이 없다.
+
+        확인창으로 한 번 알리고 말지 않는 이유도 같다. 두 건이 동시에 실패하면 뒤엣것이
+        앞엣것을 밀어내고 밀려난 값은 다시 찾을 길이 없다. 남은 것이 없으면 이 줄도
+        화면에 없다.
+      */}
+      <div className="side">
+        <FailedWrites
+          failed={writes.failed}
+          durable={writes.durable}
+          onRetry={writes.retry}
+          onRetryAll={writes.retryAll}
+          onDiscard={writes.discard}
+        />
+      </div>
+
+      {/*
+        같이 보기는 **본문을 대신 차지한다.** 상단 렌즈는 그대로 남아 있어 언제든
+        돌아올 수 있고, 카드도 달력도 뜨지 않으므로 지금 보고 있는 것이 공유 화면임이
+        분명하다. 보드가 없으면 열리지 않는다.
+      */}
+      {sharedOpen && shared.board && uid ? (
+        <main className="main">
+          <SharedScreen
+            board={shared.board}
+            partner={shared.partner}
+            myUid={uid}
+            items={shared.items}
+            ddays={shared.ddays}
+            memoText={shared.memoText}
+            contentReady={shared.contentReady}
+            todayISO={today}
+            onBack={() => setSharedOpen(false)}
+            onOpenInvite={() => setSharedSheet('settings')}
+            onSaveItem={shared.saveItem}
+            onDeleteItem={shared.removeItem}
+            onSaveMemo={shared.saveMemo}
+            onSaveDday={shared.saveDday}
+            onDeleteDday={shared.removeDday}
+          />
+        </main>
+      ) : (
+      <>
       <div className="toolbar">
         <div className="tool-l">
           <button className="ico-btn sm" aria-label="이전 달"
@@ -806,19 +990,6 @@ function Workspace({ uid, user, onSignOut }: WorkspaceProps) {
         잔고 카드에 두 번 나왔다. 잔고는 카드 안으로, 대출과 고정 메모는 각자의 렌즈로.
       */}
       <div className="side">
-        {/*
-          저장하지 못한 것이 있으면 렌즈와 무관하게 늘 여기 뜬다. 확인창으로 한 번 알리고
-          말면, 두 건이 동시에 실패했을 때 뒤엣것이 앞엣것을 밀어내고 밀려난 값은 다시
-          찾을 길이 없다. 남은 것이 없으면 이 줄도 화면에 없다.
-        */}
-        <FailedWrites
-          failed={writes.failed}
-          durable={writes.durable}
-          onRetry={writes.retry}
-          onRetryAll={writes.retryAll}
-          onDiscard={writes.discard}
-        />
-
         {/*
           빚이 0이면 아무것도 렌더링하지 않는다. 정상 상태에서 회복은 화면에 없어야 한다.
           렌즈와 무관하게 같은 자리에 두는 이유는, 밀렸다는 사실이 가계부를 보는 동안에도
@@ -924,6 +1095,21 @@ function Workspace({ uid, user, onSignOut }: WorkspaceProps) {
           </TideBar>
         )}
 
+        {/*
+          같이 보기 진입점 — TODO 화면 **안쪽**의 보조 액션이다. 상단 렌즈와 나란히 두면
+          축이 하나 더 있는 것처럼 보이고, 큰 세그먼트 토글로 상시 노출하면 1차
+          네비게이션과 위계가 겹친다.
+        */}
+        {lens === 'task' && !isAnon && (
+          <SharedBar
+            ready={shared.ready}
+            board={shared.board}
+            partner={shared.partner}
+            onOpen={() => setSharedOpen(true)}
+            onStart={() => setSharedSheet('start')}
+          />
+        )}
+
         {/* 고정 메모는 각 축의 렌즈에서 본다. 전체 렌즈는 요약 카드 하나만 둔다. */}
         {lens !== 'all' && lens !== 'money' && pinnedSection}
       </div>
@@ -961,6 +1147,8 @@ function Workspace({ uid, user, onSignOut }: WorkspaceProps) {
       </main>
 
       <button className="fab" onClick={() => openCreate()} aria-label="추가"><Icon.Plus size={22} /></button>
+      </>
+      )}
 
       {showPicker && (
         <MonthPicker
@@ -1016,6 +1204,72 @@ function Workspace({ uid, user, onSignOut }: WorkspaceProps) {
         onDelete={(e) => void handleDelete(e)}
         onClose={closeModal}
       />
+
+      {sharedSheet === 'start' && (
+        <SharedStartSheet
+          defaultName="같이 보기"
+          onCreate={(name) => { setSharedSheet(null); startShare(name); }}
+          onClose={() => setSharedSheet(null)}
+        />
+      )}
+
+      {sharedSheet === 'settings' && shared.board && uid && (
+        <SharedSettingsSheet
+          board={shared.board}
+          myUid={uid}
+          invite={invite}
+          invitesReady={invitesReady}
+          boardCount={shared.boardCount}
+          onMakeInvite={() => {
+            setInvitesReady(false);
+            void shared.makeInvite().then((made) => { setInvite(made); setInvitesReady(true); });
+          }}
+          onDropInvite={(code) => { shared.dropInvite(code); setInvite(null); }}
+          onLeave={async () => {
+            const ok = await dialog.confirm({
+              title: '이 보드에서 나갈까요?',
+              body: '공유 화면의 TODO · 고정메모 · D-Day 는 그대로 남고, 더 이상 보이지 않습니다. 내 개인 자료는 영향을 받지 않습니다.',
+              confirmLabel: '나가기', danger: true,
+            });
+            if (!ok) return;
+            setSharedSheet(null);
+            setSharedOpen(false);
+            try {
+              await shared.leave();
+              dialog.toast('보드에서 나왔습니다.');
+            } catch (err) {
+              dialog.toast(`나가지 못했습니다. ${describeFirestoreError(err)}`, 'bad');
+            }
+          }}
+          onDelete={async () => {
+            const ok = await dialog.confirm({
+              title: '공유를 그만둘까요?',
+              // 원본은 건드리지 않는다. 사라지는 것은 공유 자료뿐이라는 것을 먼저 말한다.
+              body: '공유 화면의 TODO 수정 · 같이 보기 전용 항목 · 고정메모 · D-Day 가 모두 지워집니다. 내 TODO 원본은 그대로 남습니다.',
+              confirmLabel: '그만두기', danger: true,
+            });
+            if (!ok) return;
+            setSharedSheet(null);
+            setSharedOpen(false);
+            try {
+              await shared.removeBoard();
+              dialog.toast('공유를 그만두었습니다. 내 TODO 는 그대로입니다.');
+            } catch (err) {
+              dialog.toast(`지우지 못했습니다. ${describeFirestoreError(err)}`, 'bad');
+            }
+          }}
+          onClose={() => setSharedSheet(null)}
+        />
+      )}
+
+      {join && !isAnon && (
+        <SharedJoinSheet
+          invite={join.invite}
+          state={join.state}
+          onAccept={() => void acceptJoin()}
+          onClose={() => setJoin(null)}
+        />
+      )}
 
       {showAuth && (
         <div className="mod-back" onClick={() => setShowAuth(false)}>

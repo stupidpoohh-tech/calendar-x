@@ -1,0 +1,282 @@
+/**
+ * 같이 보기 — 단방향 동기화와 겹쳐 보기.
+ *
+ * 이 파일이 지키는 약속은 셋이다.
+ *   1. 공유 화면의 편집은 원본을 **한 글자도** 바꾸지 않는다.
+ *   2. 고치지 않은 필드는 계속 원본을 따라간다.
+ *   3. 고친 필드는 원본이 바뀌어도 유지된다.
+ */
+import { describe, expect, it } from 'vitest';
+import { newEntry, withDerived } from './entry';
+import {
+  applyOverrides, canRevert, isOverridden, isShareableTask, newLocalItem,
+  overriddenFields, revertToSource, sameSource, setHidden, sharedSortKey,
+  sharedTitle, sharedView, shortName, sourceOf, withSource, partnerName,
+  newInviteCode, inviteUrl,
+} from './shared';
+import type { Entry, SharedTodoItem } from './types';
+
+const OWNER = 'owner-uid';
+
+function task(patch: Partial<Entry> = {}): Entry {
+  return newEntry('task', { id: 'task-a', title: '병원 예약', startDate: '2026-09-25', ...patch });
+}
+
+/** 원본에서 받아 온 공유 항목. 실제 경로와 같은 함수로 만든다. */
+function mirrored(e: Entry): SharedTodoItem {
+  return withSource(null, e.id, sourceOf(e), OWNER, '2026-09-01T00:00:00.000Z');
+}
+
+describe('공유 대상', () => {
+  it('할 일만 나간다 — 아이디어와 가계부는 자동 공유하지 않는다', () => {
+    expect(isShareableTask(task())).toBe(true);
+    expect(isShareableTask(newEntry('idea', { title: '떠오른 것' }))).toBe(false);
+    expect(isShareableTask(newEntry('money', { title: '전기요금' }))).toBe(false);
+  });
+
+  it('회복 항목은 빼 둔다 — 개인 시스템 항목이다', () => {
+    const recovery = task({
+      recovery: { options: [{ id: 'work', label: '회사 일' }], repayment: false, movedCount: 0 },
+    });
+    expect(isShareableTask(recovery)).toBe(false);
+  });
+
+  it('반복 전개분은 빼 둔다 — 저장되지 않는 화면용 사본이다', () => {
+    expect(isShareableTask({ ...task(), virtual: true })).toBe(false);
+  });
+
+  it('공유하는 필드만 뽑는다 — 색·태그·장소는 가지 않는다', () => {
+    const source = sourceOf(task({ color: 'pink', tags: ['비밀'], location: '강남' }));
+    expect(Object.keys(source).sort()).toEqual([
+      'endDate', 'important', 'note', 'recurring', 'startDate', 'startTime', 'status', 'title', 'urgent',
+    ]);
+  });
+
+  it('반복 여부는 표식으로만 넘긴다', () => {
+    const repeating = withDerived({
+      ...task(), recurrence: { freq: 'weekly', interval: 1, until: null, count: null },
+    });
+    expect(sourceOf(repeating).recurring).toBe(true);
+  });
+});
+
+describe('원본 → 공유', () => {
+  it('원본 TODO 를 공유 항목으로 만든다', () => {
+    const item = mirrored(task());
+    expect(item.id).toBe('task-a');
+    expect(item.sourceEntryId).toBe('task-a');
+    expect(item.localOnly).toBe(false);
+    expect(item.hidden).toBe(false);
+    expect(item.overrides).toEqual({});
+    expect(sharedView(item).title).toBe('병원 예약');
+  });
+
+  it('원본 제목이 바뀌면 공유 화면도 바뀐다', () => {
+    const item = mirrored(task());
+    const next = withSource(item, 'task-a', sourceOf(task({ title: '치과 예약' })), OWNER);
+    expect(sharedView(next).title).toBe('치과 예약');
+  });
+
+  it('원본 날짜가 바뀌면 공유 화면도 바뀐다', () => {
+    const item = mirrored(task());
+    const next = withSource(item, 'task-a', sourceOf(task({ startDate: '2026-09-27' })), OWNER);
+    expect(sharedView(next).startDate).toBe('2026-09-27');
+  });
+
+  it('원본 갱신은 공유 화면의 수정과 감춤을 건드리지 않는다', () => {
+    const hidden = setHidden(applyOverrides(mirrored(task()), { title: '병원 전화하기' }), true);
+    const next = withSource(hidden, 'task-a', sourceOf(task({ startDate: '2026-09-27' })), OWNER);
+    expect(next.overrides.title).toBe('병원 전화하기');
+    expect(next.hidden).toBe(true);
+  });
+
+  it('값이 같으면 다시 보낼 이유가 없다', () => {
+    const a = sourceOf(task());
+    expect(sameSource(a, sourceOf(task()))).toBe(true);
+    expect(sameSource(a, sourceOf(task({ title: '다른 제목' })))).toBe(false);
+    expect(sameSource(a, null)).toBe(false);
+    expect(sameSource(null, null)).toBe(true);
+  });
+});
+
+describe('공유 → 원본은 없다', () => {
+  it('제목을 고쳐도 원본 Entry 는 그대로다', () => {
+    const entry = task();
+    const before = JSON.stringify(entry);
+    const item = mirrored(entry);
+
+    const edited = applyOverrides(item, { title: '병원 전화하기' });
+
+    expect(edited.overrides.title).toBe('병원 전화하기');
+    // 원본 객체가 그대로여야 한다 — 이 방향으로는 아무것도 흐르지 않는다.
+    expect(JSON.stringify(entry)).toBe(before);
+    // source 도 원본에서 받은 값 그대로다.
+    expect(edited.source?.title).toBe('병원 예약');
+  });
+
+  it('완료로 체크해도 원본 상태는 그대로다', () => {
+    const entry = task();
+    const item = mirrored(entry);
+    const done = applyOverrides(item, { status: 'done' });
+
+    expect(sharedView(done).status).toBe('done');
+    expect(entry.task?.status).toBe('planned');
+    expect(done.source?.status).toBe('planned');
+  });
+
+  it('감춰도 원본은 남는다', () => {
+    const entry = task();
+    const hidden = setHidden(mirrored(entry), true);
+    expect(hidden.hidden).toBe(true);
+    expect(hidden.source?.title).toBe('병원 예약');
+    expect(entry.title).toBe('병원 예약');
+  });
+});
+
+describe('고치지 않은 필드는 원본을 따라간다', () => {
+  it('제목만 고친 뒤 원본 날짜가 바뀌면, 고친 제목 + 새 날짜다', () => {
+    const edited = applyOverrides(mirrored(task()), { title: '병원 전화하기' });
+    const after = withSource(edited, 'task-a', sourceOf(task({ startDate: '2026-09-27' })), OWNER);
+
+    const view = sharedView(after);
+    expect(view.title).toBe('병원 전화하기');
+    expect(view.startDate).toBe('2026-09-27');
+    expect(view.overridden).toEqual(['title']);
+  });
+
+  it('원본 상태 변경은 override 가 없을 때만 보인다', () => {
+    const plain = withSource(mirrored(task()), 'task-a', sourceOf(task({
+      task: { status: 'done', important: false, urgent: false, order: 0 },
+    })), OWNER);
+    expect(sharedView(plain).status).toBe('done');
+
+    const overridden = applyOverrides(mirrored(task()), { status: 'in-progress' });
+    const afterOwner = withSource(overridden, 'task-a', sourceOf(task({
+      task: { status: 'done', important: false, urgent: false, order: 0 },
+    })), OWNER);
+    // 원본이 완료로 바뀌어도 공유 화면의 상태는 고쳐 둔 값을 지킨다.
+    expect(sharedView(afterOwner).status).toBe('in-progress');
+  });
+
+  /*
+    편집 화면은 제목·날짜·상태를 한 번에 제출한다. 받은 필드를 전부 override 로 남기면
+    한 번 편집한 항목이 원본에서 통째로 떨어져 나간다 — 이 규칙이 그것을 막는다.
+  */
+  it('원본과 같은 값으로 제출한 필드는 override 가 되지 않는다', () => {
+    const item = mirrored(task());
+    const saved = applyOverrides(item, {
+      title: '병원 전화하기',
+      startDate: '2026-09-25', // 원본과 같다
+      status: 'planned',       // 원본과 같다
+      note: '',
+      important: false,
+      urgent: false,
+    });
+    expect(overriddenFields(saved)).toEqual(['title']);
+
+    const moved = withSource(saved, 'task-a', sourceOf(task({ startDate: '2026-10-01' })), OWNER);
+    expect(sharedView(moved).startDate).toBe('2026-10-01');
+  });
+
+  it('원본과 같은 값으로 되돌려 적으면 그 필드는 다시 원본을 따라간다', () => {
+    const edited = applyOverrides(mirrored(task()), { title: '병원 전화하기' });
+    const back = applyOverrides(edited, { title: '병원 예약' });
+    expect(overriddenFields(back)).toEqual([]);
+  });
+
+  it('기간 없음으로 고친 것과 고치지 않은 것은 다르다', () => {
+    const withRange = mirrored(task({ endDate: '2026-09-28' }));
+    expect(sharedView(withRange).endDate).toBe('2026-09-28');
+
+    const cleared = applyOverrides(withRange, { endDate: null });
+    expect(sharedView(cleared).endDate).toBe(null);
+    expect(overriddenFields(cleared)).toEqual(['endDate']);
+  });
+});
+
+describe('원본대로 되돌리기', () => {
+  it('override 를 지우면 원본 값이 보인다. 원본은 건드리지 않는다', () => {
+    const entry = task();
+    const edited = applyOverrides(mirrored(entry), { title: '병원 전화하기', status: 'done' });
+    expect(isOverridden(edited)).toBe(true);
+
+    const reverted = revertToSource(edited);
+    expect(reverted.overrides).toEqual({});
+    expect(sharedView(reverted).title).toBe('병원 예약');
+    expect(sharedView(reverted).status).toBe('planned');
+    expect(entry.title).toBe('병원 예약');
+  });
+
+  it('고친 자리가 없으면 되돌릴 것도 없다', () => {
+    expect(canRevert(mirrored(task()))).toBe(false);
+  });
+
+  it('공유 화면에서만 만든 항목에는 되돌릴 원본이 없다', () => {
+    const local = newLocalItem('local-1', 'member-uid', { title: '토요일 같이 장보기' });
+    expect(canRevert(local)).toBe(false);
+    expect(revertToSource(local)).toBe(local);
+  });
+});
+
+describe('공유 화면 전용 항목', () => {
+  it('원본을 가리키지 않는다 — 개인 TODO 에는 만들어지지 않는다', () => {
+    const local = newLocalItem('local-1', 'member-uid', {
+      title: '토요일 같이 장보기', startDate: '2026-09-26',
+    });
+    expect(local.sourceEntryId).toBe(null);
+    expect(local.source).toBe(null);
+    expect(local.localOnly).toBe(true);
+    expect(local.createdBy).toBe('member-uid');
+    expect(sharedView(local).title).toBe('토요일 같이 장보기');
+  });
+
+  it('값은 전부 자기 것이다 — 비교할 원본이 없어 override 가 지워지지 않는다', () => {
+    const local = newLocalItem('local-1', 'member-uid', { title: '장보기', startDate: '2026-09-26' });
+    const edited = applyOverrides(local, { title: '장보기', status: 'done' });
+    expect(sharedView(edited).title).toBe('장보기');
+    expect(sharedView(edited).status).toBe('done');
+  });
+
+  it('공유 화면에서만 만든 항목은 "수정됨" 이 아니다', () => {
+    const local = newLocalItem('local-1', 'member-uid', { title: '장보기' });
+    expect(isOverridden(local)).toBe(false);
+  });
+});
+
+describe('표시', () => {
+  it('제목이 비어 있어도 자리를 비워 두지 않는다', () => {
+    expect(sharedTitle(newLocalItem('x', 'u', { title: '   ' }))).toBe('(제목 없음)');
+  });
+
+  it('날짜가 없는 항목은 목록 뒤로 보낸다', () => {
+    const dated = mirrored(task());
+    const undated = newLocalItem('x', 'u', { title: '언젠가' });
+    expect(sharedSortKey(dated) < sharedSortKey(undated)).toBe(true);
+  });
+
+  it('계정 이름은 @ 앞만 쓴다', () => {
+    expect(shortName('someone@example.com')).toBe('someone');
+    expect(shortName('보리')).toBe('보리');
+    expect(shortName('  ')).toBe('상대');
+  });
+
+  it('상대는 나 아닌 member 다', () => {
+    const names = { me: 'me@example.com', you: 'you@example.com' };
+    expect(partnerName(['me', 'you'], names, 'me')).toBe('you');
+    expect(partnerName(['me'], names, 'me')).toBe(null);
+  });
+});
+
+describe('초대 코드', () => {
+  it('추측할 수 없는 길이여야 한다', () => {
+    const a = newInviteCode();
+    const b = newInviteCode();
+    expect(a).toHaveLength(20);
+    expect(a).not.toBe(b);
+    expect(a).toMatch(/^[a-z2-9]{20}$/);
+  });
+
+  it('링크는 앱 주소에 코드를 붙인다', () => {
+    expect(inviteUrl('https://example.com', '/', 'abc')).toBe('https://example.com/?join=abc');
+  });
+});

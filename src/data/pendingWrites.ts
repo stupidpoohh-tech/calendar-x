@@ -26,11 +26,18 @@
 import {
   deleteDoc, doc, getDoc, setDoc, writeBatch, type Firestore,
 } from 'firebase/firestore';
-import type { Account, Budget, Debt, Entry, Pin, RecoveryRule, Reserve } from '../domain/types';
+import type {
+  Account, Budget, Debt, Entry, Pin, RecoveryRule, Reserve,
+  SharedBoard, SharedDday, SharedInvite, SharedPin, SharedSource, SharedTodoItem,
+} from '../domain/types';
 import {
   accountToDoc, budgetToDoc, debtToDoc, entryToDoc, pinToDoc, recoveryRuleToDoc, reserveToDoc,
 } from './converters';
-import { COL, docIn, userDoc } from './paths';
+import {
+  sharedBoardToDoc, sharedDdayToDoc, sharedInviteToDoc, sharedItemToDoc, sharedPinToDoc,
+  sharedSourcePatch,
+} from './sharedConverters';
+import { boardDoc, boardSubDoc, COL, docIn, inviteDoc, SHARED, userDoc } from './paths';
 
 export type PendingKind =
   | 'entry' | 'entryDelete'
@@ -40,12 +47,20 @@ export type PendingKind =
   | 'budget' | 'budgetDelete'
   | 'reserve' | 'reserveDelete'
   | 'taskOrder'
-  | 'recoveryRule' | 'recoveryPatch' | 'recoveryCommit';
+  | 'recoveryRule' | 'recoveryPatch' | 'recoveryCommit'
+  // 같이 보기. 개인 자료와 **같은 길**을 쓴다 — 거절당한 공유 편집도 목록에 남아야 한다.
+  | 'sharedBoard' | 'sharedInvite' | 'sharedInviteDelete'
+  | 'sharedSource' | 'sharedItem' | 'sharedItemDelete'
+  | 'sharedPin' | 'sharedPinDelete'
+  | 'sharedDday' | 'sharedDdayDelete';
 
 const KINDS: readonly PendingKind[] = [
   'entry', 'entryDelete', 'account', 'debt', 'debtDelete',
   'pin', 'pinDelete', 'budget', 'budgetDelete', 'reserve', 'reserveDelete',
   'taskOrder', 'recoveryRule', 'recoveryPatch', 'recoveryCommit',
+  'sharedBoard', 'sharedInvite', 'sharedInviteDelete',
+  'sharedSource', 'sharedItem', 'sharedItemDelete',
+  'sharedPin', 'sharedPinDelete', 'sharedDday', 'sharedDdayDelete',
 ];
 
 /** 회복은 항목과 규칙을 한 배치로 쓴다. 그 한 벌이 payload 다. */
@@ -55,12 +70,31 @@ export interface RecoveryCommitPayload {
   removeEntryId?: string | null;
 }
 
+/**
+ * 원본 → 공유 갱신 한 건.
+ *
+ * 항목 전체가 아니라 `source` 만 담는다. 실제 쓰기도 그 필드들만 merge 하므로,
+ * 다시 보낼 때에도 상대가 고쳐 둔 값(`overrides`)과 감춰 둔 상태(`hidden`)를 덮지 않는다.
+ */
+export interface SharedSourcePayload {
+  boardId: string;
+  entryId: string;
+  source: SharedSource;
+  ownerUid: string;
+}
+
 export type PendingPayload =
   | Entry | Account | Debt | Pin | Budget | Reserve | RecoveryRule
   | { id: string }
   | { ordered: { id: string; order: number }[] }
   | Partial<RecoveryRule>
-  | RecoveryCommitPayload;
+  | RecoveryCommitPayload
+  | SharedBoard | SharedInvite
+  | SharedSourcePayload
+  | { boardId: string; item: SharedTodoItem }
+  | { boardId: string; pin: SharedPin }
+  | { boardId: string; dday: SharedDday }
+  | { boardId: string; id: string };
 
 /** 보낼 값 그 자체. 화면에서 만들어 그대로 넘긴다. */
 export interface CommitInput {
@@ -135,6 +169,54 @@ export function sendPending(db: Firestore, uid: string, op: CommitInput): Promis
       return setDoc(userDoc(db, uid), { recovery: op.payload as Partial<RecoveryRule> }, { merge: true });
     case 'recoveryCommit':
       return sendRecoveryCommit(db, uid, op.payload as RecoveryCommitPayload);
+
+    /*
+      같이 보기. 경로가 `users/{uid}` 밖이라 uid 를 쓰지 않는다 — 보드 id 가 자리를 정하고,
+      누가 쓸 수 있는지는 보안 규칙이 보드의 member 목록으로 판정한다.
+    */
+    case 'sharedBoard': {
+      const b = op.payload as SharedBoard;
+      return setDoc(boardDoc(db, b.id), sharedBoardToDoc(b));
+    }
+    case 'sharedInvite': {
+      const i = op.payload as SharedInvite;
+      return setDoc(inviteDoc(db, i.code), sharedInviteToDoc(i));
+    }
+    case 'sharedInviteDelete':
+      return deleteDoc(inviteDoc(db, asId(op.payload)));
+    case 'sharedSource': {
+      const p = op.payload as SharedSourcePayload;
+      // merge. `overrides` · `hidden` 을 담지 않으므로 상대의 수정이 살아남는다.
+      return setDoc(
+        boardSubDoc(db, p.boardId, SHARED.items, p.entryId),
+        sharedSourcePatch(p.entryId, p.source, p.ownerUid, new Date().toISOString()),
+        { merge: true },
+      );
+    }
+    case 'sharedItem': {
+      const p = op.payload as { boardId: string; item: SharedTodoItem };
+      return setDoc(boardSubDoc(db, p.boardId, SHARED.items, p.item.id), sharedItemToDoc(p.item));
+    }
+    case 'sharedItemDelete': {
+      const p = op.payload as { boardId: string; id: string };
+      return deleteDoc(boardSubDoc(db, p.boardId, SHARED.items, p.id));
+    }
+    case 'sharedPin': {
+      const p = op.payload as { boardId: string; pin: SharedPin };
+      return setDoc(boardSubDoc(db, p.boardId, SHARED.pins, p.pin.id), sharedPinToDoc(p.pin));
+    }
+    case 'sharedPinDelete': {
+      const p = op.payload as { boardId: string; id: string };
+      return deleteDoc(boardSubDoc(db, p.boardId, SHARED.pins, p.id));
+    }
+    case 'sharedDday': {
+      const p = op.payload as { boardId: string; dday: SharedDday };
+      return setDoc(boardSubDoc(db, p.boardId, SHARED.ddays, p.dday.id), sharedDdayToDoc(p.dday));
+    }
+    case 'sharedDdayDelete': {
+      const p = op.payload as { boardId: string; id: string };
+      return deleteDoc(boardSubDoc(db, p.boardId, SHARED.ddays, p.id));
+    }
   }
 }
 
@@ -172,49 +254,99 @@ function sendRecoveryCommit(db: Firestore, uid: string, change: RecoveryCommitPa
  */
 export type Freshness = 'fresh' | 'stale' | 'unknown';
 
-/** 종류별로 어느 문서를 보고, 무엇과 견줄지. */
-function targetOf(op: PendingOp): { col: string; id: string; base: string } | null {
+/**
+ * 종류별로 어느 문서를 보고, 무엇과 견줄지.
+ *
+ * 경로를 조각으로 돌려준다 — 같이 보기의 문서는 `users/{uid}` 밖(`sharedBoards/...`)에
+ * 있어서, 개인 컬렉션 이름 하나로는 자리를 가리킬 수 없다.
+ */
+function targetOf(op: PendingOp, uid: string): { path: string[]; base: string } | null {
+  const mine = (name: string, id: string, base: string) => ({ path: ['users', uid, name, id], base });
+  const board = (boardId: string, name: string, id: string, base: string) =>
+    ({ path: [SHARED.boards, boardId, name, id], base });
+
   switch (op.kind) {
-    case 'entry': return { col: COL.entries, id: asEntry(op.payload).id, base: asEntry(op.payload).updatedAt };
+    case 'entry': return mine(COL.entries, asEntry(op.payload).id, asEntry(op.payload).updatedAt);
     case 'account': {
       const a = op.payload as Account;
-      return { col: COL.accounts, id: a.id, base: a.updatedAt };
+      return mine(COL.accounts, a.id, a.updatedAt);
     }
     case 'debt': {
       const d = op.payload as Debt;
-      return { col: COL.debts, id: d.id, base: d.updatedAt };
+      return mine(COL.debts, d.id, d.updatedAt);
     }
     case 'pin': {
       const p = op.payload as Pin;
-      return { col: COL.pins, id: p.id, base: p.updatedAt };
+      return mine(COL.pins, p.id, p.updatedAt);
     }
     // 삭제에는 값이 없다. 실패한 시각을 기준으로 본다 — 그 뒤에 다시 쓰였다면
     // 사용자가 같은 자리를 새로 채운 것이므로 지우면 안 된다.
-    case 'entryDelete': return { col: COL.entries, id: asId(op.payload), base: op.at };
-    case 'debtDelete': return { col: COL.debts, id: asId(op.payload), base: op.at };
-    case 'pinDelete': return { col: COL.pins, id: asId(op.payload), base: op.at };
+    case 'entryDelete': return mine(COL.entries, asId(op.payload), op.at);
+    case 'debtDelete': return mine(COL.debts, asId(op.payload), op.at);
+    case 'pinDelete': return mine(COL.pins, asId(op.payload), op.at);
     case 'budget': {
       const b = op.payload as Budget;
-      return { col: COL.budgets, id: b.id, base: b.updatedAt };
+      return mine(COL.budgets, b.id, b.updatedAt);
     }
     case 'reserve': {
       const r = op.payload as Reserve;
-      return { col: COL.reserves, id: r.id, base: r.updatedAt };
+      return mine(COL.reserves, r.id, r.updatedAt);
     }
-    case 'budgetDelete': return { col: COL.budgets, id: asId(op.payload), base: op.at };
-    case 'reserveDelete': return { col: COL.reserves, id: asId(op.payload), base: op.at };
+    case 'budgetDelete': return mine(COL.budgets, asId(op.payload), op.at);
+    case 'reserveDelete': return mine(COL.reserves, asId(op.payload), op.at);
+
+    /*
+      같이 보기. 보드 문서는 두 사람이 함께 쓰는 자리라 견주는 일이 더 중요하다 —
+      "더 새로운 내용이 서버에 있습니다" 가 실제로 상대의 수정일 수 있다.
+
+      원본 → 공유 갱신(`sharedSource`)의 기준은 **큐에 넣은 시각**이다. 그 값에는
+      updatedAt 이 없고(보내는 순간에 찍는다), 그 뒤에 서버 항목이 더 새로워졌다면
+      다른 기기가 이미 같은 원본을 보냈거나 상대가 같은 항목을 고친 것이다.
+    */
+    case 'sharedBoard': {
+      const b = op.payload as SharedBoard;
+      return { path: [SHARED.boards, b.id], base: b.updatedAt };
+    }
+    case 'sharedSource': {
+      const p = op.payload as SharedSourcePayload;
+      return board(p.boardId, SHARED.items, p.entryId, op.at);
+    }
+    case 'sharedItem': {
+      const p = op.payload as { boardId: string; item: SharedTodoItem };
+      return board(p.boardId, SHARED.items, p.item.id, p.item.updatedAt);
+    }
+    case 'sharedPin': {
+      const p = op.payload as { boardId: string; pin: SharedPin };
+      return board(p.boardId, SHARED.pins, p.pin.id, p.pin.updatedAt);
+    }
+    case 'sharedDday': {
+      const p = op.payload as { boardId: string; dday: SharedDday };
+      return board(p.boardId, SHARED.ddays, p.dday.id, p.dday.updatedAt);
+    }
+    case 'sharedItemDelete': {
+      const p = op.payload as { boardId: string; id: string };
+      return board(p.boardId, SHARED.items, p.id, op.at);
+    }
+    case 'sharedPinDelete': {
+      const p = op.payload as { boardId: string; id: string };
+      return board(p.boardId, SHARED.pins, p.id, op.at);
+    }
+    case 'sharedDdayDelete': {
+      const p = op.payload as { boardId: string; id: string };
+      return board(p.boardId, SHARED.ddays, p.id, op.at);
+    }
     default: return null;
   }
 }
 
 export async function freshnessOf(db: Firestore, uid: string, op: PendingOp): Promise<Freshness> {
-  const t = targetOf(op);
+  const t = targetOf(op, uid);
   // 순서 저장은 `task.order` 필드만 건드리고 updatedAt 을 올리지 않는다. 회복 규칙은
-  // 맵 필드 하나라 시각 자체가 없다. 둘 다 견줄 값이 없으므로 사람에게 묻는다.
+  // 맵 필드 하나라 시각 자체가 없다. 초대장에는 갱신이 없다. 견줄 값이 없으면 사람에게 묻는다.
   if (!t) return 'unknown';
 
   try {
-    const snap = await getDoc(doc(db, 'users', uid, t.col, t.id));
+    const snap = await getDoc(doc(db, t.path.join('/')));
     if (!snap.exists()) {
       // 지우려던 것이 이미 없다 — 다시 보낼 필요조차 없지만, 보내도 무해하다.
       return 'fresh';

@@ -5,6 +5,8 @@ import { defineConfig } from 'vitest/config';
  *   rules.test.ts                  보안 규칙 자체
  *   restore.emulator.test.ts       복원 순서를 진짜 저장소 위에서
  *   pendingWrites.emulator.test.ts 규칙 거절 뒤에 무엇이 남는가
+ *   shared.emulator.test.ts        같이 보기 — merge 갱신이 상대의 수정을 남기는가,
+ *                                  공유 화면의 편집이 원본에 닿지 않는가
  */
 export default defineConfig({
   test: {
@@ -14,6 +16,7 @@ export default defineConfig({
       'src/test/rules.test.ts',
       'src/test/restore.emulator.test.ts',
       'src/test/pendingWrites.emulator.test.ts',
+      'src/test/shared.emulator.test.ts',
     ],
     testTimeout: 20_000,
     hookTimeout: 30_000,
