@@ -3,7 +3,7 @@
  *
  * ── 위계 ────────────────────────────────────────────────────────
  *
- *   ← 내 TODO                          같이 보기 · {보드}
+ *   ← 나                                같이 보기 · {보드}
  *   [대표 D-Day]  📌 고정된 메모        ← 보드 공통. 한 줄
  *   [ 일정 | 함께 할 것 | 메모 ]        ← 2차 탭
  *                본문
@@ -43,7 +43,7 @@ import {
 } from '../domain/shared';
 import type {
   Entry, SharedBoard, SharedCollection, SharedCollectionItem, SharedDday, SharedNote,
-  SharedTodoItem, ViewId, WeekStart, YearMonth,
+  SharedTabId, SharedTodoItem, ViewId, WeekStart, YearMonth,
 } from '../domain/types';
 import { Icon } from './Icon';
 import { MonthCalendar } from './MonthCalendar';
@@ -52,13 +52,16 @@ import { SharedDdayPanel } from './SharedDdayPanel';
 import { SharedItemSheet } from './SharedItemSheet';
 import { SharedNotes } from './SharedNotes';
 
-/** 공유 보드의 2차 탭. 정확히 셋이다. */
-type Tab = 'schedule' | 'wish' | 'notes';
-
-const TABS: { id: Tab; label: string }[] = [
-  { id: 'schedule', label: '일정' },
-  { id: 'wish', label: '함께 할 것' },
-  { id: 'notes', label: '메모' },
+/**
+ * 공유 보드의 탭. 정확히 셋이다.
+ *
+ * 이름은 개인 공간과 짝이 맞게 적는다 — 저쪽도 캘린더 · 노트다. 같은 말이 두 공간에서
+ * 같은 것을 가리켜야 어느 쪽에 있는지가 그림(👤 · 👥) 하나로 읽힌다.
+ */
+const TABS: { id: SharedTabId; label: string }[] = [
+  { id: 'calendar', label: '캘린더' },
+  { id: 'list', label: '리스트' },
+  { id: 'notes', label: '노트' },
 ];
 
 interface Props {
@@ -79,6 +82,9 @@ interface Props {
   onCursorChange: (next: Date) => void;
   view: ViewId;
   onViewChange: (next: ViewId) => void;
+  /** 보고 있는 탭. 개인 공간의 렌즈와 **따로** 기억한다. */
+  tab: SharedTabId;
+  onTabChange: (next: SharedTabId) => void;
   weekStart: WeekStart;
   onBack: () => void;
   onOpenInvite: () => void;
@@ -112,13 +118,12 @@ const NO_ENTRIES: Entry[] = [];
 
 export function SharedScreen({
   board, partner, myUid, items, ddays, collections, collectionItems, notes, legacyMemo,
-  contentReady, todayISO, cursor, onCursorChange, view, onViewChange, weekStart,
+  contentReady, todayISO, cursor, onCursorChange, view, onViewChange, tab, onTabChange, weekStart,
   onBack, onOpenInvite, onSaveItem, onUnshareItem, onDeleteItem,
   onSaveDday, onDeleteDday,
   onSaveCollection, onDeleteCollection, onSaveCollectionItem, onDeleteCollectionItem,
   onSaveNote, onDeleteNote, onPinNote, onAdoptLegacyMemo,
 }: Props) {
-  const [tab, setTab] = useState<Tab>('schedule');
   const [editing, setEditing] = useState<{ item: SharedTodoItem; mode: 'create' | 'edit' } | null>(null);
   const [showHidden, setShowHidden] = useState(false);
   const [showDdays, setShowDdays] = useState(false);
@@ -237,7 +242,7 @@ export function SharedScreen({
     <section className="sh" aria-label="같이 보기">
       <div className="sh-top">
         <button className="sh-back" onClick={onBack}>
-          <Icon.Chevron size={14} dir="left" />내 TODO
+          <Icon.Chevron size={14} dir="left" />나
         </button>
         <div className="sh-who">
           <Icon.Users size={13} />
@@ -274,7 +279,7 @@ export function SharedScreen({
         </button>
 
         {pinned && (
-          <button className="sh-pinned" onClick={() => setTab('notes')}>
+          <button className="sh-pinned" onClick={() => onTabChange('notes')}>
             <Icon.Pin size={12} />
             <b>{noteTitle(pinned)}</b>
             <span>{noteSummary(pinned)}</span>
@@ -299,7 +304,7 @@ export function SharedScreen({
             role="tab"
             className={'sh-tab' + (tab === t.id ? ' on' : '')}
             aria-selected={tab === t.id}
-            onClick={() => setTab(t.id)}
+            onClick={() => onTabChange(t.id)}
           >
             {t.label}
           </button>
@@ -309,7 +314,7 @@ export function SharedScreen({
       {/* 아직 한 건도 못 받았으면 "없다" 고 말하지 않는다. */}
       {!contentReady ? (
         <p className="sh-empty">불러오는 중입니다.</p>
-      ) : tab === 'wish' ? (
+      ) : tab === 'list' ? (
         <SharedCollections
           myUid={myUid}
           collections={collections}

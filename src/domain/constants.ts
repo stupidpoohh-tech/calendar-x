@@ -39,10 +39,17 @@ export interface LensDef {
   kind: EntryKind | null;
 }
 
+/*
+  내 공간의 탭. 이름은 사용자가 보는 말로 적는다.
+
+  `task` 를 'TODO' 라 부르고 `idea` 를 이모지 하나로 두던 때가 있었는데, 하나는 영어
+  약어이고 하나는 그림이라 나란히 놓으면 같은 층으로 읽히지 않았다. 내부 id 는 그대로다
+  (`task` · `idea`) — 자료의 이름과 화면의 이름은 다를 수 있다.
+*/
 export const LENSES: readonly LensDef[] = [
   { id: 'all',   label: '전체',   title: '전체',      accentVar: '--lens-all',   kind: null },
-  { id: 'task',  label: 'TODO',   title: '할 일',     accentVar: '--lens-task',  kind: 'task' },
-  { id: 'idea',  label: '💡',     title: '아이디어',  accentVar: '--lens-idea',  kind: 'idea' },
+  { id: 'task',  label: '캘린더', title: '캘린더',    accentVar: '--lens-task',  kind: 'task' },
+  { id: 'idea',  label: '노트',   title: '노트',      accentVar: '--lens-idea',  kind: 'idea' },
   { id: 'money', label: '가계부', title: '가계부',    accentVar: '--lens-money', kind: 'money' },
 ];
 

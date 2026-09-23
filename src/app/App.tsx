@@ -45,7 +45,7 @@ import { FailedWrites } from '../ui/FailedWrites';
 import { PinnedSection } from '../ui/PinnedSection';
 import { RecoveryDebtBar } from '../ui/RecoveryDebtBar';
 import { RecoverySheet } from '../ui/RecoverySheet';
-import { SharedBar } from '../ui/SharedBar';
+import { SpaceSwitch } from '../ui/SpaceSwitch';
 import { SharedScreen } from '../ui/SharedScreen';
 import { SharedJoinSheet, SharedSettingsSheet, SharedStartSheet } from '../ui/SharedInvite';
 import { SettingsSheet } from '../ui/SettingsSheet';
@@ -114,10 +114,22 @@ function Workspace({ uid, user, onSignOut }: WorkspaceProps) {
   /*
     같이 보기.
 
-    렌즈를 하나 더 만들지 않는다 — 이것은 TODO 의 하위 기능이고, 열려 있는 동안만
-    본문 자리를 차지한다. 상단 렌즈는 그대로 남아 있고, 다른 렌즈를 누르면 닫힌다.
+    ── 렌즈가 아니라 **공간**이다 ───────────────────────────────
+
+    렌즈 칸을 하나 더 만들면 축이 다섯 개라는 뜻이 되고, 실제로는 같은 축을 거르는 것이
+    아니라 **다른 자료를 보는 다른 화면**이다. 그래서 렌즈보다 한 층 위에 두고
+    👤 / 👥 두 그림으로 오간다 (`SpaceSwitch`).
+
+    보드가 없으면 공유 공간은 열리지 않는다 — 빈 공간을 미리 만들어 보여 주지 않고,
+    👥+ 가 만들기·초대 흐름으로 간다. 보드가 사라진 뒤(나가기 · 삭제)에도 같은 규칙이라
+    아래 `space` 가 내 공간으로 물러난다.
   */
-  const [sharedOpen, setSharedOpen] = useState(false);
+  const setSharedOpen = useCallback(
+    (open: boolean) => set('space', open ? 'shared' : 'me'),
+    [set],
+  );
+  /** 사용자가 가려는 공간. 보드가 실제로 있는지는 아래에서 본다. */
+  const wantsShared = prefs.space === 'shared';
   const [sharedSheet, setSharedSheet] = useState<'start' | 'settings' | null>(null);
   const [invite, setInvite] = useState<SharedInvite | null>(null);
   const [invitesReady, setInvitesReady] = useState(false);
@@ -163,10 +175,26 @@ function Workspace({ uid, user, onSignOut }: WorkspaceProps) {
     uid,
     todayISO: today,
     accountName,
-    open: sharedOpen,
+    open: wantsShared,
     onError: (message) => dialog.toast(message, 'bad'),
     commit,
   });
+
+  /*
+    공유 공간은 보드가 있을 때만 열린다.
+
+    보드 구독이 아직 안 왔으면(`ready === false`) "없음" 을 확정할 수 없으므로 물러나지
+    않는다 — 그때 되돌리면 새로고침마다 공유에 있던 사람이 내 공간으로 튕긴다.
+  */
+  const sharedOpen = wantsShared && !!uid && !!shared.board;
+
+  /*
+    보드가 사라졌으면(나가기 · 삭제 · 계정 변경) 기억해 둔 공간도 되돌린다. 남겨 두면
+    다음 접속 때마다 열리지 않는 공간을 향한다.
+  */
+  useEffect(() => {
+    if (wantsShared && shared.ready && !shared.board) set('space', 'me');
+  }, [wantsShared, shared.ready, shared.board, set]);
 
   // 저장·편집 시도 시 로그인 유도 팝업. 사용자가 실제 앱을 만져 보다가
   // 남기려는 순간에만 계정이 필요하다는 것을 자연스럽게 전달한다.
@@ -293,7 +321,7 @@ function Workspace({ uid, user, onSignOut }: WorkspaceProps) {
     }
     // 실패해도 창을 닫지 않는다 — 무엇이 막혔는지 읽고 다시 시도할 수 있어야 한다.
     setJoin((j) => (j ? { ...j, state: result === 'not-found' ? 'not-found' : 'ready' } : j));
-  }, [join, shared, dialog]);
+  }, [join, shared, dialog, setSharedOpen]);
 
   const startShare = useCallback((name: string) => {
     const created = shared.createBoard(name);
@@ -303,7 +331,7 @@ function Workspace({ uid, user, onSignOut }: WorkspaceProps) {
     setInvitesReady(true);
     setSharedSheet('settings');
     setSharedOpen(true);
-  }, [shared]);
+  }, [shared, setSharedOpen]);
 
   // 이관 전 컬렉션이 남아 있는지, 이미 옮겼는지 한 번만 확인한다.
   const checkedLegacy = useRef(false);
@@ -376,8 +404,8 @@ function Workspace({ uid, user, onSignOut }: WorkspaceProps) {
     if (!entryId) return;
     const ok = await dialog.confirm({
       title: '이 항목을 공유에서 내릴까요?',
-      body: '상대 화면에서 사라집니다. 내 TODO 에는 그대로 남고, 여기서 고쳐 둔 내용은 함께 지워집니다.'
-        + ' 다시 올리려면 내 TODO 에서 이 항목의 \'나만 보기\' 를 끄면 됩니다.',
+      body: '상대 화면에서 사라집니다. 내 캘린더에는 그대로 남고, 여기서 고쳐 둔 내용은 함께 지워집니다.'
+        + ' 다시 올리려면 내 캘린더에서 이 항목의 \'나만 보기\' 를 끄면 됩니다.',
       confirmLabel: '내리기',
       danger: true,
     });
@@ -924,6 +952,20 @@ function Workspace({ uid, user, onSignOut }: WorkspaceProps) {
           <span className="brand-name">캘린더X</span>
         </div>
 
+        {/*
+          공간 전환. 탭보다 **위**이지만 자리는 작다 — 머리가 한 줄 더 늘면 모바일에서
+          캘린더가 그만큼 밀린다. 로그인해야 공유가 뜻이 있으므로 그 전에는 띄우지 않는다.
+        */}
+        {!isAnon && (
+          <SpaceSwitch
+            space={sharedOpen ? 'shared' : 'me'}
+            hasBoard={!!shared.board}
+            ready={shared.ready}
+            onChange={(next) => setSharedOpen(next === 'shared')}
+            onStart={() => setSharedSheet('start')}
+          />
+        )}
+
           {!sharedOpen && (
         <div className="tool-l">
           <button className="ico-btn sm" aria-label="이전 달"
@@ -971,7 +1013,6 @@ function Workspace({ uid, user, onSignOut }: WorkspaceProps) {
                 <button onClick={() => set('view', 'list')} aria-pressed={view === 'list'}><Icon.List size={16} />리스트 보기</button>
                 <button onClick={() => setShowFilters((x) => !x)} aria-expanded={showFilters}><Icon.Filter size={16} />필터{hasActiveFilter(filters) ? ' · 적용 중' : ''}</button>
               </>}
-              {!isAnon && <button disabled={!shared.ready} onClick={() => shared.board ? setSharedOpen(true) : setSharedSheet('start')}><Icon.Users size={16} />같이 보기</button>}
               {isAnon
                 ? <button onClick={() => setShowAuth(true)}>로그인 · 가입</button>
                 : <button onClick={() => setShowSettings(true)}><Icon.Settings size={16} />설정</button>}
@@ -1002,10 +1043,6 @@ function Workspace({ uid, user, onSignOut }: WorkspaceProps) {
           </button>
         </div>
           )}
-        {!isAnon && (
-          <SharedBar ready={shared.ready} board={shared.board} partner={shared.partner}
-            onOpen={() => setSharedOpen(true)} onStart={() => setSharedSheet('start')} />
-        )}
         {isAnon ? (
           <button className="landing-cta-sm" onClick={() => setShowAuth(true)}>로그인 · 가입</button>
         ) : (
@@ -1057,6 +1094,9 @@ function Workspace({ uid, user, onSignOut }: WorkspaceProps) {
             // 리스트가 되면 고친 적 없는 화면이 바뀐 것으로 보인다.
             view={prefs.sharedView}
             onViewChange={(v) => set('sharedView', v)}
+            // 공간마다 마지막 탭을 따로 기억한다 — 👥 를 누르면 보던 자리로 돌아온다.
+            tab={prefs.sharedTab}
+            onTabChange={(t) => set('sharedTab', t)}
             weekStart={prefs.weekStart}
             onBack={() => setSharedOpen(false)}
             onOpenInvite={() => setSharedSheet('settings')}

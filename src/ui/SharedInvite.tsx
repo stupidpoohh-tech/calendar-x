@@ -46,19 +46,19 @@ export function SharedStartSheet({ defaultName, onCreate, onClose }: StartProps)
 
   return (
     <div className="mod-back" onClick={onClose}>
-      <div className="mod sh-mod" role="dialog" aria-modal="true" aria-label="TODO 공유하기" onClick={(e) => e.stopPropagation()}>
+      <div className="mod sh-mod" role="dialog" aria-modal="true" aria-label="같이 보기 만들기" onClick={(e) => e.stopPropagation()}>
         <header className="mod-head">
-          <strong className="shi-head">TODO 공유하기</strong>
+          <strong className="shi-head">같이 보기 만들기</strong>
           <button className="ico-btn sm" onClick={onClose} aria-label="닫기"><Icon.X size={14} /></button>
         </header>
 
         <div className="mod-body">
           <p className="mod-hint">
-            내 TODO 를 상대와 함께 보는 자리를 만듭니다. 상대가 보는 것은 <b>이 공유 화면뿐</b>이고,
+            내 캘린더를 상대와 함께 보는 자리를 만듭니다. 상대가 보는 것은 <b>이 공유 화면뿐</b>이고,
             아이디어 · 가계부 · 잔고에는 접근할 수 없습니다.
           </p>
           <p className="mod-hint">
-            공유 화면에서 고친 값은 <b>내 TODO 에 반영되지 않습니다.</b> 고치지 않은 칸은 계속 원본을 따라갑니다.
+            공유 화면에서 고친 값은 <b>내 캘린더에 반영되지 않습니다.</b> 고치지 않은 칸은 계속 원본을 따라갑니다.
           </p>
 
           <div className="mod-row">
@@ -236,12 +236,12 @@ export function SharedJoinSheet({ invite, state, onAccept, onClose }: JoinProps)
                 함께 보고 고칠 수 있습니다.
               </p>
               <p className="mod-hint">
-                <b>두 사람의 TODO 가 모두 여기로 옵니다</b> — 오늘 이후의 할 일만 올라가고,
+                <b>두 사람의 캘린더가 모두 여기로 옵니다</b> — 오늘 이후의 할 일만 올라가고,
                 항목을 <b>나만 보기</b>로 표시하면 그 항목은 올라가지 않습니다.
               </p>
               <p className="mod-hint">
                 수락해도 상대의 <b>아이디어 · 가계부 · 잔고 · 개인 고정 메모</b>에는 접근할 수 없습니다.
-                공유 화면에서 고친 값은 상대의 원본 TODO 에 반영되지 않습니다.
+                공유 화면에서 고친 값은 상대의 원본에 반영되지 않습니다.
               </p>
               {!navigator.onLine && (
                 <p className="dlg-warn">지금 오프라인으로 보입니다. 수락은 연결된 뒤에만 됩니다.</p>

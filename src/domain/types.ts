@@ -363,10 +363,28 @@ export type LensId = EntryKind | 'all';
 export type ViewId = 'calendar' | 'list';
 
 /** 기기에 남는 UI 설정. 사용자 데이터가 아니므로 Firestore 에 올리지 않는다. */
+/**
+ * 최상위 공간. 렌즈보다 위다.
+ *
+ *   me      내 캘린더 · 노트 · 가계부
+ *   shared  둘이 함께 보는 보드
+ *
+ * 공유를 렌즈 칸 하나로 만들지 않는 이유는 축이 다섯 개라는 뜻이 되기 때문이고,
+ * 공간으로 올리는 이유는 그것이 **다른 자료를 보는 다른 화면**이기 때문이다.
+ */
+export type SpaceId = 'me' | 'shared';
+
+/** 공유 보드 안의 탭. 캘린더 · 리스트 · 노트 셋이다. */
+export type SharedTabId = 'calendar' | 'list' | 'notes';
+
 export interface Prefs {
   theme: ThemePref;
   fontScale: FontScale;
+  /** 마지막으로 있던 공간. 재진입하면 여기로 돌아온다. */
+  space: SpaceId;
   lens: LensId;
+  /** 공유 공간의 마지막 탭. 개인 렌즈와 **따로** 기억한다. */
+  sharedTab: SharedTabId;
   view: ViewId;
   /**
    * 같이 보기 화면의 보기 방식.

@@ -32,7 +32,7 @@ interface Props {
   mode: 'create' | 'edit';
   onSave: (item: SharedTodoItem) => void;
   /**
-   * 내가 올린 항목을 보드에서 내린다. 원본은 내 TODO 에 그대로 남는다.
+   * 내가 올린 항목을 보드에서 내린다. 원본은 내 캘린더에 그대로 남는다.
    *
    * 남의 항목에는 주지 않는다 — 내릴 수 있는 것은 그 원본의 주인뿐이다.
    */
@@ -107,13 +107,13 @@ export function SharedItemSheet({
 
         <div className="mod-body">
           {item.localOnly && mode === 'edit' && (
-            <p className="mod-hint">이 항목은 같이 보기에만 있습니다. 내 TODO 에는 만들어지지 않습니다.</p>
+            <p className="mod-hint">이 항목은 같이 보기에만 있습니다. 내 캘린더에는 만들어지지 않습니다.</p>
           )}
           {!item.localOnly && (
             <p className="mod-hint">
               {ownsMirror(item, myUid)
-                ? <>내 TODO 의 항목입니다. 여기서 고친 값은 <b>내 TODO 에 반영되지 않고</b>, 고치지 않은 칸은 계속 원본을 따라갑니다.</>
-                : <>상대의 TODO 에서 온 항목입니다. 여기서 고친 값은 <b>상대의 원본에 반영되지 않고</b>, 고치지 않은 칸은 계속 원본을 따라갑니다.</>}
+                ? <>내 캘린더의 항목입니다. 여기서 고친 값은 <b>내 캘린더에 반영되지 않고</b>, 고치지 않은 칸은 계속 원본을 따라갑니다.</>
+                : <>상대의 캘린더에서 온 항목입니다. 여기서 고친 값은 <b>상대의 원본에 반영되지 않고</b>, 고치지 않은 칸은 계속 원본을 따라갑니다.</>}
             </p>
           )}
 

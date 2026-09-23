@@ -1621,3 +1621,32 @@
 }
 .shn-legacy-t { font-size: 0.8125rem; color: var(--ink-2); font-weight: 600; }
 .shn-legacy-b { font-size: 0.8125rem; color: var(--ink-3); white-space: pre-wrap; }
+
+/* ---------- 공간 전환 (👤 / 👥) ---------- */
+
+/*
+  탭보다 **위**이지만 자리는 작다. 아래 렌즈 줄과 같은 세그먼트 모양으로 그리면 어느
+  쪽이 상위인지가 흐려지므로, 칸을 나누지 않고 그림 둘을 나란히 둔다.
+*/
+.spx { display: inline-flex; align-items: center; gap: 2px; }
+
+.spx-b {
+  display: inline-flex; align-items: center; gap: 4px;
+  padding: 5px 8px; border-radius: 8px;
+  color: var(--ink-3); font-size: 0.75rem;
+}
+.spx-b:hover:not(:disabled) { color: var(--ink-2); background: var(--bg-soft); }
+.spx-b:disabled { opacity: 0.45; }
+
+/* 선택 상태가 불분명하면 안 된다 — 색만이 아니라 바탕으로도 가른다. */
+.spx-b.on { color: var(--ink); background: var(--bg-soft); font-weight: 600; }
+.spx-b.on svg { color: var(--lens); }
+
+.spx-l { line-height: 1; }
+.spx-plus { font-weight: 700; color: var(--lens); margin-left: -2px; }
+
+/* 좁은 화면에서는 그림만 남긴다. 머리 한 줄을 더 늘리지 않는다. */
+@media (max-width: 480px) {
+  .spx-l { display: none; }
+  .spx-b { padding: 5px 6px; }
+}

@@ -152,6 +152,13 @@ export const Icon = {
       <circle cx="9" cy="18" r="1" /><circle cx="15" cy="18" r="1" />
     </svg>
   ),
+  /** 내 공간. 사람 하나. */
+  User: (p: Props) => (
+    <svg {...base(p)}>
+      <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2" />
+      <circle cx="12" cy="7" r="4" />
+    </svg>
+  ),
   /** 같이 보기. 사람 둘 — 관계를 그리지 않고 '둘이 본다' 만 말한다. */
   Users: (p: Props) => (
     <svg {...base(p)}>

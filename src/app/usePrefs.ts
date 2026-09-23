@@ -6,7 +6,13 @@ const PREF_KEY = 'dada.pref.v2';
 const DEFAULTS: Prefs = {
   theme: 'system',
   fontScale: 'auto',
+  /*
+    처음 여는 사람에게는 내 공간이 기본이다. 공유는 보드가 있어야 열리고, 그 전에는
+    만들기 자리(👥+)만 보인다.
+  */
+  space: 'me',
   lens: 'all',
+  sharedTab: 'calendar',
   view: 'calendar',
   /*
     공유 일정은 리스트가 기본이다. 둘이 보는 목록은 "지금 뭐가 남았나" 가 먼저이고,

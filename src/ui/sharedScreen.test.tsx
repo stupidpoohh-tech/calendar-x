@@ -9,6 +9,7 @@
  * 반영되지 않는다" 의 구조적 근거이므로, 저장 콜백이 넘겨받는 값이 항상
  * `SharedTodoItem` 임을 여기서 확인한다.
  */
+import { useState } from 'react';
 import { cleanup, fireEvent, render, screen, within } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { applyOverrides, newLocalItem, sharedView, sourceOf, withSource } from '../domain/shared';
@@ -67,6 +68,7 @@ function mount(over: {
   onDeleteNote?: P['onDeleteNote'];
   onPinNote?: P['onPinNote'];
   onAdoptLegacyMemo?: () => void;
+  tab?: P['tab'];
   onBack?: () => void;
   onViewChange?: (v: 'calendar' | 'list') => void;
   onCursorChange?: (d: Date) => void;
@@ -105,14 +107,22 @@ function mount(over: {
     onPinNote: over.onPinNote ?? vi.fn(),
     onAdoptLegacyMemo: over.onAdoptLegacyMemo ?? vi.fn(),
   };
-  render(<SharedScreen {...props} />);
+  /*
+    탭은 위(앱)가 들고 있다 — 공간마다 마지막 탭을 따로 기억하기 때문이다. 시험에서는
+    그 자리를 작은 껍데기가 대신한다. 상태를 넘겨주지 않으면 탭을 눌러도 안 바뀐다.
+  */
+  function Harness() {
+    const [tab, setTab] = useState<P['tab']>(over.tab ?? 'calendar');
+    return <SharedScreen {...props} tab={tab} onTabChange={setTab} />;
+  }
+  render(<Harness />);
   return props;
 }
 
 describe('돌아가기와 머리글', () => {
-  it('내 TODO 로 돌아가는 길이 있다', () => {
+  it('내 공간으로 돌아가는 길이 있다', () => {
     const props = mount();
-    fireEvent.click(screen.getByRole('button', { name: '내 TODO' }));
+    fireEvent.click(screen.getByRole('button', { name: '나' }));
     expect(props.onBack).toHaveBeenCalled();
   });
 
@@ -239,7 +249,7 @@ describe('항목 편집', () => {
   it('원본을 고치지 않는다는 것을 편집 화면이 말한다', () => {
     mount({ items: [mine(task())] });
     const dialog = open('병원 예약');
-    expect(within(dialog).getByText(/내 TODO 에 반영되지 않고/)).toBeInTheDocument();
+    expect(within(dialog).getByText(/내 캘린더에 반영되지 않고/)).toBeInTheDocument();
   });
 
   it('상대가 올린 항목은 상대의 원본이라고 적는다', () => {
@@ -451,7 +461,7 @@ describe('달력', () => {
   그래서 이 자리의 시험은 '메모 탭에서 글을 쓰고 고정하는가' 다.
 */
 describe('메모', () => {
-  const openNotes = () => fireEvent.click(screen.getByRole('tab', { name: '메모' }));
+  const openNotes = () => fireEvent.click(screen.getByRole('tab', { name: '노트' }));
 
   const note = (over: Partial<P['notes'][number]> = {}): P['notes'][number] => ({
     id: 'n1', title: '제주도 준비', body: '렌터카 확인\n호텔 체크인 15:00',
@@ -503,7 +513,7 @@ describe('메모', () => {
   it('고정 줄을 누르면 메모 탭이 열린다', () => {
     mount({ notes: [note({ pinned: true })] });
     fireEvent.click(screen.getByText('제주도 준비'));
-    expect(screen.getByRole('tab', { name: '메모' })).toHaveAttribute('aria-selected', 'true');
+    expect(screen.getByRole('tab', { name: '노트' })).toHaveAttribute('aria-selected', 'true');
   });
 
   it('고정을 누르면 그 글만 올린다', () => {
@@ -642,7 +652,7 @@ describe('초대받은 사람의 화면', () => {
   적게 되고, 맞지 않는 것은 아예 안 적는다.
 */
 describe('함께 할 것', () => {
-  const openWish = () => fireEvent.click(screen.getByRole('tab', { name: '함께 할 것' }));
+  const openWish = () => fireEvent.click(screen.getByRole('tab', { name: '리스트' }));
 
   const list = (over: Partial<P['collections'][number]> = {}): P['collections'][number] => ({
     id: 'c1', title: '갈 곳', order: 0, createdBy: ME, createdAt: '', updatedAt: '', ...over,
@@ -733,14 +743,14 @@ describe('함께 할 것', () => {
   탭은 정확히 셋이다. 일정과 TODO 를 나누지 않는다 — 공유 보드에서 "해야 하는 것" 은
   하나이고, 두 자리로 나누면 어디에 적어야 하는지가 매번 애매해진다.
 */
-describe('2차 탭', () => {
-  it('일정 · 함께 할 것 · 메모 셋뿐이다', () => {
+describe('보드 안의 탭', () => {
+  it('캘린더 · 리스트 · 노트 셋뿐이다', () => {
     mount();
-    expect(screen.getAllByRole('tab').map((t) => t.textContent)).toEqual(['일정', '함께 할 것', '메모']);
+    expect(screen.getAllByRole('tab').map((t) => t.textContent)).toEqual(['캘린더', '리스트', '노트']);
   });
 
-  it('일정이 기본이다', () => {
-    mount();
-    expect(screen.getByRole('tab', { name: '일정' })).toHaveAttribute('aria-selected', 'true');
+  it('위가 넘겨준 탭을 그대로 연다 — 마지막 자리로 돌아온다', () => {
+    mount({ tab: 'notes' });
+    expect(screen.getByRole('tab', { name: '노트' })).toHaveAttribute('aria-selected', 'true');
   });
 });
