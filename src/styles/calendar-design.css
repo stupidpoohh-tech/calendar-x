@@ -116,3 +116,11 @@
   .header-left .brand { display: none; }
   .header-left .tool-l { flex: 0 1 auto; }
 }
+
+/* Recovery is a quiet, clickable text line beneath ordinary events. */
+.cal-bar.recovery-text, .cal-bar.recovery-text:hover {
+  background: transparent; border: 0; border-radius: 0; filter: none;
+  padding: 0 6px; color: var(--ink-3); font-size: .71875rem;
+}
+.cal-bar.recovery-text .cal-bar-t { color: inherit; font-size: inherit; }
+.cal-bar.recovery-text .cal-bar-x { font-weight: 400; }
