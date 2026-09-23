@@ -25,9 +25,13 @@ import { isComposingEnter } from './ime';
 
 interface Props {
   item: SharedTodoItem;
+  /** 고친 사람으로 남길 값. 양방향이라 누가 고쳤는지가 남아야 한다. */
+  myUid: string;
+  /** 나에게 감춰져 있는가. 감추기는 보드 전체가 아니라 사람별이다. */
+  hiddenForMe: boolean;
   mode: 'create' | 'edit';
   onSave: (item: SharedTodoItem) => void;
-  /** 공유 화면에서만 감춘다. **원본은 지우지 않는다.** */
+  /** 나에게만 감춘다. 상대 화면과 원본은 그대로다. */
   onHide: (item: SharedTodoItem) => void;
   /** 공유 화면에서만 만든 항목을 지운다. 원본이 있는 항목에는 주지 않는다. */
   onDelete: (item: SharedTodoItem) => void;
@@ -45,7 +49,9 @@ interface Form {
   urgent: boolean;
 }
 
-export function SharedItemSheet({ item, mode, onSave, onHide, onDelete, onClose }: Props) {
+export function SharedItemSheet({
+  item, myUid, hiddenForMe, mode, onSave, onHide, onDelete, onClose,
+}: Props) {
   const view = sharedView(item);
   /*
     입력칸은 표시값으로 한 번만 채운다.
@@ -76,7 +82,7 @@ export function SharedItemSheet({ item, mode, onSave, onHide, onDelete, onClose 
       important: form.important,
       urgent: form.urgent,
     };
-    onSave(applyOverrides(item, patchFields));
+    onSave(applyOverrides(item, patchFields, myUid));
   };
 
   return (
@@ -216,7 +222,7 @@ export function SharedItemSheet({ item, mode, onSave, onHide, onDelete, onClose 
               </button>
             ) : (
               <button className="btn ghost" onClick={() => onHide(item)}>
-                <Icon.EyeOff size={14} /> {item.hidden ? '다시 보이기' : '같이 보기에서 감추기'}
+                <Icon.EyeOff size={14} /> {hiddenForMe ? '다시 보이기' : '나에게만 감추기'}
               </button>
             )
           )}

@@ -27,8 +27,8 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { describeFirestoreError } from '../data/errors';
 import { getFirebase } from '../data/firebase';
 import {
-  acceptInvite, applyOwnerSync, deleteBoardDeep, fetchBoardInvites, fetchOwnerTasks, isEmptyPlan,
-  leaveBoard, planOwnerSync, readInvite, subscribeMyBoards,
+  acceptInvite, applyMirrorSync, deleteBoardDeep, fetchBoardInvites, fetchMyTasks, isEmptyPlan,
+  leaveBoard, planMirrorSync, readInvite, subscribeMyBoards,
   subscribeSharedDdays, subscribeSharedItems, subscribeSharedPins, SHARED_MEMO_ID,
 } from '../data/sharedRepo';
 import { uid as newId } from '../domain/entry';
@@ -172,18 +172,17 @@ export function useSharedBoard({ uid, todayISO, accountName, open, onError, comm
     return () => unsubs.forEach((u) => u());
   }, [db, uid, boardId, open, own, sink]);
 
-  const isOwner = !!board && !!uid && board.ownerUid === uid;
-
   /*
-    3. 맞추기 — 소유자가 이 보드를 처음 열 때 한 번.
+    3. 맞추기 — 이 보드를 처음 열 때 한 번. **둘 다 자기 몫을 맞춘다.**
 
-    쓰기 시점 갱신이 실패했거나(연결 · 규칙) 보드를 만들기 전부터 있던 TODO 가 있으면
-    공유 목록에 빈자리가 생긴다. 여기서 메운다. 원본 전량을 읽어야 "지울 것" 을 판정할
-    수 있으므로 화면 구독 목록을 쓰지 않는다.
+    쓰기 시점 갱신이 실패했거나(연결 · 규칙) 보드에 들어오기 전부터 있던 TODO 가 있으면
+    공유 목록에 빈자리가 생긴다. 여기서 메운다. 내 원본 전량을 읽어야 "지울 것" 을
+    판정할 수 있으므로 화면 구독 목록을 쓰지 않는다.
   */
   const syncedFor = useRef<string | null>(null);
   const syncNow = useCallback(async (): Promise<'ok' | 'skip' | 'error'> => {
-    if (!uid || !board || board.ownerUid !== uid) return 'skip';
+    // 양방향이다. 소유자만이 아니라 member 도 자기 몫을 맞춘다.
+    if (!uid || !board) return 'skip';
     try {
       /*
         원본은 **전량**을 읽는다. 화면 구독 목록으로 판정하면 창 밖의 항목이 "원본이
@@ -192,10 +191,10 @@ export function useSharedBoard({ uid, todayISO, accountName, open, onError, comm
         공유 목록은 구독으로 들고 있는 것을 쓴다 — 그래서 이 함수는 내용 구독이 한 번
         도착한 뒤에만 부른다 (아래 effect 가 `contentReady` 를 기다린다).
       */
-      const tasks = await fetchOwnerTasks(db, uid);
-      const plan = planOwnerSync(tasks, items, todayISO);
+      const tasks = await fetchMyTasks(db, uid);
+      const plan = planMirrorSync(tasks, items, todayISO, uid);
       if (isEmptyPlan(plan)) return 'ok';
-      await applyOwnerSync(db, board.id, uid, plan, new Date().toISOString());
+      await applyMirrorSync(db, board.id, uid, plan, new Date().toISOString());
       return 'ok';
     } catch (err) {
       console.error('[shared:sync]', err);
@@ -208,11 +207,11 @@ export function useSharedBoard({ uid, todayISO, accountName, open, onError, comm
   syncRef.current = syncNow;
 
   useEffect(() => {
-    if (!open || !isOwner || !boardId || !contentReady) return;
+    if (!open || !boardId || !contentReady) return;
     if (syncedFor.current === boardId) return;
     syncedFor.current = boardId;
     void syncRef.current();
-  }, [open, isOwner, boardId, contentReady]);
+  }, [open, boardId, contentReady]);
 
   // 보드가 사라지면 다음에 다시 맞출 수 있게 표식을 지운다.
   useEffect(() => { if (!boardId) syncedFor.current = null; }, [boardId]);
@@ -224,19 +223,15 @@ export function useSharedBoard({ uid, todayISO, accountName, open, onError, comm
     const activeBoard = blocked ? null : board;
 
     /*
-      원본을 올리는 것은 **보드를 만든 사람뿐이다.**
+      **둘 다 올린다.** 누가 보드를 만들었는지는 초대와 삭제에만 쓰이고, 올리는 자격과는
+      무관하다 — 먼저 누른 사람의 TODO 만 보이는 것은 화면에 드러나지 않는 사실이라
+      설명할 수 없다.
 
-      같이 보기는 "내 TODO 를 상대에게 보여 주는" 자리다. 초대받은 사람의 개인 TODO 는
-      올라가지 않는다 — 그쪽이 보드에 더하는 것은 이 화면에서 만든 항목뿐이다.
-
-      이 검사가 없으면 초대받은 사람의 TODO 도 올라갔다가, 소유자가 화면을 열 때 맞추기
-      (`planOwnerSync`)가 "원본이 없는 항목" 으로 보고 지운다. 적은 것이 잠깐 보이다
-      말없이 사라지는 것이 이 앱에서 가장 하면 안 되는 일이다.
+      대신 올린 사람이 그 항목의 **주인**(`createdBy`)이 되고, 맞추기와 권한이 그 값으로
+      갈린다. 남의 몫까지 맞추면 상대가 올린 것을 "원본이 없다" 고 보고 지운다.
     */
-    const mirrors = !!activeBoard && !!uid && activeBoard.ownerUid === uid;
-
     const pushEntry = (e: Entry) => {
-      if (!activeBoard || !uid || !mirrors) return;
+      if (!activeBoard || !uid) return;
       if (!isShareableTask(e, todayISO)) return;
       commit({
         kind: 'sharedSource', label: '같이 보기',
@@ -262,8 +257,7 @@ export function useSharedBoard({ uid, todayISO, accountName, open, onError, comm
       pushEntry,
 
       removeEntry: (entryId) => {
-        // 올리지 않는 사람은 지울 것도 없다. 같은 이유로 소유자만 지난다.
-        if (!activeBoard || !mirrors) return;
+        if (!activeBoard) return;
         commit({
           kind: 'sharedItemDelete', label: '같이 보기 항목 삭제',
           summary: entryId, payload: { boardId: activeBoard.id, id: entryId },

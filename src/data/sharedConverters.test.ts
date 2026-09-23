@@ -28,39 +28,44 @@ const source: SharedSource = {
 };
 
 describe('갱신 쓰기의 모양', () => {
-  it('overrides · hidden 을 담지 않는다', () => {
+  it('overrides · overriddenBy · hiddenBy 를 담지 않는다', () => {
     const patch = sharedSourcePatch('task-a', source, 'owner', '2026-09-23T00:00:00.000Z');
     expect(Object.keys(patch).sort()).toEqual([
       'createdBy', 'localOnly', 'source', 'sourceEntryId', 'updatedAt',
     ]);
     expect('overrides' in patch).toBe(false);
-    expect('hidden' in patch).toBe(false);
+    expect('overriddenBy' in patch).toBe(false);
+    expect('hiddenBy' in patch).toBe(false);
   });
 
   it('원본 entry 를 가리킨다', () => {
     const patch = sharedSourcePatch('task-a', source, 'owner', '2026-09-23T00:00:00.000Z');
     expect(patch.sourceEntryId).toBe('task-a');
     expect(patch.localOnly).toBe(false);
+    // 올린 사람이 주인이다. 맞추기와 권한이 이 값으로 갈린다.
+    expect(patch.createdBy).toBe('owner');
   });
 
-  it('항목 전체 쓰기는 세 필드를 모두 담는다 — 공유 화면의 편집이 쓰는 길이다', () => {
+  it('항목 전체 쓰기는 공유 화면의 값을 모두 담는다 — 편집이 쓰는 길이다', () => {
     const doc = sharedItemToDoc({
       id: 'task-a', sourceEntryId: 'task-a', source,
-      overrides: { title: '병원 전화하기' }, localOnly: false, hidden: true,
+      overrides: { title: '병원 전화하기' }, overriddenBy: 'member',
+      localOnly: false, hiddenBy: ['member'],
       createdBy: 'owner', createdAt: '', updatedAt: '',
     });
     expect(doc.overrides).toEqual({ title: '병원 전화하기' });
-    expect(doc.hidden).toBe(true);
+    expect(doc.overriddenBy).toBe('member');
+    expect(doc.hiddenBy).toEqual(['member']);
   });
 });
 
 describe('항목 읽기', () => {
-  it('세 필드가 없는 문서가 정상이다 — 갱신 쓰기가 담지 않기 때문이다', () => {
+  it('공유 화면의 값이 없는 문서가 정상이다 — 갱신 쓰기가 담지 않기 때문이다', () => {
     const item = sharedItemFromDoc('task-a', {
       sourceEntryId: 'task-a', source, createdBy: 'owner', updatedAt: '',
     });
     expect(item.overrides).toEqual({});
-    expect(item.hidden).toBe(false);
+    expect(item.hiddenBy).toEqual([]);
     expect(item.localOnly).toBe(false);
   });
 
@@ -143,6 +148,38 @@ describe('항목 읽기', () => {
   it('source 가 통째로 깨져 있으면 null 로 읽는다 — 던지지 않는다', () => {
     const item = sharedItemFromDoc('task-a', { sourceEntryId: 'task-a', source: 'nope' });
     expect(item.source).toBe(null);
+  });
+});
+
+describe('사람별 감추기 · 고친 사람 읽기', () => {
+  it('감춘 사람 목록에서 중복과 빈 값을 걸러 낸다', () => {
+    const item = sharedItemFromDoc('task-a', {
+      sourceEntryId: 'task-a', source, hiddenBy: ['a', 'a', '', 7, 'b'],
+    });
+    expect(item.hiddenBy).toEqual(['a', 'b']);
+  });
+
+  /*
+    보드 값 하나였던 옛 `hidden` 에는 "누가 감췄는지" 가 없다. 아무에게나 씌우느니
+    다시 보이게 둔다 — 자료가 사라지는 것이 아니라 감춤 표시만 풀린다.
+  */
+  it('옛 보드 단위 hidden 은 사람별로 옮기지 않는다', () => {
+    const item = sharedItemFromDoc('task-a', { sourceEntryId: 'task-a', source, hidden: true });
+    expect(item.hiddenBy).toEqual([]);
+  });
+
+  it('고친 자리가 없으면 고친 사람도 비운다', () => {
+    const item = sharedItemFromDoc('task-a', {
+      sourceEntryId: 'task-a', source, overrides: {}, overriddenBy: 'member',
+    });
+    expect(item.overriddenBy).toBe('');
+  });
+
+  it('고친 자리가 있으면 고친 사람을 읽는다', () => {
+    const item = sharedItemFromDoc('task-a', {
+      sourceEntryId: 'task-a', source, overrides: { title: '고침' }, overriddenBy: 'member',
+    });
+    expect(item.overriddenBy).toBe('member');
   });
 });
 

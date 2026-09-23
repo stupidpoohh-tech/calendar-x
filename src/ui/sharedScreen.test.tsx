@@ -125,25 +125,26 @@ describe('목록', () => {
   });
 
   it('공유 화면에서 고친 항목에 표시를 남긴다', () => {
-    mount({ items: [applyOverrides(mirrored(task()), { title: '병원 전화하기' })] });
+    mount({ items: [applyOverrides(mirrored(task()), { title: '병원 전화하기' }, ME)] });
     expect(screen.getByText('병원 전화하기')).toBeInTheDocument();
-    expect(screen.getByText('공유 화면에서 수정됨')).toBeInTheDocument();
+    // 양방향이라 누가 고쳤는지가 남는다.
+    expect(screen.getByText('내가 고침')).toBeInTheDocument();
   });
 
   it('공유 화면에서만 만든 항목은 그렇게 적는다', () => {
     mount({ items: [newLocalItem('local-1', ME, { title: '토요일 같이 장보기', startDate: TODAY })] });
     expect(screen.getByText('같이 보기 전용')).toBeInTheDocument();
-    expect(screen.queryByText('공유 화면에서 수정됨')).not.toBeInTheDocument();
+    expect(screen.queryByText(/고침/)).not.toBeInTheDocument();
   });
 
   it('감춘 항목은 기본으로 보이지 않고, 눌러서 볼 수 있다', () => {
-    const hidden = { ...mirrored(task()), hidden: true };
+    const hidden = { ...mirrored(task()), hiddenBy: [ME] };
     mount({ items: [hidden] });
     expect(screen.queryByText('병원 예약')).not.toBeInTheDocument();
 
     fireEvent.click(screen.getByRole('button', { name: '감춘 항목 1개 보기' }));
     expect(screen.getByText('병원 예약')).toBeInTheDocument();
-    expect(screen.getByText('감춤')).toBeInTheDocument();
+    expect(screen.getByText('나에게만 감춤')).toBeInTheDocument();
   });
 
   /*
@@ -169,7 +170,7 @@ describe('목록', () => {
   */
   it('다시 누르면 예정으로 돌아가고, 상태는 다시 원본을 따라간다', () => {
     const onSaveItem = vi.fn();
-    const done = applyOverrides(mirrored(task()), { status: 'done' });
+    const done = applyOverrides(mirrored(task()), { status: 'done' }, ME);
     mount({ items: [done], onSaveItem });
 
     fireEvent.click(screen.getByRole('button', { name: '병원 예약 완료' }));
@@ -237,7 +238,7 @@ describe('항목 편집', () => {
 
   it('고친 자리가 있으면 원본대로 되돌릴 수 있다', () => {
     const onSaveItem = vi.fn();
-    mount({ items: [applyOverrides(mirrored(task()), { title: '병원 전화하기' })], onSaveItem });
+    mount({ items: [applyOverrides(mirrored(task()), { title: '병원 전화하기' }, ME)], onSaveItem });
     const dialog = open('병원 전화하기');
 
     fireEvent.click(within(dialog).getByRole('button', { name: /원본대로 되돌리기/ }));
@@ -260,11 +261,12 @@ describe('항목 편집', () => {
     const dialog = open('병원 예약');
 
     expect(within(dialog).queryByRole('button', { name: /삭제/ })).not.toBeInTheDocument();
-    fireEvent.click(within(dialog).getByRole('button', { name: /같이 보기에서 감추기/ }));
+    fireEvent.click(within(dialog).getByRole('button', { name: /나에게만 감추기/ }));
 
     expect(onDeleteItem).not.toHaveBeenCalled();
     const saved = onSaveItem.mock.calls[0]![0] as SharedTodoItem;
-    expect(saved.hidden).toBe(true);
+    // 내 uid 만 들어간다 — 상대 화면은 그대로다.
+    expect(saved.hiddenBy).toEqual([ME]);
     expect(saved.source?.title).toBe('병원 예약');
   });
 
@@ -462,17 +464,28 @@ describe('D-Day', () => {
 });
 
 /*
-  같이 보기는 "내 TODO 를 상대에게 보여 주는" 자리다. 초대받은 사람의 개인 TODO 는
-  올라가지 않으므로, 그쪽 화면의 안내가 "내 TODO 가 여기로 온다" 고 말하면 거짓이 된다.
+  둘 다 올린다. 초대받은 사람에게 "여기에 오는 것은 보낸 사람의 TODO 다" 라고 적으면
+  거짓이 되고, 자기가 적은 것이 상대에게 보이는 줄 모르는 채로 쓰게 된다.
 */
 describe('초대받은 사람의 화면', () => {
-  it('누구의 TODO 가 오는지 갈라 적는다', () => {
+  it('둘 다 올린다고 적는다', () => {
     mount({ myUid: ME, partner: 'owner' });
-    expect(screen.getByText(/owner 의 TODO 가 여기에 따라옵니다/)).toBeInTheDocument();
+    expect(screen.getByText(/두 사람이 적은 오늘 이후의 할 일/)).toBeInTheDocument();
+  });
 
-    cleanup();
-    mount({ myUid: OWNER, partner: 'member' });
-    expect(screen.getByText(/내 TODO 에 적은 오늘 이후의 할 일/)).toBeInTheDocument();
+  it('상대가 고친 것은 상대 이름으로 적는다', () => {
+    mount({
+      myUid: ME,
+      items: [applyOverrides(mirrored(task()), { title: '병원 전화하기' }, OWNER)],
+    });
+    expect(screen.getByText('owner가 고침')).toBeInTheDocument();
+  });
+
+  it('내가 감춘 것은 상대 화면에서 보인다', () => {
+    // 같은 항목을 상대(OWNER) 눈으로 그린다 — hiddenBy 에 내 uid 만 들어 있다.
+    mount({ myUid: OWNER, items: [{ ...mirrored(task()), hiddenBy: [ME] }] });
+    expect(screen.getByText('병원 예약')).toBeInTheDocument();
+    expect(screen.queryByText('나에게만 감춤')).not.toBeInTheDocument();
   });
 
   it('보드를 만든 사람과 같은 자리에서 같은 것을 한다', () => {

@@ -62,7 +62,9 @@ service cloud.firestore {
           && (data().money == null || (
                data().money.amountMinor is int
                && data().money.currency is string
-             ));
+             ))
+          // 같이 보기에 올리지 않는 표시. 옛 문서에는 없고 그것이 정상이다.
+          && (!('keepPrivate' in data()) || data().keepPrivate is bool);
       }
 
       match /accounts/{accountId} {
@@ -230,31 +232,82 @@ service cloud.firestore {
       /*
         공유 TODO.
 
-        갱신 쓰기는 `overrides` · `hidden` · `localOnly` 를 **담지 않는다** (merge).
+        갱신 쓰기는 `overrides` · `overriddenBy` · `hiddenBy` 를 **담지 않는다** (merge).
         그래서 그 필드가 없는 문서가 정상이고, 규칙도 있을 때만 형태를 본다.
         `money` · `recovery` 같은 개인 자료는 애초에 이 문서에 오지 않는다.
+
+        ── 둘 다 올리므로 자리를 갈라야 한다 ────────────────────────
+
+        member 아무나 아무 필드나 쓸 수 있으면, 상대가 **내 원본 스냅샷을 위조**할 수
+        있다. 그리고 그것은 조용히 끝나지도 않는다 — 내 맞추기가 다음에 열 때 되돌려
+        놓아서 값이 왔다 갔다 한다. 삭제도 같다. 상대가 내 항목을 지우면 내 맞추기가
+        되살려 유령처럼 돌아온다.
+
+          source · sourceEntryId · createdBy   그 항목의 주인만
+          overrides · overriddenBy             member 누구나 (보드는 함께 쓰는 자리다)
+          hiddenBy                             자기 uid 만 (감추기는 사람별이다)
+          삭제                                 원본이 있으면 주인만, 공유 전용은 누구나
       */
       match /items/{itemId} {
-        allow read, delete: if isBoardMember(boardId);
-        allow create, update: if isBoardMember(boardId)
-          && withinSize()
-          && (!('source' in data()) || data().source == null || (
-               data().source.title is string && data().source.title.size() <= 500
-               && isDateISO(data().source.startDate)
-               && data().source.get('color', '') is string
-               && data().source.get('color', '').size() <= 40
-             ))
-          && (!('overrides' in data()) || (
-               data().overrides is map
-               && data().overrides.get('title', '') is string
-               && data().overrides.get('title', '').size() <= 500
-               && data().overrides.get('note', '') is string
-               && data().overrides.get('note', '').size() <= 20000
-               && data().overrides.get('color', '') is string
-               && data().overrides.get('color', '').size() <= 40
-             ))
-          && (!('hidden' in data()) || data().hidden is bool)
-          && (!('localOnly' in data()) || data().localOnly is bool);
+
+        /** 원본에서 온 값을 건드리지 않았는가. */
+        function sourceUntouched() {
+          return request.resource.data.get('source', null) == resource.data.get('source', null)
+            && request.resource.data.get('sourceEntryId', null) == resource.data.get('sourceEntryId', null)
+            && request.resource.data.get('createdBy', '') == resource.data.get('createdBy', '')
+            && request.resource.data.get('localOnly', false) == resource.data.get('localOnly', false);
+        }
+
+        function ownsIt() {
+          return request.auth.uid == resource.data.get('createdBy', '');
+        }
+
+        /** 감추기는 **자기 uid 만** 넣고 뺄 수 있다. 남의 화면을 건드리지 못한다. */
+        function hidesOnlySelf() {
+          return request.resource.data.get('hiddenBy', [])
+                   .hasOnly(resource.data.get('hiddenBy', []).concat([request.auth.uid]))
+            && resource.data.get('hiddenBy', [])
+                 .hasOnly(request.resource.data.get('hiddenBy', []).concat([request.auth.uid]));
+        }
+
+        function shapeOk() {
+          return withinSize()
+            && (!('source' in data()) || data().source == null || (
+                 data().source.title is string && data().source.title.size() <= 500
+                 && isDateISO(data().source.startDate)
+                 && data().source.get('color', '') is string
+                 && data().source.get('color', '').size() <= 40
+               ))
+            && (!('overrides' in data()) || (
+                 data().overrides is map
+                 && data().overrides.get('title', '') is string
+                 && data().overrides.get('title', '').size() <= 500
+                 && data().overrides.get('note', '') is string
+                 && data().overrides.get('note', '').size() <= 20000
+                 && data().overrides.get('color', '') is string
+                 && data().overrides.get('color', '').size() <= 40
+               ))
+            && (!('overriddenBy' in data())
+                || (data().overriddenBy is string && data().overriddenBy.size() <= 200))
+            && (!('hiddenBy' in data())
+                || (data().hiddenBy is list && data().hiddenBy.size() <= memberLimit()))
+            && (!('localOnly' in data()) || data().localOnly is bool);
+        }
+
+        allow read: if isBoardMember(boardId);
+
+        // 원본을 담아 만드는 것은 그 원본의 주인뿐이다. 공유 전용 항목은 누구나 만든다.
+        allow create: if isBoardMember(boardId) && shapeOk()
+          && (data().get('source', null) == null || data().get('createdBy', '') == request.auth.uid)
+          && data().get('hiddenBy', []).hasOnly([request.auth.uid]);
+
+        allow update: if isBoardMember(boardId) && shapeOk()
+          && hidesOnlySelf()
+          && (sourceUntouched() || ownsIt());
+
+        // 원본이 있는 항목은 주인만 지운다. 남의 것을 지워 봐야 맞추기가 되살린다.
+        allow delete: if isBoardMember(boardId)
+          && (resource.data.get('localOnly', false) == true || ownsIt());
       }
 
       /** 공유 고정메모. 개인 `users/{uid}/pins` 와 다른 자료다. */

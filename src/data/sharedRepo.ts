@@ -3,15 +3,15 @@
  *
  * ── 개인 경로를 건드리지 않는다 ─────────────────────────────────
  *
- * 이 파일에는 `users/{uid}/entries` 에 **쓰는** 함수가 없다. 있는 것은 소유자의 할 일을
- * 한 번에 읽어 오는 `fetchOwnerTasks` 하나뿐이고, 그것도 자기 자료를 읽는 것이다.
+ * 이 파일에는 `users/{uid}/entries` 에 **쓰는** 함수가 없다. 있는 것은 자기 할 일을
+ * 한 번에 읽어 오는 `fetchMyTasks` 하나뿐이고, 그것도 자기 자료를 읽는 것이다.
  * 공유 화면의 모든 편집은 `sharedBoards/...` 안에서 끝난다 — 역반영이 새어 나갈 자리가
  * 코드에 없다.
  *
- * ── 갱신은 merge 로, 세 필드는 담지 않는다 ──────────────────────
+ * ── 갱신은 merge 로, 공유 화면의 값은 담지 않는다 ───────────────
  *
  * 원본 → 공유 갱신은 `source` 계열만 담은 부분 문서를 merge 로 쓴다
- * (`sharedSourcePatch`). 담지 않은 `overrides` · `hidden` 은 그대로 남는다. 기본값을
+ * (`sharedSourcePatch`). 담지 않은 `overrides` · `hiddenBy` 는 그대로 남는다. 기본값을
  * 함께 보내면 상대가 감춰 둔 항목이 원본을 고칠 때마다 되살아난다.
  *
  * ── 초대는 코드를 아는 사람만 ───────────────────────────────────
@@ -208,14 +208,14 @@ export function leaveBoard(db: Firestore, boardId: string, uid: string, now: str
  * 원본 → 공유 갱신 한 건.
  *
  * 문서 id 가 **원본 entry 의 id 와 같다.** 그래서 같은 항목을 두 번 만들 수 없고,
- * 갱신이 덮어쓰기 한 번으로 끝난다. merge 라서 `overrides` · `hidden` 은 남는다.
+ * 갱신이 덮어쓰기 한 번으로 끝난다. merge 라서 `overrides` · `hiddenBy` 는 남는다.
  */
 export function pushSource(
-  db: Firestore, boardId: string, entryId: string, source: SharedSource, ownerUid: string, now: string,
+  db: Firestore, boardId: string, entryId: string, source: SharedSource, byUid: string, now: string,
 ): Promise<void> {
   return setDoc(
     boardSubDoc(db, boardId, SHARED.items, entryId),
-    sharedSourcePatch(entryId, source, ownerUid, now),
+    sharedSourcePatch(entryId, source, byUid, now),
     { merge: true },
   );
 }
@@ -261,12 +261,12 @@ export async function deleteBoardDeep(db: Firestore, boardId: string): Promise<v
 // ---------- 소유자 자료 맞추기 ----------
 
 /**
- * 소유자의 할 일 **전량**.
+ * 내 할 일 **전량**.
  *
  * 화면 구독은 보고 있는 달 주변만 받으므로, 그 목록으로 "공유에서 지울 것" 을 판정하면
  * 창 밖의 항목이 통째로 지워진다. 맞추기는 반드시 이 전량 조회를 쓴다.
  */
-export async function fetchOwnerTasks(db: Firestore, uid: string): Promise<Entry[]> {
+export async function fetchMyTasks(db: Firestore, uid: string): Promise<Entry[]> {
   const snap = await getDocs(query(col(db, uid, COL.entries), where('kind', '==', 'task')));
   return snap.docs.map((d) => entryFromDoc(d.id, d.data() as Raw));
 }
@@ -279,19 +279,26 @@ export interface SharedSyncPlan {
 }
 
 /**
- * 원본과 공유 목록의 차이.
+ * 내 원본과 공유 목록의 차이.
  *
- * `tasks` 는 **전량**이어야 한다. 부분 목록을 넣으면 없는 항목을 지운 것으로 본다.
+ * `tasks` 는 **내 전량**이어야 한다. 부분 목록을 넣으면 없는 항목을 지운 것으로 본다.
  *
- * 공유 대상이 아닌 것이 올라가 있으면 지운다 — 원본이 사라졌거나, 할 일이 아니게
- * 됐거나(아이디어로 강등), 회복 항목이거나, **지나간 일정**이다. 마지막 갈래가
- * 시간이 흐르기만 해도 생기므로, 이 맞추기가 보드를 스스로 정리하는 자리가 된다.
+ * ── 양방향이라 "내 몫" 을 갈라야 한다 ───────────────────────────
  *
- * 공유 화면에서만 만든 항목(`localOnly`)은 건드리지 않는다. 원본이 없는 것이 정상이고,
- * 지우면 되살릴 곳이 없다 — 지난 날짜라도 그것은 보드의 자기 기록이다.
+ * 둘 다 올리므로, 지울 대상은 **내가 올린 것**(`createdBy === 나`)뿐이다. 남의 몫까지
+ * 보면 상대가 올린 항목이 "내 원본에 없다" 로 읽혀 통째로 지워지고, 상대가 다음에
+ * 화면을 열면 다시 올라온다 — 항목이 사라졌다 나타났다 한다.
+ *
+ * 공유 대상이 아닌 내 항목이 올라가 있으면 지운다 — 원본이 사라졌거나, 할 일이 아니게
+ * 됐거나(아이디어로 강등), 회복 항목이거나, **비공개로 표시했거나**, 지나간 일정이다.
+ * 뒤의 둘은 손대지 않아도 생기므로(시간이 흐르고, 나중에 비공개로 바꾸고), 이 맞추기가
+ * 보드를 스스로 정리하는 자리가 된다.
+ *
+ * 공유 화면에서만 만든 항목(`localOnly`)은 누구 것이든 건드리지 않는다. 원본이 없는
+ * 것이 정상이고, 지우면 되살릴 곳이 없다 — 지난 날짜라도 그것은 보드의 자기 기록이다.
  */
-export function planOwnerSync(
-  tasks: readonly Entry[], items: readonly SharedTodoItem[], todayISO: string,
+export function planMirrorSync(
+  tasks: readonly Entry[], items: readonly SharedTodoItem[], todayISO: string, myUid: string,
 ): SharedSyncPlan {
   const shareable = tasks.filter((t) => isShareableTask(t, todayISO));
   const byId = new Map(items.map((i) => [i.id, i]));
@@ -299,13 +306,19 @@ export function planOwnerSync(
   for (const t of shareable) {
     const source = sourceOf(t);
     const existing = byId.get(t.id);
-    if (existing && existing.sourceEntryId === t.id && sameSource(existing.source, source)) continue;
+    if (existing
+      && existing.sourceEntryId === t.id
+      && existing.createdBy === myUid
+      && sameSource(existing.source, source)) continue;
     upserts.push({ id: t.id, source });
   }
 
   const alive = new Set(shareable.map((t) => t.id));
   const deletes = items
-    .filter((i) => !i.localOnly && i.sourceEntryId !== null && !alive.has(i.sourceEntryId))
+    .filter((i) => !i.localOnly
+      && i.sourceEntryId !== null
+      && i.createdBy === myUid
+      && !alive.has(i.sourceEntryId))
     .map((i) => i.id);
 
   return { upserts, deletes };
@@ -318,15 +331,15 @@ export function isEmptyPlan(plan: SharedSyncPlan): boolean {
 /**
  * 차이를 실제로 쓴다.
  *
- * 배치로 보내되 `overrides` · `hidden` 은 담지 않는다 (merge). 맞추기가 상대의 수정을
- * 지우면 "원본은 보호하되 함께 고친다" 가 무너진다.
+ * 배치로 보내되 `overrides` · `hiddenBy` 는 담지 않는다 (merge). 맞추기가 상대의
+ * 수정을 지우면 "원본은 보호하되 함께 고친다" 가 무너진다.
  */
-export async function applyOwnerSync(
-  db: Firestore, boardId: string, ownerUid: string, plan: SharedSyncPlan, now: string,
+export async function applyMirrorSync(
+  db: Firestore, boardId: string, myUid: string, plan: SharedSyncPlan, now: string,
 ): Promise<void> {
   const ops: { kind: 'set' | 'del'; id: string; data?: Raw }[] = [
     ...plan.upserts.map((u) => ({
-      kind: 'set' as const, id: u.id, data: sharedSourcePatch(u.id, u.source, ownerUid, now),
+      kind: 'set' as const, id: u.id, data: sharedSourcePatch(u.id, u.source, myUid, now),
     })),
     ...plan.deletes.map((id) => ({ kind: 'del' as const, id })),
   ];

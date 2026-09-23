@@ -236,8 +236,8 @@ export function SharedJoinSheet({ invite, state, onAccept, onClose }: JoinProps)
                 함께 보고 고칠 수 있습니다.
               </p>
               <p className="mod-hint">
-                여기에 오는 것은 <b>보낸 사람의 TODO</b> 입니다. <b>내 TODO 는 올라가지 않습니다</b> —
-                내가 이 보드에 더하는 것은 이 화면에서 만든 항목뿐입니다.
+                <b>두 사람의 TODO 가 모두 여기로 옵니다</b> — 오늘 이후의 할 일만 올라가고,
+                항목을 <b>나만 보기</b>로 표시하면 그 항목은 올라가지 않습니다.
               </p>
               <p className="mod-hint">
                 수락해도 상대의 <b>아이디어 · 가계부 · 잔고 · 개인 고정 메모</b>에는 접근할 수 없습니다.

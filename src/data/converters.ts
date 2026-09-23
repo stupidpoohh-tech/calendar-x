@@ -177,6 +177,11 @@ export function entryFromDoc(id: string, raw: Raw): Entry {
       : null,
     // 회복 표식은 할 일 위에만 얹힌다.
     recovery: kind === 'task' ? asRecoveryFields(raw.recovery) : null,
+    /*
+      같이 보기에 올리지 않는 항목. **기본은 공유**라, 값이 없으면 false 다.
+      옛 문서에는 이 필드가 없고 그것이 정상이다 — 없으면 올라간다.
+    */
+    keepPrivate: bool(raw.keepPrivate),
     createdAt: str(raw.createdAt),
     updatedAt: str(raw.updatedAt),
   };
@@ -201,6 +206,8 @@ export function entryToDoc(e: Entry): Raw {
     task: e.task,
     money: e.money,
     recovery: e.recovery,
+    // undefined 는 Firestore 가 받지 않는다. 늘 참/거짓으로 굳혀 쓴다.
+    keepPrivate: e.keepPrivate === true,
     createdAt: e.createdAt,
     updatedAt: e.updatedAt,
   };

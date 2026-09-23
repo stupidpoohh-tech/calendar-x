@@ -33,7 +33,8 @@ import { colorHex } from '../domain/constants';
 import { fmtDayShort, fmtMonthTitle, ymOfDate } from '../domain/date';
 import { uid as newId } from '../domain/entry';
 import {
-  applyOverrides, isOverridden, newLocalItem, setHidden, sharedSortKey, sharedTitle, sharedView,
+  applyOverrides, isHiddenFor, isOverridden, newLocalItem, setHiddenFor,
+  sharedSortKey, sharedTitle, sharedView, shortName,
 } from '../domain/shared';
 import type {
   Entry, SharedBoard, SharedDday, SharedTodoItem, ViewId, WeekStart, YearMonth,
@@ -83,16 +84,16 @@ export function SharedScreen({
   const [editing, setEditing] = useState<{ item: SharedTodoItem; mode: 'create' | 'edit' } | null>(null);
   const [showHidden, setShowHidden] = useState(false);
 
-  /*
-    원본을 올리는 것은 보드를 만든 사람뿐이다. 초대받은 사람에게는 "내 TODO 가 여기로
-    온다" 가 거짓이므로, 빈 화면의 안내도 갈라 적는다.
-  */
-  const isOwner = board.ownerUid === myUid;
-  const hiddenCount = items.filter((i) => i.hidden).length;
+  // 감추기는 사람별이다. 내가 감춘 것만 내 화면에서 빠진다.
+  const hiddenCount = items.filter((i) => isHiddenFor(i, myUid)).length;
   const shown = useMemo(
-    () => items.filter((i) => showHidden || !i.hidden),
-    [items, showHidden],
+    () => items.filter((i) => showHidden || !isHiddenFor(i, myUid)),
+    [items, showHidden, myUid],
   );
+
+  /** 고친 사람을 이름으로. 모르면 이름 없이 "고침" 만 적는다. */
+  const editorName = (uid: string): string =>
+    (uid === myUid ? '내가' : `${shortName(board.memberNames[uid] ?? '')}가`);
 
   /** 달력이 돌려준 `Entry` 로 원래 항목을 되찾는다. id 가 같다. */
   const byId = useMemo(() => new Map(items.map((i) => [i.id, i])), [items]);
@@ -150,7 +151,7 @@ export function SharedScreen({
   const toggleStatus = (item: SharedTodoItem) => {
     const done = sharedView(item).status === 'done';
     // 상태도 override 다. 여기서 원본의 상태를 바꾸지 않는다.
-    onSaveItem(applyOverrides(item, { status: done ? 'planned' : 'done' }));
+    onSaveItem(applyOverrides(item, { status: done ? 'planned' : 'done' }, myUid));
   };
 
   return (
@@ -260,10 +261,8 @@ export function SharedScreen({
         <div className="empty">
           <p className="empty-t">이 달에는 같이 볼 TODO 가 없습니다.</p>
           <p className="empty-s">
-            {isOwner
-              ? '내 TODO 에 적은 오늘 이후의 할 일이 여기에 따라옵니다.'
-              : `${partner ?? '상대'} 의 TODO 가 여기에 따라옵니다.`}
-            {' '}이 화면에서만 쓸 항목은 '추가' 로 만듭니다.
+            두 사람이 적은 오늘 이후의 할 일이 여기에 따라옵니다.
+            이 화면에서만 쓸 항목은 '추가' 로 만듭니다.
           </p>
         </div>
       ) : (
@@ -279,7 +278,7 @@ export function SharedScreen({
                   const v = sharedView(item);
                   const done = v.status === 'done';
                   return (
-                    <li key={item.id} className={'lst-row' + (item.hidden ? ' sh-hidden' : '')}>
+                    <li key={item.id} className={'lst-row' + (isHiddenFor(item, myUid) ? ' sh-hidden' : '')}>
                       <div className="sh-row">
                         <button
                           className="tp-check"
@@ -299,8 +298,13 @@ export function SharedScreen({
                           <span className="sh-row-m">
                             {v.startTime && <span>{v.startTime}</span>}
                             {item.localOnly && <span className="sh-tag local">같이 보기 전용</span>}
-                            {isOverridden(item) && <span className="sh-tag">공유 화면에서 수정됨</span>}
-                            {item.hidden && <span className="sh-tag">감춤</span>}
+                            {/* 양방향이라 "수정됨" 만으로는 누가 고쳤는지 알 수 없다. */}
+                            {isOverridden(item) && (
+                              <span className="sh-tag">
+                                {item.overriddenBy ? `${editorName(item.overriddenBy)} 고침` : '공유 화면에서 수정됨'}
+                              </span>
+                            )}
+                            {isHiddenFor(item, myUid) && <span className="sh-tag">나에게만 감춤</span>}
                             {v.important && <Icon.Star size={11} />}
                             {v.urgent && <Icon.Flame size={11} />}
                           </span>
@@ -320,9 +324,14 @@ export function SharedScreen({
           // 항목이 바뀌면 조각을 새로 만든다 — 입력칸이 새 값으로 채워진다.
           key={editingNow.id}
           item={editingNow}
+          myUid={myUid}
+          hiddenForMe={isHiddenFor(editingNow, myUid)}
           mode={editing?.mode ?? 'edit'}
           onSave={(next) => { onSaveItem(next); setEditing(null); }}
-          onHide={(item) => { onSaveItem(setHidden(item, !item.hidden)); setEditing(null); }}
+          onHide={(item) => {
+            onSaveItem(setHiddenFor(item, myUid, !isHiddenFor(item, myUid)));
+            setEditing(null);
+          }}
           onDelete={(item) => { onDeleteItem(item); setEditing(null); }}
           onClose={() => setEditing(null)}
         />

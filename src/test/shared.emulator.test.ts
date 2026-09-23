@@ -23,13 +23,13 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { saveEntry, deleteEntry } from '../data/repo';
 import { sharedItemFromDoc } from '../data/sharedConverters';
 import {
-  acceptInvite, applyOwnerSync, createInvite, deleteBoardDeep, deleteSharedItem,
-  fetchBoardInvites, fetchOwnerTasks, planOwnerSync, pushSource, readInvite, revokeInvite,
+  acceptInvite, applyMirrorSync, createInvite, deleteBoardDeep, deleteSharedItem,
+  fetchBoardInvites, fetchMyTasks, planMirrorSync, pushSource, readInvite, revokeInvite,
   saveBoard, saveSharedDday, saveSharedItem, saveSharedPin, SHARED_MEMO_ID,
 } from '../data/sharedRepo';
 import { newEntry, withDerived } from '../domain/entry';
 import {
-  applyOverrides, newLocalItem, revertToSource, setHidden, sharedView, sourceOf,
+  applyOverrides, isHiddenFor, newLocalItem, revertToSource, setHiddenFor, sharedView, sourceOf,
 } from '../domain/shared';
 import type { Entry, SharedBoard, SharedInvite, SharedTodoItem } from '../domain/types';
 
@@ -156,7 +156,7 @@ describe('원본 → 공유는 한 방향이다', () => {
     await pushSource(owner, BOARD, entry.id, sourceOf(entry), OWNER, NOW);
 
     const item = await readItem(member, entry.id);
-    await saveSharedItem(member, BOARD, applyOverrides(item!, { title: '병원 전화하기' }));
+    await saveSharedItem(member, BOARD, applyOverrides(item!, { title: '병원 전화하기' }, MEMBER));
 
     const raw = await getDoc(doc(owner, `users/${OWNER}/entries/${entry.id}`));
     expect(raw.data()?.title).toBe('병원 예약');
@@ -185,7 +185,7 @@ describe('원본 → 공유는 한 방향이다', () => {
     await pushSource(owner, BOARD, entry.id, sourceOf(entry), OWNER, NOW);
 
     const item = await readItem(member, entry.id);
-    await saveSharedItem(member, BOARD, applyOverrides(item!, { title: '병원 전화하기' }));
+    await saveSharedItem(member, BOARD, applyOverrides(item!, { title: '병원 전화하기' }, MEMBER));
 
     const moved = withDerived({ ...entry, startDate: '2026-09-27' });
     await saveEntry(owner, OWNER, moved);
@@ -209,7 +209,7 @@ describe('원본 → 공유는 한 방향이다', () => {
 
     // 상대가 다시 '진행중' 으로 고쳐 두면 그 뒤 원본이 어떻게 바뀌어도 유지된다.
     const item = await readItem(member, entry.id);
-    await saveSharedItem(member, BOARD, applyOverrides(item!, { status: 'in-progress' }));
+    await saveSharedItem(member, BOARD, applyOverrides(item!, { status: 'in-progress' }, MEMBER));
     const planned = withDerived({ ...entry, task: { ...entry.task!, status: 'planned' } });
     await saveEntry(owner, OWNER, planned);
     await pushSource(owner, BOARD, planned.id, sourceOf(planned), OWNER, NOW);
@@ -224,7 +224,7 @@ describe('원본 → 공유는 한 방향이다', () => {
     expect(sharedView((await readItem(member, entry.id))!).color).toBe('pink');
 
     const item = await readItem(member, entry.id);
-    await saveSharedItem(member, BOARD, applyOverrides(item!, { color: 'green' }));
+    await saveSharedItem(member, BOARD, applyOverrides(item!, { color: 'green' }, MEMBER));
 
     // 원본의 색은 그대로다.
     expect((await getDoc(doc(owner, `users/${OWNER}/entries/${entry.id}`))).data()?.color).toBe('pink');
@@ -245,7 +245,7 @@ describe('원본 → 공유는 한 방향이다', () => {
     await pushSource(owner, BOARD, entry.id, sourceOf(entry), OWNER, NOW);
 
     const item = await readItem(member, entry.id);
-    await saveSharedItem(member, BOARD, applyOverrides(item!, { title: '병원 전화하기' }));
+    await saveSharedItem(member, BOARD, applyOverrides(item!, { title: '병원 전화하기' }, MEMBER));
     const edited = await readItem(member, entry.id);
     await saveSharedItem(member, BOARD, revertToSource(edited!));
 
@@ -260,7 +260,7 @@ describe('원본 → 공유는 한 방향이다', () => {
     await pushSource(owner, BOARD, entry.id, sourceOf(entry), OWNER, NOW);
 
     const item = await readItem(member, entry.id);
-    await saveSharedItem(member, BOARD, applyOverrides(item!, { status: 'done' }));
+    await saveSharedItem(member, BOARD, applyOverrides(item!, { status: 'done' }, MEMBER));
 
     expect(sharedView((await readItem(member, entry.id))!).status).toBe('done');
     const raw = await getDoc(doc(owner, `users/${OWNER}/entries/${entry.id}`));
@@ -276,26 +276,47 @@ describe('감추기와 삭제', () => {
     await pushSource(owner, BOARD, entry.id, sourceOf(entry), OWNER, NOW);
 
     const item = await readItem(member, entry.id);
-    await saveSharedItem(member, BOARD, setHidden(item!, true));
+    await saveSharedItem(member, BOARD, setHiddenFor(item!, MEMBER, true));
 
     const moved = withDerived({ ...entry, startDate: '2026-09-27' });
     await saveEntry(owner, OWNER, moved);
     await pushSource(owner, BOARD, moved.id, sourceOf(moved), OWNER, NOW);
 
     const after = await readItem(member, entry.id);
-    expect(after?.hidden).toBe(true);
+    expect(isHiddenFor(after!, MEMBER)).toBe(true);
     expect((await getDoc(doc(owner, `users/${OWNER}/entries/${entry.id}`))).exists()).toBe(true);
   });
 
-  it('공유 항목을 지워도 원본은 남는다', async () => {
+  /*
+    상대가 내 항목을 지워 봐야 내 맞추기가 다음에 열 때 되살린다 — 사라졌다 나타나는
+    것이 더 이상하다. 그래서 규칙이 아예 막고, 상대에게는 '나에게만 감추기' 가 있다.
+  */
+  it('상대는 내가 올린 항목을 지우지 못한다', async () => {
     const { owner, member } = await connect();
     const entry = task();
     await saveEntry(owner, OWNER, entry);
     await pushSource(owner, BOARD, entry.id, sourceOf(entry), OWNER, NOW);
 
-    await deleteSharedItem(member, BOARD, entry.id);
+    await expect(deleteSharedItem(member, BOARD, entry.id)).rejects.toThrow();
+    expect(await readItem(member, entry.id)).not.toBeNull();
+  });
+
+  it('내가 올린 항목을 내가 지우면 원본은 남는다', async () => {
+    const { owner, member } = await connect();
+    const entry = task();
+    await saveEntry(owner, OWNER, entry);
+    await pushSource(owner, BOARD, entry.id, sourceOf(entry), OWNER, NOW);
+
+    await deleteSharedItem(owner, BOARD, entry.id);
     expect(await readItem(member, entry.id)).toBeNull();
     expect((await getDoc(doc(owner, `users/${OWNER}/entries/${entry.id}`))).exists()).toBe(true);
+  });
+
+  it('공유 전용 항목은 member 누구나 지운다', async () => {
+    const { owner, member } = await connect();
+    await saveSharedItem(member, BOARD, newLocalItem('local-1', MEMBER, { title: '장보기' }));
+    await deleteSharedItem(owner, BOARD, 'local-1');
+    expect(await readItem(member, 'local-1')).toBeNull();
   });
 
   it('원본을 지우면 공유 항목도 사라진다 — 유령 항목을 남기지 않는다', async () => {
@@ -334,6 +355,71 @@ describe('감추기와 삭제', () => {
   });
 });
 
+/*
+  양방향이다. 둘 다 자기 TODO 를 올리고, 자기 몫만 맞춘다. 누가 보드를 만들었는지는
+  초대와 삭제에만 쓰인다.
+*/
+describe('둘 다 올린다', () => {
+  it('상대가 올린 항목을 내가 읽는다', async () => {
+    const { owner, member } = await connect();
+    const theirs = newEntry('task', { id: 'their-1', title: '상대 할 일', startDate: '2026-09-30' });
+    await saveEntry(member, MEMBER, theirs);
+    await pushSource(member, BOARD, theirs.id, sourceOf(theirs), MEMBER, NOW);
+
+    const item = await readItem(owner, theirs.id);
+    expect(sharedView(item!).title).toBe('상대 할 일');
+    expect(item!.createdBy).toBe(MEMBER);
+    // 내 개인 TODO 에는 생기지 않는다.
+    expect((await getDoc(doc(owner, `users/${OWNER}/entries/their-1`))).exists()).toBe(false);
+  });
+
+  it('내 맞추기가 상대가 올린 항목을 지우지 않는다', async () => {
+    const { owner, member } = await connect();
+    const theirs = newEntry('task', { id: 'their-1', title: '상대 할 일', startDate: '2026-09-30' });
+    await saveEntry(member, MEMBER, theirs);
+    await pushSource(member, BOARD, theirs.id, sourceOf(theirs), MEMBER, NOW);
+
+    const tasks = await fetchMyTasks(owner, OWNER);
+    const items = (await getDocs(collection(owner, `sharedBoards/${BOARD}/items`))).docs
+      .map((d) => sharedItemFromDoc(d.id, d.data() as Record<string, unknown>));
+    await applyMirrorSync(owner, BOARD, OWNER, planMirrorSync(tasks, items, TODAY, OWNER), NOW);
+
+    expect(await readItem(member, theirs.id)).not.toBeNull();
+  });
+
+  it('비공개로 표시한 항목은 올라가지 않고, 이미 올라간 것은 내려간다', async () => {
+    const { owner, member } = await connect();
+    const gift = task({ id: 'gift', title: '선물 준비' });
+    await saveEntry(owner, OWNER, gift);
+    await pushSource(owner, BOARD, gift.id, sourceOf(gift), OWNER, NOW);
+    expect(await readItem(member, 'gift')).not.toBeNull();
+
+    await saveEntry(owner, OWNER, withDerived({ ...gift, keepPrivate: true }));
+    const tasks = await fetchMyTasks(owner, OWNER);
+    const items = (await getDocs(collection(owner, `sharedBoards/${BOARD}/items`))).docs
+      .map((d) => sharedItemFromDoc(d.id, d.data() as Record<string, unknown>));
+    await applyMirrorSync(owner, BOARD, OWNER, planMirrorSync(tasks, items, TODAY, OWNER), NOW);
+
+    expect(await readItem(member, 'gift')).toBeNull();
+    // 원본은 그대로다. 공유에서만 내려간다.
+    expect((await getDoc(doc(owner, `users/${OWNER}/entries/gift`))).exists()).toBe(true);
+  });
+
+  it('감추기는 사람별이다 — 내가 감춰도 상대 화면에는 남는다', async () => {
+    const { owner, member } = await connect();
+    const entry = task();
+    await saveEntry(owner, OWNER, entry);
+    await pushSource(owner, BOARD, entry.id, sourceOf(entry), OWNER, NOW);
+
+    const item = await readItem(member, entry.id);
+    await saveSharedItem(member, BOARD, setHiddenFor(item!, MEMBER, true));
+
+    const seen = await readItem(owner, entry.id);
+    expect(isHiddenFor(seen!, MEMBER)).toBe(true);
+    expect(isHiddenFor(seen!, OWNER)).toBe(false);
+  });
+});
+
 describe('공유 화면 전용 항목', () => {
   it('상대가 만든 항목은 소유자의 개인 TODO 에 생기지 않는다', async () => {
     const { owner, member } = await connect();
@@ -355,10 +441,10 @@ describe('공유 화면 전용 항목', () => {
     const { owner, member } = await connect();
     await saveSharedItem(member, BOARD, newLocalItem('local-1', MEMBER, { title: '장보기' }));
 
-    const tasks = await fetchOwnerTasks(owner, OWNER);
+    const tasks = await fetchMyTasks(owner, OWNER);
     const items = (await getDocs(collection(owner, `sharedBoards/${BOARD}/items`))).docs
       .map((d) => sharedItemFromDoc(d.id, d.data() as Record<string, unknown>));
-    await applyOwnerSync(owner, BOARD, OWNER, planOwnerSync(tasks, items, TODAY), NOW);
+    await applyMirrorSync(owner, BOARD, OWNER, planMirrorSync(tasks, items, TODAY, OWNER), NOW);
 
     expect(await readItem(owner, 'local-1')).not.toBeNull();
   });
@@ -372,8 +458,8 @@ describe('맞추기 — 보드를 만든 뒤 한 번', () => {
     await saveEntry(owner, OWNER, newEntry('money', { id: 'money-1', title: '전기요금', startDate: '2026-09-25' }));
     const { member } = await connect();
 
-    const tasks = await fetchOwnerTasks(owner, OWNER);
-    await applyOwnerSync(owner, BOARD, OWNER, planOwnerSync(tasks, [], TODAY), NOW);
+    const tasks = await fetchMyTasks(owner, OWNER);
+    await applyMirrorSync(owner, BOARD, OWNER, planMirrorSync(tasks, [], TODAY, OWNER), NOW);
 
     const items = await getDocs(collection(member, `sharedBoards/${BOARD}/items`));
     expect(items.docs.map((d) => d.id)).toEqual(['old-1']);
@@ -392,10 +478,10 @@ describe('맞추기 — 보드를 만든 뒤 한 번', () => {
     // 지난 항목이 이미 보드에 올라가 있는 상태를 만든다.
     await pushSource(owner, BOARD, past.id, sourceOf(past), OWNER, NOW);
 
-    const tasks = await fetchOwnerTasks(owner, OWNER);
+    const tasks = await fetchMyTasks(owner, OWNER);
     const items = (await getDocs(collection(owner, `sharedBoards/${BOARD}/items`))).docs
       .map((d) => sharedItemFromDoc(d.id, d.data() as Record<string, unknown>));
-    await applyOwnerSync(owner, BOARD, OWNER, planOwnerSync(tasks, items, TODAY), NOW);
+    await applyMirrorSync(owner, BOARD, OWNER, planMirrorSync(tasks, items, TODAY, OWNER), NOW);
 
     const after = await getDocs(collection(member, `sharedBoards/${BOARD}/items`));
     expect(after.docs.map((d) => d.id)).toEqual(['future-1']);
@@ -410,17 +496,17 @@ describe('맞추기 — 보드를 만든 뒤 한 번', () => {
     await pushSource(owner, BOARD, entry.id, sourceOf(entry), OWNER, NOW);
 
     const item = await readItem(member, entry.id);
-    await saveSharedItem(member, BOARD, setHidden(applyOverrides(item!, { title: '병원 전화하기' }), true));
+    await saveSharedItem(member, BOARD, setHiddenFor(applyOverrides(item!, { title: '병원 전화하기' }, MEMBER), MEMBER, true));
 
     // 원본이 바뀐 상태에서 맞추기를 돌린다.
     const moved = withDerived({ ...entry, startDate: '2026-10-01' });
     await saveEntry(owner, OWNER, moved);
-    const tasks = await fetchOwnerTasks(owner, OWNER);
+    const tasks = await fetchMyTasks(owner, OWNER);
     const stale = [await readItem(owner, entry.id)].filter((x): x is SharedTodoItem => x !== null);
-    await applyOwnerSync(owner, BOARD, OWNER, planOwnerSync(tasks, stale, TODAY), NOW);
+    await applyMirrorSync(owner, BOARD, OWNER, planMirrorSync(tasks, stale, TODAY, OWNER), NOW);
 
     const after = await readItem(member, entry.id);
-    expect(after?.hidden).toBe(true);
+    expect(isHiddenFor(after!, MEMBER)).toBe(true);
     expect(sharedView(after!).title).toBe('병원 전화하기');
     expect(sharedView(after!).startDate).toBe('2026-10-01');
   });
@@ -432,9 +518,9 @@ describe('맞추기 — 보드를 만든 뒤 한 번', () => {
     await pushSource(owner, BOARD, entry.id, sourceOf(entry), OWNER, NOW);
     await deleteEntry(owner, OWNER, entry.id);
 
-    const tasks = await fetchOwnerTasks(owner, OWNER);
+    const tasks = await fetchMyTasks(owner, OWNER);
     const items = [await readItem(owner, entry.id)].filter((x): x is SharedTodoItem => x !== null);
-    await applyOwnerSync(owner, BOARD, OWNER, planOwnerSync(tasks, items, TODAY), NOW);
+    await applyMirrorSync(owner, BOARD, OWNER, planMirrorSync(tasks, items, TODAY, OWNER), NOW);
 
     expect(await readItem(member, entry.id)).toBeNull();
   });

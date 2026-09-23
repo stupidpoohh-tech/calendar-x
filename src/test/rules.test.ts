@@ -146,6 +146,11 @@ describe('entry 형태 검증', () => {
   it('제목이 지나치게 길면 거부한다', async () => {
     await assertFails(setDoc(doc(db(ME), `users/${ME}/entries/e1`), validEntry({ title: 'x'.repeat(501) })));
   });
+
+  it('비공개 표시는 참/거짓이어야 한다 — 없는 것도 정상이다', async () => {
+    await assertSucceeds(setDoc(doc(db(ME), `users/${ME}/entries/e1`), validEntry({ keepPrivate: true })));
+    await assertFails(setDoc(doc(db(ME), `users/${ME}/entries/e2`), validEntry({ keepPrivate: 'yes' })));
+  });
 });
 
 describe('accounts / debts / pins', () => {
@@ -508,6 +513,13 @@ describe('같이 보기 — 보드 안의 자료', () => {
     ...over,
   });
 
+  /** 규칙을 건너뛰고 항목 하나를 심어 둔다. 여기서 재는 것은 그 뒤의 접근이다. */
+  async function seedItem(id: string, over: Record<string, unknown> = {}) {
+    await env.withSecurityRulesDisabled(async (ctx) => {
+      await setDoc(doc(ctx.firestore(), `sharedBoards/${BOARD}/items/${id}`), item(over));
+    });
+  }
+
   beforeEach(async () => {
     await env.withSecurityRulesDisabled(async (ctx) => {
       await setDoc(doc(ctx.firestore(), `sharedBoards/${BOARD}`), {
@@ -591,11 +603,83 @@ describe('같이 보기 — 보드 안의 자료', () => {
     ));
   });
 
-  it('hidden 이 참/거짓이 아니면 거부한다', async () => {
+  it('감춘 사람 목록이 배열이 아니면 거부한다', async () => {
     await assertFails(setDoc(
       doc(db(ME), `sharedBoards/${BOARD}/items/task-a`),
-      item({ hidden: 'yes' }),
+      item({ hiddenBy: 'yes' }),
     ));
+  });
+
+  /*
+    ── 둘 다 올리므로 자리를 갈라야 한다 ──────────────────────────
+
+    member 아무나 아무 필드나 쓸 수 있으면 상대가 내 원본 스냅샷을 위조할 수 있고,
+    그것은 조용히 끝나지도 않는다 — 내 맞추기가 되돌려 놓아 값이 왔다 갔다 한다.
+  */
+  it('원본을 담아 만드는 것은 그 원본의 주인뿐이다', async () => {
+    await assertFails(setDoc(
+      doc(db(OTHER), `sharedBoards/${BOARD}/items/task-a`),
+      item({ createdBy: ME }),
+    ));
+    await assertSucceeds(setDoc(
+      doc(db(OTHER), `sharedBoards/${BOARD}/items/task-b`),
+      item({ createdBy: OTHER }),
+    ));
+  });
+
+  it('상대는 내 원본 스냅샷을 고치지 못한다', async () => {
+    await seedItem('task-a');
+    await assertFails(updateDoc(doc(db(OTHER), `sharedBoards/${BOARD}/items/task-a`), {
+      source: { ...item().source, title: '위조' },
+      updatedAt: '2026-09-24T00:00:00.000Z',
+    }));
+    // 주인은 고칠 수 있다.
+    await assertSucceeds(updateDoc(doc(db(ME), `sharedBoards/${BOARD}/items/task-a`), {
+      source: { ...item().source, title: '고침' },
+      updatedAt: '2026-09-24T00:00:00.000Z',
+    }));
+  });
+
+  it('상대가 주인을 자기로 바꿔 가져갈 수 없다', async () => {
+    await seedItem('task-a');
+    await assertFails(updateDoc(doc(db(OTHER), `sharedBoards/${BOARD}/items/task-a`), {
+      createdBy: OTHER, updatedAt: '2026-09-24T00:00:00.000Z',
+    }));
+  });
+
+  it('수정(overrides)은 member 누구나 한다 — 보드는 함께 쓰는 자리다', async () => {
+    await seedItem('task-a');
+    await assertSucceeds(updateDoc(doc(db(OTHER), `sharedBoards/${BOARD}/items/task-a`), {
+      overrides: { title: '병원 전화하기' },
+      overriddenBy: OTHER,
+      updatedAt: '2026-09-24T00:00:00.000Z',
+    }));
+  });
+
+  it('감추기는 자기 uid 만 넣고 뺄 수 있다', async () => {
+    await seedItem('task-a', { hiddenBy: [ME] });
+    // 자기를 더하는 것은 된다.
+    await assertSucceeds(updateDoc(doc(db(OTHER), `sharedBoards/${BOARD}/items/task-a`), {
+      hiddenBy: arrayUnion(OTHER), updatedAt: '2026-09-24T00:00:00.000Z',
+    }));
+    // 남을 감추거나 남의 감춤을 푸는 것은 안 된다.
+    await assertFails(updateDoc(doc(db(OTHER), `sharedBoards/${BOARD}/items/task-a`), {
+      hiddenBy: [OTHER], updatedAt: '2026-09-24T00:00:00.000Z',
+    }));
+    await assertFails(updateDoc(doc(db(OTHER), `sharedBoards/${BOARD}/items/task-a`), {
+      hiddenBy: [ME, OTHER, THIRD], updatedAt: '2026-09-24T00:00:00.000Z',
+    }));
+  });
+
+  it('원본이 있는 항목은 주인만 지운다', async () => {
+    await seedItem('task-a');
+    await assertFails(deleteDoc(doc(db(OTHER), `sharedBoards/${BOARD}/items/task-a`)));
+    await assertSucceeds(deleteDoc(doc(db(ME), `sharedBoards/${BOARD}/items/task-a`)));
+  });
+
+  it('공유 전용 항목은 member 누구나 지운다', async () => {
+    await seedItem('local-1', { sourceEntryId: null, source: null, localOnly: true, createdBy: ME });
+    await assertSucceeds(deleteDoc(doc(db(OTHER), `sharedBoards/${BOARD}/items/local-1`)));
   });
 
   // ---------- 고정메모 ----------

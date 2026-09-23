@@ -11,7 +11,7 @@ import { describe, expect, it } from 'vitest';
 import { newEntry } from '../domain/entry';
 import { sourceOf, withSource } from '../domain/shared';
 import type { Entry, SharedTodoItem } from '../domain/types';
-import { isEmptyPlan, planOwnerSync } from './sharedRepo';
+import { isEmptyPlan, planMirrorSync } from './sharedRepo';
 
 const OWNER = 'owner-uid';
 const TODAY = '2026-09-23';
@@ -31,26 +31,26 @@ function mirrored(e: Entry): SharedTodoItem {
 
 describe('맞추기 계획', () => {
   it('공유에 없는 할 일은 보낸다', () => {
-    const plan = planOwnerSync([task('a'), task('b')], [], TODAY);
+    const plan = planMirrorSync([task('a'), task('b')], [], TODAY, OWNER);
     expect(plan.upserts.map((u) => u.id)).toEqual(['a', 'b']);
     expect(plan.deletes).toEqual([]);
   });
 
   it('값이 같으면 다시 보내지 않는다', () => {
     const a = task('a');
-    expect(isEmptyPlan(planOwnerSync([a], [mirrored(a)], TODAY))).toBe(true);
+    expect(isEmptyPlan(planMirrorSync([a], [mirrored(a)], TODAY, OWNER))).toBe(true);
   });
 
   it('값이 달라졌으면 보낸다', () => {
     const before = task('a');
     const after = task('a', { title: '고친 제목' });
-    const plan = planOwnerSync([after], [mirrored(before)], TODAY);
+    const plan = planMirrorSync([after], [mirrored(before)], TODAY, OWNER);
     expect(plan.upserts).toHaveLength(1);
     expect(plan.upserts[0]?.source.title).toBe('고친 제목');
   });
 
   it('원본이 사라진 공유 항목은 지운다 — 유령 항목을 남기지 않는다', () => {
-    const plan = planOwnerSync([task('a')], [mirrored(task('a')), mirrored(task('gone'))], TODAY);
+    const plan = planMirrorSync([task('a')], [mirrored(task('a')), mirrored(task('gone'))], TODAY, OWNER);
     expect(plan.deletes).toEqual(['gone']);
     expect(plan.upserts).toEqual([]);
   });
@@ -58,16 +58,16 @@ describe('맞추기 계획', () => {
   it('공유 화면에서만 만든 항목은 원본이 없어도 지우지 않는다', () => {
     const local: SharedTodoItem = {
       id: 'local-1', sourceEntryId: null, source: null,
-      overrides: { title: '장보기' }, localOnly: true, hidden: false,
+      overrides: { title: '장보기' }, overriddenBy: '', localOnly: true, hiddenBy: [],
       createdBy: 'member', createdAt: '', updatedAt: '',
     };
-    expect(planOwnerSync([], [local], TODAY).deletes).toEqual([]);
+    expect(planMirrorSync([], [local], TODAY, OWNER).deletes).toEqual([]);
   });
 
   it('아이디어와 가계부는 보내지 않는다', () => {
-    const plan = planOwnerSync(
+    const plan = planMirrorSync(
       [newEntry('idea', { id: 'i1' }), newEntry('money', { id: 'm1' })],
-      [], TODAY,
+      [], TODAY, OWNER,
     );
     expect(isEmptyPlan(plan)).toBe(true);
   });
@@ -75,7 +75,7 @@ describe('맞추기 계획', () => {
   it('할 일을 아이디어로 옮기면 공유에서 지운다', () => {
     const wasTask = task('a');
     const nowIdea = newEntry('idea', { id: 'a', title: 'a' });
-    const plan = planOwnerSync([nowIdea], [mirrored(wasTask)], TODAY);
+    const plan = planMirrorSync([nowIdea], [mirrored(wasTask)], TODAY, OWNER);
     expect(plan.deletes).toEqual(['a']);
   });
 
@@ -83,7 +83,7 @@ describe('맞추기 계획', () => {
     const recovery = task('r1', {
       recovery: { options: [], repayment: false, movedCount: 0 },
     });
-    const plan = planOwnerSync([recovery], [mirrored(task('r1'))], TODAY);
+    const plan = planMirrorSync([recovery], [mirrored(task('r1'))], TODAY, OWNER);
     expect(plan.upserts).toEqual([]);
     expect(plan.deletes).toEqual(['r1']);
   });
@@ -91,14 +91,14 @@ describe('맞추기 계획', () => {
   it('상대가 고쳐 둔 항목도 갱신 대상이다 — 실제 쓰기가 overrides 를 담지 않는다', () => {
     const before = task('a');
     const edited = { ...mirrored(before), overrides: { title: '고친 제목' } };
-    const plan = planOwnerSync([task('a', { startDate: '2026-09-27' })], [edited], TODAY);
+    const plan = planMirrorSync([task('a', { startDate: '2026-09-27' })], [edited], TODAY, OWNER);
     expect(plan.upserts.map((u) => u.id)).toEqual(['a']);
     expect(plan.deletes).toEqual([]);
   });
 
   it('반복 할 일도 한 건으로 보낸다 — 발생분으로 펼치지 않는다', () => {
     const repeating = task('a', { recurrence: { freq: 'weekly', interval: 1, until: null, count: null } });
-    const plan = planOwnerSync([repeating], [], TODAY);
+    const plan = planMirrorSync([repeating], [], TODAY, OWNER);
     expect(plan.upserts).toHaveLength(1);
     expect(plan.upserts[0]?.source.recurring).toBe(true);
   });
@@ -111,30 +111,75 @@ describe('맞추기 계획', () => {
   시간이 흐르기만 해도 어제 것이 지난 것이 되므로, 이 맞추기가 보드를 스스로
   정리하는 자리가 된다.
 */
+/*
+  양방향이라 둘 다 올린다. 맞추기는 **내가 올린 것**만 본다 — 남의 몫까지 지우면
+  상대가 다음에 열 때 다시 올라와, 항목이 사라졌다 나타났다 한다.
+*/
+describe('내 몫만 맞춘다', () => {
+  const theirs = (id: string): SharedTodoItem => ({
+    ...mirrored(task(id)), createdBy: 'partner-uid',
+  });
+
+  it('상대가 올린 항목은 내 원본에 없어도 지우지 않는다', () => {
+    expect(planMirrorSync([], [theirs('t1')], TODAY, OWNER).deletes).toEqual([]);
+  });
+
+  it('내가 올린 것만 지운다', () => {
+    const plan = planMirrorSync([], [theirs('t1'), mirrored(task('mine'))], TODAY, OWNER);
+    expect(plan.deletes).toEqual(['mine']);
+  });
+
+  it('상대가 올린 항목과 같은 id 의 내 원본이 있으면 내 것으로 다시 올린다', () => {
+    // 있을 수 없는 상태이지만, 주인이 어긋난 채 남아 있으면 내 쪽이 바로잡는다.
+    const plan = planMirrorSync([task('t1')], [theirs('t1')], TODAY, OWNER);
+    expect(plan.upserts.map((u) => u.id)).toEqual(['t1']);
+  });
+});
+
+describe('비공개 항목', () => {
+  it('올리지 않는다', () => {
+    const secret = task('gift', { keepPrivate: true });
+    expect(isEmptyPlan(planMirrorSync([secret], [], TODAY, OWNER))).toBe(true);
+  });
+
+  it('나중에 비공개로 바꾸면 이미 올라간 것을 내린다', () => {
+    const shared = task('gift');
+    const secret = task('gift', { keepPrivate: true });
+    const plan = planMirrorSync([secret], [mirrored(shared)], TODAY, OWNER);
+    expect(plan.deletes).toEqual(['gift']);
+    expect(plan.upserts).toEqual([]);
+  });
+
+  it('비공개를 풀면 다시 올라간다', () => {
+    const plan = planMirrorSync([task('gift')], [], TODAY, OWNER);
+    expect(plan.upserts.map((u) => u.id)).toEqual(['gift']);
+  });
+});
+
 describe('지나간 일정', () => {
   it('보내지 않는다', () => {
-    expect(isEmptyPlan(planOwnerSync([pastTask('old')], [], TODAY))).toBe(true);
+    expect(isEmptyPlan(planMirrorSync([pastTask('old')], [], TODAY, OWNER))).toBe(true);
   });
 
   it('이미 올라가 있으면 지운다', () => {
-    const plan = planOwnerSync([pastTask('old')], [mirrored(pastTask('old'))], TODAY);
+    const plan = planMirrorSync([pastTask('old')], [mirrored(pastTask('old'))], TODAY, OWNER);
     expect(plan.deletes).toEqual(['old']);
     expect(plan.upserts).toEqual([]);
   });
 
   it('오늘 것은 남는다', () => {
     const today = task('t', { startDate: TODAY });
-    expect(planOwnerSync([today], [], TODAY).upserts.map((u) => u.id)).toEqual(['t']);
+    expect(planMirrorSync([today], [], TODAY, OWNER).upserts.map((u) => u.id)).toEqual(['t']);
   });
 
   it('어제 시작해 모레 끝나는 일정은 아직 진행 중이라 남는다', () => {
     const running = task('r', { startDate: '2026-09-20', endDate: '2026-09-25' });
-    expect(planOwnerSync([running], [], TODAY).upserts.map((u) => u.id)).toEqual(['r']);
+    expect(planMirrorSync([running], [], TODAY, OWNER).upserts.map((u) => u.id)).toEqual(['r']);
   });
 
   it('어제 끝난 기간 일정은 지운다', () => {
     const ended = task('e', { startDate: '2026-09-01', endDate: '2026-09-22' });
-    expect(planOwnerSync([ended], [mirrored(ended)], TODAY).deletes).toEqual(['e']);
+    expect(planMirrorSync([ended], [mirrored(ended)], TODAY, OWNER).deletes).toEqual(['e']);
   });
 
   it('끝이 없는 반복은 시작일이 오래돼도 남는다 — 지금 돌고 있다', () => {
@@ -142,7 +187,7 @@ describe('지나간 일정', () => {
       id: 'rep', title: 'rep', startDate: '2025-01-01',
       recurrence: { freq: 'weekly', interval: 1, until: null, count: null },
     });
-    expect(planOwnerSync([repeating], [], TODAY).upserts.map((u) => u.id)).toEqual(['rep']);
+    expect(planMirrorSync([repeating], [], TODAY, OWNER).upserts.map((u) => u.id)).toEqual(['rep']);
   });
 
   it('끝난 반복은 지운다', () => {
@@ -150,15 +195,15 @@ describe('지나간 일정', () => {
       id: 'rep', title: 'rep', startDate: '2025-01-01',
       recurrence: { freq: 'weekly', interval: 1, until: '2026-08-01', count: null },
     });
-    expect(planOwnerSync([finished], [mirrored(finished)], TODAY).deletes).toEqual(['rep']);
+    expect(planMirrorSync([finished], [mirrored(finished)], TODAY, OWNER).deletes).toEqual(['rep']);
   });
 
   it('공유 화면에서만 만든 지난 항목은 지우지 않는다 — 되살릴 곳이 없다', () => {
     const local: SharedTodoItem = {
       id: 'local-old', sourceEntryId: null, source: null,
-      overrides: { title: '지난 주 약속', startDate: '2026-09-01' },
-      localOnly: true, hidden: false, createdBy: 'member', createdAt: '', updatedAt: '',
+      overrides: { title: '지난 주 약속', startDate: '2026-09-01' }, overriddenBy: '',
+      localOnly: true, hiddenBy: [], createdBy: 'member', createdAt: '', updatedAt: '',
     };
-    expect(planOwnerSync([], [local], TODAY).deletes).toEqual([]);
+    expect(planMirrorSync([], [local], TODAY, OWNER).deletes).toEqual([]);
   });
 });

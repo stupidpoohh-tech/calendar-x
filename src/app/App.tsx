@@ -1204,6 +1204,7 @@ function Workspace({ uid, user, onSignOut }: WorkspaceProps) {
         linkableTasks={linkableTasks}
         budgets={store.budgets}
         debts={store.debts}
+        sharedActive={!!shared.board}
         onSave={handleSave}
         onDelete={(e) => void handleDelete(e)}
         onClose={closeModal}

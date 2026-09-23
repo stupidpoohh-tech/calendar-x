@@ -3,12 +3,17 @@
  *
  * ── 한 방향으로만 흐른다 ────────────────────────────────────────
  *
- *     내 TODO 원본  →  공유 화면
+ *     각자의 TODO 원본  →  공유 화면
  *
  * 반대 방향은 없다. 이 모듈에는 `Entry` 를 만들어 돌려주는 함수가 하나도 없고,
  * 공유 화면의 모든 편집은 `SharedTodoItem` 을 돌려준다. 누가 고쳤는지가 아니라
- * **어느 화면에서 고쳤는지**가 기준이므로, 소유자가 공유 화면에서 고쳐도 원본은
+ * **어느 화면에서 고쳤는지**가 기준이므로, 자기 항목을 공유 화면에서 고쳐도 원본은
  * 그대로다.
+ *
+ * **둘 다 올린다.** 누가 보드를 만들었는지는 초대와 삭제에만 쓰이고, 올리는 자격과는
+ * 무관하다 — 먼저 누른 사람의 TODO 만 보이는 것은 화면에 드러나지 않는 사실이라
+ * 설명할 수 없다. 대신 항목마다 **주인**(`createdBy`)이 있고, 맞추기도 권한도 그
+ * 값으로 갈린다.
  *
  * ── 복제가 아니라 겹쳐 보기다 ───────────────────────────────────
  *
@@ -69,6 +74,7 @@ export interface SharedView extends SharedSource {
  * 회복 항목도 뺀다. 그것은 "휴식을 빚지 않게" 관리하는 개인 시스템 항목이고,
  * 캘린더에 올라온 한 건은 규칙이 방금 만든 것이라 상대가 볼 자료가 아니다.
  * 반복 전개분(`virtual`)도 뺀다 — 저장되지 않는 화면용 사본이다.
+ * 사용자가 **비공개로 표시한 항목**(`keepPrivate`)도 뺀다.
  *
  * ── 그리고 **지나간 일정은 공유하지 않는다** ────────────────────
  *
@@ -85,6 +91,8 @@ export interface SharedView extends SharedSource {
  */
 export function isShareableTask(e: Entry, todayISO: DateISO): boolean {
   if (e.kind !== 'task' || e.recovery != null || e.virtual === true) return false;
+  // 비공개로 표시한 항목은 올리지 않는다. 이미 올라가 있으면 맞추기가 내린다.
+  if (e.keepPrivate === true) return false;
   return !isPastTask(e, todayISO);
 }
 
@@ -178,7 +186,9 @@ function sameValue(a: unknown, b: unknown): boolean {
  * 원본과 같아진 필드는 override 에서 **빠진다** — 그 필드는 다시 원본을 따라간다.
  * 원본이 없는 항목(localOnly)은 비교할 대상이 없으므로 받은 값을 그대로 들고 있는다.
  */
-export function applyOverrides(item: SharedTodoItem, patch: SharedOverrides, now = new Date().toISOString()): SharedTodoItem {
+export function applyOverrides(
+  item: SharedTodoItem, patch: SharedOverrides, by: string, now = new Date().toISOString(),
+): SharedTodoItem {
   const next: SharedOverrides = { ...item.overrides };
   const src = item.localOnly ? null : item.source;
   for (const k of SHARED_OVERRIDABLE_FIELDS) {
@@ -188,17 +198,40 @@ export function applyOverrides(item: SharedTodoItem, patch: SharedOverrides, now
     if (src && sameValue(src[k], v)) delete next[k];
     else Object.assign(next, { [k]: v });
   }
-  return { ...item, overrides: next, updatedAt: now };
+  // 고친 자리가 하나도 안 남았으면 고친 사람도 남기지 않는다.
+  const overriddenBy = Object.keys(next).length > 0 ? by : '';
+  return { ...item, overrides: next, overriddenBy, updatedAt: now };
 }
 
 /** 원본대로 되돌린다. **원본은 건드리지 않는다** — override 만 지운다. */
 export function revertToSource(item: SharedTodoItem, now = new Date().toISOString()): SharedTodoItem {
   if (!canRevert(item)) return item;
-  return { ...item, overrides: {}, updatedAt: now };
+  return { ...item, overrides: {}, overriddenBy: '', updatedAt: now };
 }
 
-export function setHidden(item: SharedTodoItem, hidden: boolean, now = new Date().toISOString()): SharedTodoItem {
-  return { ...item, hidden, updatedAt: now };
+/** 이 사람에게 감춰져 있는가. 감추기는 보드 전체가 아니라 사람별이다. */
+export function isHiddenFor(item: SharedTodoItem, uid: string): boolean {
+  return item.hiddenBy.includes(uid);
+}
+
+/**
+ * 나에게만 감춘다 / 다시 보이게 한다.
+ *
+ * **남의 uid 는 건드리지 않는다.** 보드 값 하나로 두면 내가 감춘 순간 상대의 자기
+ * 할 일이 상대 화면에서도 사라진다. 규칙도 같은 것을 막는다.
+ */
+export function setHiddenFor(
+  item: SharedTodoItem, uid: string, hidden: boolean, now = new Date().toISOString(),
+): SharedTodoItem {
+  const has = item.hiddenBy.includes(uid);
+  if (has === hidden) return item;
+  const hiddenBy = hidden ? [...item.hiddenBy, uid] : item.hiddenBy.filter((u) => u !== uid);
+  return { ...item, hiddenBy, updatedAt: now };
+}
+
+/** 이 항목을 맞추고 지울 책임이 누구에게 있는가. */
+export function ownsMirror(item: SharedTodoItem, uid: string): boolean {
+  return item.createdBy === uid;
 }
 
 /**
@@ -218,8 +251,9 @@ export function withSource(
       sourceEntryId: entryId,
       source,
       overrides: {},
+      overriddenBy: '',
       localOnly: false,
-      hidden: false,
+      hiddenBy: [],
       createdBy: ownerUid,
       createdAt: now,
       updatedAt: now,
@@ -242,8 +276,9 @@ export function newLocalItem(
     sourceEntryId: null,
     source: null,
     overrides: { title: '', status: 'planned', ...fields },
+    overriddenBy: '',
     localOnly: true,
-    hidden: false,
+    hiddenBy: [],
     createdBy,
     createdAt: now,
     updatedAt: now,

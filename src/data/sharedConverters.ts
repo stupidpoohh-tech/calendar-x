@@ -10,12 +10,12 @@
  * 끝낸 일이 되살아난다. 키를 **버리면** 그 필드는 다시 원본을 따라가므로, 최소한
  * 원본이 말하는 사실은 유지된다.
  *
- * ── 갱신 쓰기는 `overrides` · `hidden` 을 보내지 않는다 ─────────
+ * ── 갱신 쓰기는 `overrides` · `hiddenBy` 를 보내지 않는다 ───────
  *
  * 원본 → 공유 갱신(`sharedSourcePatch`)은 `source` 계열 필드만 담는다. merge 로 쓰면
  * 담지 않은 필드는 그대로 남으므로, 상대가 고쳐 둔 값도 감춰 둔 상태도 살아남는다.
- * 그래서 이 파일의 읽기 쪽은 **세 필드가 아예 없는 문서**를 정상으로 다뤄야 한다 —
- * 없으면 `{}` · false 다.
+ * 그래서 이 파일의 읽기 쪽은 **그 필드들이 아예 없는 문서**를 정상으로 다뤄야 한다 —
+ * 없으면 `{}` · `[]` 다.
  */
 import { COLOR_BY_ID, DEFAULT_COLOR, STATUS_BY_ID } from '../domain/constants';
 import { normalizeDate } from '../domain/date';
@@ -33,6 +33,9 @@ const bool = (v: unknown, fallback = false): boolean => (typeof v === 'boolean' 
 const obj = (v: unknown): Raw | null => (v !== null && typeof v === 'object' && !Array.isArray(v) ? (v as Raw) : null);
 const strArr = (v: unknown): string[] =>
   (Array.isArray(v) ? v.filter((x): x is string => typeof x === 'string') : []);
+
+/** uid 목록. 중복과 빈 값은 걸러 낸다. */
+const uidList = (v: unknown): string[] => [...new Set(strArr(v).filter(Boolean))];
 
 const asStatus = (v: unknown): TaskStatus | null =>
   (typeof v === 'string' && v in STATUS_BY_ID ? (v as TaskStatus) : null);
@@ -193,14 +196,22 @@ function overridesFromRaw(v: unknown): SharedOverrides {
 export function sharedItemFromDoc(id: string, raw: Raw): SharedTodoItem {
   const source = sourceFromRaw(raw.source);
   const sourceEntryId = typeof raw.sourceEntryId === 'string' && raw.sourceEntryId ? raw.sourceEntryId : null;
+  const overrides = overridesFromRaw(raw.overrides);
   return {
     id,
     sourceEntryId,
     source,
-    // 세 필드는 갱신 쓰기가 담지 않는다. 없는 것이 정상이다.
-    overrides: overridesFromRaw(raw.overrides),
+    // 아래 넷은 갱신 쓰기가 담지 않는다. 없는 것이 정상이다.
+    overrides,
+    // 고친 자리가 없으면 고친 사람도 없다 — 옛 문서에 남은 값을 그대로 믿지 않는다.
+    overriddenBy: Object.keys(overrides).length > 0 ? str(raw.overriddenBy) : '',
     localOnly: bool(raw.localOnly, sourceEntryId === null && source === null),
-    hidden: bool(raw.hidden),
+    /*
+      감추기는 사람별이다. 보드 값 하나였던 옛 `hidden` 은 **누가 감췄는지가 없어**
+      옮길 곳이 없다 — 아무에게나 씌우느니 다시 보이게 둔다. 자료가 사라지는 것이
+      아니라 감춤 표시만 풀리고, 다시 감추면 된다.
+    */
+    hiddenBy: uidList(raw.hiddenBy),
     createdBy: str(raw.createdBy),
     createdAt: str(raw.createdAt),
     updatedAt: str(raw.updatedAt),
@@ -228,8 +239,9 @@ export function sharedItemToDoc(item: SharedTodoItem): Raw {
     sourceEntryId: item.sourceEntryId,
     source: item.source ? sourceToDoc(item.source) : null,
     overrides: { ...item.overrides },
+    overriddenBy: item.overriddenBy,
     localOnly: item.localOnly,
-    hidden: item.hidden,
+    hiddenBy: item.hiddenBy,
     createdBy: item.createdBy,
     createdAt: item.createdAt,
     updatedAt: item.updatedAt,
@@ -239,16 +251,19 @@ export function sharedItemToDoc(item: SharedTodoItem): Raw {
 /**
  * 원본 → 공유 갱신에 쓰는 **부분 문서**.
  *
- * `overrides` · `hidden` · `localOnly` 가 **없다.** merge 로 쓰면 담지 않은 필드는
+ * `overrides` · `overriddenBy` · `hiddenBy` 가 **없다.** merge 로 쓰면 담지 않은 필드는
  * 그대로 남으므로, 상대가 고쳐 둔 값과 감춰 둔 상태를 덮지 않는다. 문서가 아직 없으면
- * 이 필드들만 있는 문서가 만들어지고, 읽기 쪽이 `{}` · false 로 메운다.
+ * 이 필드들만 있는 문서가 만들어지고, 읽기 쪽이 `{}` · `[]` 로 메운다.
+ *
+ * `createdBy` 는 **이 원본의 주인**이다. 양방향이라 둘 다 올리므로, 이 값이 "누가 이
+ * 항목을 맞추고 지울 책임이 있는가" 를 정한다.
  */
-export function sharedSourcePatch(entryId: string, source: SharedSource, ownerUid: string, now: string): Raw {
+export function sharedSourcePatch(entryId: string, source: SharedSource, byUid: string, now: string): Raw {
   return {
     sourceEntryId: entryId,
     source: sourceToDoc(source),
     localOnly: false,
-    createdBy: ownerUid,
+    createdBy: byUid,
     updatedAt: now,
   };
 }

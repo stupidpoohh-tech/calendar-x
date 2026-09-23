@@ -9,15 +9,16 @@
 import { describe, expect, it } from 'vitest';
 import { newEntry, withDerived } from './entry';
 import {
-  applyOverrides, canRevert, isOverridden, isPastTask, isShareableTask, newLocalItem,
-  overriddenFields, revertToSource, sameSource, setHidden, sharedSortKey,
-  sharedTitle, sharedView, shortName, sourceOf, withSource, partnerName,
+  applyOverrides, canRevert, isHiddenFor, isOverridden, isPastTask, isShareableTask,
+  newLocalItem, overriddenFields, ownsMirror, revertToSource, sameSource, setHiddenFor,
+  sharedSortKey, sharedTitle, sharedView, shortName, sourceOf, withSource, partnerName,
   newInviteCode, inviteUrl,
 } from './shared';
 import type { Entry, SharedTodoItem } from './types';
 
 const OWNER = 'owner-uid';
 const TODAY = '2026-09-23';
+const MEMBER = 'member-uid';
 
 function task(patch: Partial<Entry> = {}): Entry {
   return newEntry('task', { id: 'task-a', title: '병원 예약', startDate: '2026-09-25', ...patch });
@@ -137,8 +138,11 @@ describe('원본 → 공유', () => {
     expect(item.id).toBe('task-a');
     expect(item.sourceEntryId).toBe('task-a');
     expect(item.localOnly).toBe(false);
-    expect(item.hidden).toBe(false);
+    expect(item.hiddenBy).toEqual([]);
     expect(item.overrides).toEqual({});
+    // 올린 사람이 이 항목의 주인이다 — 맞추기와 권한이 이 값으로 갈린다.
+    expect(ownsMirror(item, OWNER)).toBe(true);
+    expect(ownsMirror(item, MEMBER)).toBe(false);
     expect(sharedView(item).title).toBe('병원 예약');
   });
 
@@ -155,10 +159,10 @@ describe('원본 → 공유', () => {
   });
 
   it('원본 갱신은 공유 화면의 수정과 감춤을 건드리지 않는다', () => {
-    const hidden = setHidden(applyOverrides(mirrored(task()), { title: '병원 전화하기' }), true);
+    const hidden = setHiddenFor(applyOverrides(mirrored(task()), { title: '병원 전화하기' }, MEMBER), MEMBER, true);
     const next = withSource(hidden, 'task-a', sourceOf(task({ startDate: '2026-09-27' })), OWNER);
     expect(next.overrides.title).toBe('병원 전화하기');
-    expect(next.hidden).toBe(true);
+    expect(isHiddenFor(next, MEMBER)).toBe(true);
   });
 
   it('값이 같으면 다시 보낼 이유가 없다', () => {
@@ -176,7 +180,7 @@ describe('공유 → 원본은 없다', () => {
     const before = JSON.stringify(entry);
     const item = mirrored(entry);
 
-    const edited = applyOverrides(item, { title: '병원 전화하기' });
+    const edited = applyOverrides(item, { title: '병원 전화하기' }, MEMBER);
 
     expect(edited.overrides.title).toBe('병원 전화하기');
     // 원본 객체가 그대로여야 한다 — 이 방향으로는 아무것도 흐르지 않는다.
@@ -188,7 +192,7 @@ describe('공유 → 원본은 없다', () => {
   it('완료로 체크해도 원본 상태는 그대로다', () => {
     const entry = task();
     const item = mirrored(entry);
-    const done = applyOverrides(item, { status: 'done' });
+    const done = applyOverrides(item, { status: 'done' }, MEMBER);
 
     expect(sharedView(done).status).toBe('done');
     expect(entry.task?.status).toBe('planned');
@@ -197,8 +201,8 @@ describe('공유 → 원본은 없다', () => {
 
   it('감춰도 원본은 남는다', () => {
     const entry = task();
-    const hidden = setHidden(mirrored(entry), true);
-    expect(hidden.hidden).toBe(true);
+    const hidden = setHiddenFor(mirrored(entry), MEMBER, true);
+    expect(isHiddenFor(hidden, MEMBER)).toBe(true);
     expect(hidden.source?.title).toBe('병원 예약');
     expect(entry.title).toBe('병원 예약');
   });
@@ -206,7 +210,7 @@ describe('공유 → 원본은 없다', () => {
 
 describe('고치지 않은 필드는 원본을 따라간다', () => {
   it('제목만 고친 뒤 원본 날짜가 바뀌면, 고친 제목 + 새 날짜다', () => {
-    const edited = applyOverrides(mirrored(task()), { title: '병원 전화하기' });
+    const edited = applyOverrides(mirrored(task()), { title: '병원 전화하기' }, MEMBER);
     const after = withSource(edited, 'task-a', sourceOf(task({ startDate: '2026-09-27' })), OWNER);
 
     const view = sharedView(after);
@@ -221,7 +225,7 @@ describe('고치지 않은 필드는 원본을 따라간다', () => {
     })), OWNER);
     expect(sharedView(plain).status).toBe('done');
 
-    const overridden = applyOverrides(mirrored(task()), { status: 'in-progress' });
+    const overridden = applyOverrides(mirrored(task()), { status: 'in-progress' }, MEMBER);
     const afterOwner = withSource(overridden, 'task-a', sourceOf(task({
       task: { status: 'done', important: false, urgent: false, order: 0 },
     })), OWNER);
@@ -242,7 +246,7 @@ describe('고치지 않은 필드는 원본을 따라간다', () => {
       note: '',
       important: false,
       urgent: false,
-    });
+    }, MEMBER);
     expect(overriddenFields(saved)).toEqual(['title']);
 
     const moved = withSource(saved, 'task-a', sourceOf(task({ startDate: '2026-10-01' })), OWNER);
@@ -250,13 +254,13 @@ describe('고치지 않은 필드는 원본을 따라간다', () => {
   });
 
   it('원본과 같은 값으로 되돌려 적으면 그 필드는 다시 원본을 따라간다', () => {
-    const edited = applyOverrides(mirrored(task()), { title: '병원 전화하기' });
-    const back = applyOverrides(edited, { title: '병원 예약' });
+    const edited = applyOverrides(mirrored(task()), { title: '병원 전화하기' }, MEMBER);
+    const back = applyOverrides(edited, { title: '병원 예약' }, MEMBER);
     expect(overriddenFields(back)).toEqual([]);
   });
 
   it('색만 고쳐 두면 원본 색이 바뀌어도 고친 색을 지킨다', () => {
-    const edited = applyOverrides(mirrored(task({ color: 'blue' })), { color: 'pink' });
+    const edited = applyOverrides(mirrored(task({ color: 'blue' })), { color: 'pink' }, MEMBER);
     expect(sharedView(edited).color).toBe('pink');
 
     const afterOwner = withSource(edited, 'task-a', sourceOf(task({ color: 'green' })), OWNER);
@@ -267,7 +271,7 @@ describe('고치지 않은 필드는 원본을 따라간다', () => {
   });
 
   it('원본과 같은 색으로 고르면 override 가 되지 않는다', () => {
-    const saved = applyOverrides(mirrored(task({ color: 'blue' })), { color: 'blue' });
+    const saved = applyOverrides(mirrored(task({ color: 'blue' })), { color: 'blue' }, MEMBER);
     expect(overriddenFields(saved)).toEqual([]);
   });
 
@@ -275,7 +279,7 @@ describe('고치지 않은 필드는 원본을 따라간다', () => {
     const withRange = mirrored(task({ endDate: '2026-09-28' }));
     expect(sharedView(withRange).endDate).toBe('2026-09-28');
 
-    const cleared = applyOverrides(withRange, { endDate: null });
+    const cleared = applyOverrides(withRange, { endDate: null }, MEMBER);
     expect(sharedView(cleared).endDate).toBe(null);
     expect(overriddenFields(cleared)).toEqual(['endDate']);
   });
@@ -284,7 +288,7 @@ describe('고치지 않은 필드는 원본을 따라간다', () => {
 describe('원본대로 되돌리기', () => {
   it('override 를 지우면 원본 값이 보인다. 원본은 건드리지 않는다', () => {
     const entry = task();
-    const edited = applyOverrides(mirrored(entry), { title: '병원 전화하기', status: 'done' });
+    const edited = applyOverrides(mirrored(entry), { title: '병원 전화하기', status: 'done' }, MEMBER);
     expect(isOverridden(edited)).toBe(true);
 
     const reverted = revertToSource(edited);
@@ -321,7 +325,7 @@ describe('공유 화면 전용 항목', () => {
 
   it('값은 전부 자기 것이다 — 비교할 원본이 없어 override 가 지워지지 않는다', () => {
     const local = newLocalItem('local-1', 'member-uid', { title: '장보기', startDate: '2026-09-26' });
-    const edited = applyOverrides(local, { title: '장보기', status: 'done' });
+    const edited = applyOverrides(local, { title: '장보기', status: 'done' }, MEMBER);
     expect(sharedView(edited).title).toBe('장보기');
     expect(sharedView(edited).status).toBe('done');
   });
@@ -329,6 +333,47 @@ describe('공유 화면 전용 항목', () => {
   it('공유 화면에서만 만든 항목은 "수정됨" 이 아니다', () => {
     const local = newLocalItem('local-1', 'member-uid', { title: '장보기' });
     expect(isOverridden(local)).toBe(false);
+  });
+});
+
+/*
+  양방향이라 "누가 무엇을 할 수 있는가" 가 항목마다 갈린다. 감추기는 사람별이고,
+  수정은 보드 것이되 누가 고쳤는지가 남는다.
+*/
+describe('사람별 감추기', () => {
+  it('내가 감춰도 상대 화면에서는 보인다', () => {
+    const hidden = setHiddenFor(mirrored(task()), MEMBER, true);
+    expect(isHiddenFor(hidden, MEMBER)).toBe(true);
+    expect(isHiddenFor(hidden, OWNER)).toBe(false);
+  });
+
+  it('다시 보이게 하면 내 uid 만 빠진다', () => {
+    const both = setHiddenFor(setHiddenFor(mirrored(task()), MEMBER, true), OWNER, true);
+    const back = setHiddenFor(both, MEMBER, false);
+    expect(back.hiddenBy).toEqual([OWNER]);
+  });
+
+  it('같은 상태로 다시 부르면 그대로 둔다', () => {
+    const item = mirrored(task());
+    expect(setHiddenFor(item, MEMBER, false)).toBe(item);
+  });
+});
+
+describe('누가 고쳤는가', () => {
+  it('고친 사람을 남긴다', () => {
+    const edited = applyOverrides(mirrored(task()), { title: '병원 전화하기' }, MEMBER);
+    expect(edited.overriddenBy).toBe(MEMBER);
+  });
+
+  it('고친 자리가 없어지면 고친 사람도 지운다', () => {
+    const edited = applyOverrides(mirrored(task()), { title: '병원 전화하기' }, MEMBER);
+    const back = applyOverrides(edited, { title: '병원 예약' }, OWNER);
+    expect(back.overriddenBy).toBe('');
+  });
+
+  it('원본대로 되돌리면 고친 사람도 지운다', () => {
+    const edited = applyOverrides(mirrored(task()), { title: '병원 전화하기' }, MEMBER);
+    expect(revertToSource(edited).overriddenBy).toBe('');
   });
 });
 

@@ -25,6 +25,8 @@ interface Props {
   budgets: readonly Budget[];
   /** 상환을 걸 수 있는 대출. */
   debts: readonly Debt[];
+  /** 같이 보기 보드가 있는가. 없으면 비공개 토글을 띄울 이유가 없다. */
+  sharedActive?: boolean;
   onSave: (e: Entry) => void;
   onDelete: (e: Entry) => void;
   onClose: () => void;
@@ -46,7 +48,8 @@ function moneyUseOf(money: Entry['money']): MoneyUse {
 }
 
 export function EntryModal({
-  open, mode, initial, allTags, linkableTasks, budgets, debts, onSave, onDelete, onClose,
+  open, mode, initial, allTags, linkableTasks, budgets, debts, sharedActive = false,
+  onSave, onDelete, onClose,
 }: Props) {
   const [form, setForm] = useState<Entry>(() => initial ?? newEntry('task'));
   const [amountText, setAmountText] = useState('');
@@ -537,6 +540,34 @@ export function EntryModal({
                 ))}
               </div>
             </div>
+          )}
+
+          {/*
+            같이 보기에 올릴 것인가.
+
+            기본은 공유다 — 빼는 길이 없으면 선물 준비 · 면접 · 병원처럼 보이면 안 되는
+            할 일까지 자동으로 올라간다. 보드가 없으면 이 줄은 뜻이 없으므로 띄우지 않는다.
+          */}
+          {isTask && sharedActive && (
+            <div className="mod-row">
+              <span className="mod-lbl">같이 보기</span>
+              <div className="mod-chips">
+                <button
+                  className={'chip' + (form.keepPrivate ? ' on' : '')}
+                  onClick={() => patch({ keepPrivate: !form.keepPrivate })}
+                  aria-pressed={form.keepPrivate === true}
+                >
+                  <Icon.Lock size={12} />나만 보기
+                </button>
+              </div>
+            </div>
+          )}
+          {isTask && sharedActive && (
+            <p className="mod-hint">
+              {form.keepPrivate
+                ? '같이 보기에 올리지 않습니다. 이미 올라가 있으면 곧 내려갑니다.'
+                : '오늘 이후의 할 일은 같이 보기에 올라갑니다.'}
+            </p>
           )}
 
           {/* 메모 */}
