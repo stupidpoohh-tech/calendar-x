@@ -820,6 +820,7 @@ function Workspace({ uid, user, onSignOut }: WorkspaceProps) {
   return (
     <div className="app" data-lens={lens} style={{ ['--lens' as string]: `var(${lensDef.accentVar})` }}>
       <header className="topbar">
+        <div className="header-left">
         <div className="brand">
           {/*
             글리프 'X' 대신 획을 직접 긋는다. 글꼴의 X 는 굵기를 font-weight 로만
@@ -834,8 +835,7 @@ function Workspace({ uid, user, onSignOut }: WorkspaceProps) {
           <span className="brand-name">캘린더X</span>
         </div>
 
-        {!sharedOpen && (
-      <div className="toolbar">
+          {!sharedOpen && (
         <div className="tool-l">
           <button className="ico-btn sm" aria-label="이전 달"
             onClick={() => setCursor((d) => new Date(d.getFullYear(), d.getMonth() - 1, 1))}>
@@ -850,7 +850,26 @@ function Workspace({ uid, user, onSignOut }: WorkspaceProps) {
           </button>
           <button className="today-btn" onClick={() => setCursor(new Date())}>오늘</button>
         </div>
+          )}
+        </div>
+        <nav className="lenses" role="tablist" aria-label="렌즈">
+          {LENSES.map((l) => (
+            <button
+              key={l.id}
+              role="tab"
+              aria-selected={lens === l.id}
+              className={'lens' + (lens === l.id ? ' on' : '')}
+              style={{ ['--ac' as string]: `var(${l.accentVar})` }}
+              // 렌즈는 1차 네비게이션이다. 누르면 같이 보기 화면에서 나온다.
+              onClick={() => { set('lens', l.id); setFilters(emptyFilters()); setSharedOpen(false); }}
+            >
+              <span className="lens-dot" />{l.id === 'idea' ? '아이디어' : l.label}
+            </button>
+          ))}
+        </nav>
 
+        <div className="header-right">
+          {!sharedOpen && (
         <div className="tool-r">
           <div className="seg">
             {(['calendar', 'list'] as ViewId[]).map((v) => (
@@ -872,25 +891,7 @@ function Workspace({ uid, user, onSignOut }: WorkspaceProps) {
             <Icon.Plus size={16} /><span className="lbl">추가</span>
           </button>
         </div>
-      </div>
-        )}
-
-        <nav className="lenses" role="tablist" aria-label="렌즈">
-          {LENSES.map((l) => (
-            <button
-              key={l.id}
-              role="tab"
-              aria-selected={lens === l.id}
-              className={'lens' + (lens === l.id ? ' on' : '')}
-              style={{ ['--ac' as string]: `var(${l.accentVar})` }}
-              // 렌즈는 1차 네비게이션이다. 누르면 같이 보기 화면에서 나온다.
-              onClick={() => { set('lens', l.id); setFilters(emptyFilters()); setSharedOpen(false); }}
-            >
-              <span className="lens-dot" />{l.label}
-            </button>
-          ))}
-        </nav>
-
+          )}
         {!isAnon && (
           <SharedBar ready={shared.ready} board={shared.board} partner={shared.partner}
             onOpen={() => setSharedOpen(true)} onStart={() => setSharedSheet('start')} />
@@ -902,6 +903,7 @@ function Workspace({ uid, user, onSignOut }: WorkspaceProps) {
             <Icon.Settings size={16} />
           </button>
         )}
+        </div>
       </header>
 
       {/*

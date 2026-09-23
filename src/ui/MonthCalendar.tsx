@@ -6,6 +6,7 @@ import { compactAmount } from '../domain/money';
 import { currencyScopeOf, limitOn } from '../domain/tide';
 import type { Account, Budget, Entry, LensId, Reserve, WeekStart, YearMonth } from '../domain/types';
 import { Icon } from './Icon';
+import { isRecoveryEntry } from '../domain/recovery';
 
 interface Props {
   cursor: Date;
@@ -58,6 +59,8 @@ function placeWeek(entries: readonly Entry[], weekISO: readonly string[]): { pla
 
   // 기간이 긴 항목을 위로 올려야 바가 계단처럼 흩어지지 않는다.
   visible.sort((a, b) => {
+    const recoveryOrder = Number(isRecoveryEntry(a)) - Number(isRecoveryEntry(b));
+    if (recoveryOrder) return recoveryOrder;
     const aSpan = effectiveEndDate(a) > a.startDate ? 0 : 1;
     const bSpan = effectiveEndDate(b) > b.startDate ? 0 : 1;
     if (aSpan !== bSpan) return aSpan - bSpan;
@@ -167,11 +170,20 @@ export function MonthCalendar({
         const weekISO = week.map(toISO);
         const { placed, laneCount } = placeWeek(entries, weekISO);
         const { height, gap, showText } = barMetrics(laneCount);
+        // Recovery remains readable even when ordinary events compress to strips.
+        const laneHeights = Array.from({ length: laneCount }, (_, lane) =>
+          placed.some((p) => p.lane === lane && isRecoveryEntry(p.entry)) ? Math.max(height, 18) : height);
+        const laneOffsets: number[] = [];
+        let contentHeight = 0;
+        for (const laneHeight of laneHeights) {
+          laneOffsets.push(contentHeight);
+          contentHeight += laneHeight + (gap - height);
+        }
         const topOffset = 32;
         // 한도 숫자는 바 아래 한 줄을 차지한다. 한도가 뜨는 주에만 그만큼을 더한다 —
         // 오늘 이전 주까지 키워 두면 지나간 자리에 빈 줄만 남는다.
         const weekHasLimit = limits !== null && weekISO.some((iso) => limits.has(iso));
-        const minHeight = topOffset + laneCount * gap + 8 + (weekHasLimit ? 15 : 0);
+        const minHeight = topOffset + contentHeight + 8 + (weekHasLimit ? 15 : 0);
 
         return (
           <div className="cal-week" key={weekISO[0] ?? wi} style={{ minHeight }}>
@@ -217,13 +229,14 @@ export function MonthCalendar({
                     key={entry.id}
                     className={
                       'cal-bar'
+                      + (isRecoveryEntry(entry) ? ' recovery-text' : '')
                       + (isDone(entry) ? ' done' : '')
                       + (continuesLeft ? ' cont-l' : '')
                       + (continuesRight ? ' cont-r' : '')
                     }
                     style={{
-                      top: lane * gap,
-                      height,
+                      top: laneOffsets[lane],
+                      height: isRecoveryEntry(entry) ? Math.max(height, 18) : height,
                       left: `calc(${(from / 7) * 100}% + 3px)`,
                       width: `calc(${((to - from + 1) / 7) * 100}% - 6px)`,
                       ['--bar' as string]: accent,
@@ -231,9 +244,9 @@ export function MonthCalendar({
                     title={displayTitle(entry)}
                     onClick={(e) => { e.stopPropagation(); onEntryClick(entry); }}
                   >
-                    {showText && (
+                    {(showText || isRecoveryEntry(entry)) && (
                       <span className="cal-bar-in">
-                        {lens === 'all' && <KindDot kind={entry.kind} />}
+                        {lens === 'all' && !isRecoveryEntry(entry) && <KindDot kind={entry.kind} />}
                         {entry.startTime && <span className="cal-bar-t">{entry.startTime}</span>}
                         <span className="cal-bar-x">{displayTitle(entry)}</span>
                         {entry.isRecurring && <Icon.Repeat size={9} />}

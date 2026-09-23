@@ -93,3 +93,34 @@
 
 /* Keep the original event foreground and tint in both themes. */
 .cal-bar { --bg: var(--event-bg); --ink: var(--event-ink); --ink-3: var(--event-muted); }
+
+/* Primary navigation is centered independently of either control group. */
+.topbar { display: grid; grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr); gap: 16px; }
+.header-left, .header-right { display: flex; align-items: center; gap: 10px; min-width: 0; }
+.header-right { justify-content: flex-end; }
+.topbar .lenses { justify-self: center; margin: 0; padding: 4px; gap: 3px; background: var(--accent-soft); border: 1px solid var(--line); border-radius: 10px; }
+.topbar .lens { flex: 1; min-width: 68px; padding: 10px 14px; font-size: .9375rem; font-weight: 600; color: var(--ink-2); }
+.topbar .lens.on { background: var(--accent); color: var(--bg); box-shadow: var(--shadow-1); font-weight: 700; }
+@media (max-width: 1250px) {
+  .topbar { grid-template-columns: minmax(0, 1fr) auto; gap: 10px; }
+  .topbar .lenses { grid-column: 1 / -1; grid-row: 1; }
+  .header-left { grid-column: 1; grid-row: 2; }
+  .header-right { grid-column: 2; grid-row: 2; }
+}
+@media (max-width: 600px) {
+  .topbar { grid-template-columns: 1fr; gap: 8px; }
+  .topbar .lenses { width: 100%; max-width: 420px; }
+  .topbar .lens { min-width: 0; font-size: .875rem; padding: 9px 8px; }
+  .header-left { grid-column: 1; grid-row: 2; justify-content: center; }
+  .header-right { grid-column: 1; grid-row: 3; justify-content: center; }
+  .header-left .brand { display: none; }
+  .header-left .tool-l { flex: 0 1 auto; }
+}
+
+/* Recovery is a quiet, clickable text line beneath ordinary events. */
+.cal-bar.recovery-text, .cal-bar.recovery-text:hover {
+  background: transparent; border: 0; border-radius: 0; filter: none;
+  padding: 0 6px; color: var(--ink-3); font-size: .71875rem;
+}
+.cal-bar.recovery-text .cal-bar-t { color: inherit; font-size: inherit; }
+.cal-bar.recovery-text .cal-bar-x { font-weight: 400; }
