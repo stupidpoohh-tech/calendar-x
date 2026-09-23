@@ -1,13 +1,3 @@
-/**
- * 같이 보기 진입점.
- *
- * **상단 렌즈와 나란히 두지 않는다.** `전체 | TODO | 💡 | 가계부` 는 1차 네비게이션이고,
- * 같이 보기는 TODO 의 하위 기능이다. 렌즈 칸을 하나 더 만들면 "축이 다섯 개" 라는 뜻이
- * 되어 구조가 흐려진다. 큰 세그먼트 토글(`내 TODO | 같이 보기`)을 상시 노출하지 않는
- * 이유도 같다 — 1차보다 시각 위계가 낮아야 한다.
- *
- * 그래서 TODO 화면 안쪽의 조용한 한 줄이다. 카드도 아니고 테두리도 없다.
- */
 import type { SharedBoard } from '../domain/types';
 import { Icon } from './Icon';
 
@@ -29,8 +19,10 @@ export function SharedBar({ ready, board, partner, onOpen, onStart }: Props) {
 
   return (
     <div className="shb">
-      <span className="shb-l">TODO</span>
       <button
+        title={label}
+        aria-label={label}
+        disabled={!ready}
         className={'shb-btn' + (board ? ' on' : '')}
         onClick={board ? onOpen : onStart}
       >
