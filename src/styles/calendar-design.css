@@ -1,0 +1,107 @@
+/* Calendar X: quiet chrome, crisp color, every event stays visible. */
+.app { background: var(--bg); }
+.topbar {
+  position: relative; display: flex; flex-wrap: wrap; gap: 12px;
+  padding: 18px 24px 14px; border: 0; background: var(--bg); backdrop-filter: none;
+}
+.brand { gap: 7px; }
+.brand-mark { color: var(--accent); }
+.brand-name { font-size: 1rem; letter-spacing: -.035em; }
+.topbar .toolbar { flex: 1; margin: 0; padding: 0; gap: 16px; flex-wrap: nowrap; }
+.tool-l { gap: 2px; }
+.tool-r { gap: 6px; }
+.month-btn { font-size: 1.375rem; letter-spacing: -.04em; padding: 5px 8px; }
+.today-btn { font-size: .8125rem; padding: 7px 12px; background: transparent; }
+.topbar .lenses { flex: 0 0 auto; margin: 0; padding: 2px; border: 0; background: var(--bg-soft); }
+.lens { flex: 0 0 auto; padding: 7px 10px; font-size: .8125rem; }
+.lens-dot { display: none; }
+.lens.on { color: var(--ink); background: var(--bg); font-weight: 600; box-shadow: none; }
+.seg { border: 0; background: transparent; padding: 0; gap: 2px; }
+.seg-btn { padding: 9px 10px; font-size: .8125rem; }
+.seg-btn.on, .ico-btn.on { background: var(--accent-soft); color: var(--accent); border-color: transparent; }
+.add-btn { background: var(--accent-soft); color: var(--accent); padding: 9px 12px; }
+.ico-btn { color: var(--ink-3); width: 36px; height: 36px; }
+.shb { margin: 0; padding: 0; flex: 0 0 auto; }
+.shb-btn, .shb-btn.on { width: 36px; height: 36px; justify-content: center; padding: 0; border: 0; color: var(--ink-3); background: transparent; }
+.shb-btn span { display: none; }
+.shb-btn:hover { background: var(--accent-soft); color: var(--accent); }
+.shb-btn:disabled { opacity: .45; cursor: wait; }
+.side { padding: 0 24px; gap: 8px; }
+.side:empty { display: none; }
+.main { padding: 12px 24px 32px; }
+/* One utility strip, expandable only when its details are needed. */
+.utility-strip { display: flex; align-items: flex-start; gap: 10px; background: var(--bg-soft); border-radius: var(--radius); padding: 2px 8px; }
+.utility-strip .pin { flex: 1; min-width: 0; border: 0; border-radius: 0; background: transparent; }
+.utility-strip .pin-h { padding: 8px 6px; min-height: 36px; gap: 8px; }
+.pin-h-t { font-size: .8125rem; white-space: nowrap; }
+.pin-h-n { font-size: .75rem; color: var(--ink-3); }
+.pin-preview { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; font-size: .8125rem; font-weight: 400; color: var(--ink-3); }
+.utility-strip .pin-b { padding: 6px 8px 12px; }
+.utility-strip .rdebt { flex: 0 1 auto; border: 0; border-radius: 0; background: transparent; min-width: 0; }
+.utility-strip .rdebt-h { padding: 8px 6px; min-height: 36px; gap: 8px; font-size: .8125rem; }
+.rdebt-cta { flex: initial; white-space: nowrap; }
+.utility-strip .rdebt-b { border: 0; padding: 8px 6px; }
+.tp { border: 0; background: var(--bg-soft); box-shadow: none; }
+.tp-h { padding-top: 9px; padding-bottom: 9px; }
+/* Grid lines recede; the current day and colored events carry the hierarchy. */
+.cal { border-color: var(--line); border-radius: var(--radius); }
+.cal-week { min-height: max(116px, var(--week-height, 0px)); }
+.cal-head { background: var(--bg); }
+.cal-dow { padding: 11px 0; font-size: .8125rem; font-weight: 500; }
+.cal-cell.today { background: color-mix(in srgb, var(--accent) 6%, var(--bg)); }
+.cal-cell.today:hover { background: color-mix(in srgb, var(--accent) 10%, var(--bg)); }
+.cal-num { font-size: .9375rem; font-weight: 600; margin: 5px 0 0 6px; min-width: 27px; min-height: 27px; }
+.cal-num.is-today, .cal-cell.wknd .cal-num.is-today { background: var(--accent); color: var(--bg); border-radius: 6px; }
+.cal-cell.out .cal-num { color: var(--ink-4); }
+.cal-bar { border: 1px solid color-mix(in srgb, var(--bar) 32%, var(--bg)); border-left: 3px solid var(--bar); border-radius: 4px; background: color-mix(in srgb, var(--bar) 11%, var(--bg)); font-size: .8125rem; padding: 0 6px; color: var(--ink); }
+.cal-bar:hover { filter: none; background: color-mix(in srgb, var(--bar) 20%, var(--bg)); }
+.cal-bar-x { font-weight: 600; letter-spacing: -.015em; }
+.cal-bar-t { font-size: .71875rem; font-weight: 400; color: var(--ink-2); }
+.cal-bar.done, .cal-bar.canceled { opacity: .6; }
+.cal-bar.canceled .cal-bar-x { text-decoration: line-through; }
+.cal-bar.cont-l { border-left: 0; border-top-left-radius: 0; border-bottom-left-radius: 0; }
+.cal-bar.cont-r { border-right: 0; border-top-right-radius: 0; border-bottom-right-radius: 0; }
+.lst-item { box-shadow: none; }
+.fab { display: none; }
+@media (max-width: 1200px) {
+  .topbar { gap: 8px; }
+  .brand-name { display: none; }
+  .month-btn { font-size: 1.125rem; }
+  .lens { padding: 7px 8px; }
+  .seg-btn .lbl { display: none; }
+}
+@media (max-width: 860px) {
+  .topbar { padding: 12px 14px; }
+  .topbar .toolbar { order: 5; flex: 1 0 100%; margin-top: 2px; }
+  .topbar .lenses { margin-right: auto; }
+  .brand-name { display: inline; font-size: .875rem; }
+  .side { padding: 0 14px; }
+  .main { padding: 10px 14px 28px; }
+  .month-btn { font-size: 1.125rem; }
+  .add-btn .lbl { display: inline; }
+  .utility-strip { flex-wrap: wrap; gap: 0 8px; }
+  .utility-strip .pin { flex-basis: 200px; }
+  .utility-strip .rdebt { flex-basis: auto; }
+}
+@media (max-width: 480px) {
+  .topbar { padding: 10px 8px; gap: 4px; }
+  .brand-name { display: none; }
+  .topbar .toolbar { gap: 4px; }
+  .month-btn { font-size: 1rem; padding: 4px; }
+  .tool-l, .tool-r { gap: 0; }
+  .tool-l .ico-btn.sm { width: 26px; }
+  .today-btn { margin-left: 2px; padding: 7px; font-size: .75rem; }
+  .seg-btn { padding: 9px 6px; }
+  .add-btn { padding: 9px; }
+  .add-btn .lbl { display: none; }
+  .side { padding: 0 8px; }
+  .main { padding: 8px 8px 24px; }
+  .cal-week { min-height: max(82px, var(--week-height, 0px)); }
+  .cal-num { margin-left: 2px; font-size: .8125rem; }
+  .cal-bar { font-size: .75rem; padding: 0 2px; border-left-width: 2px; }
+  .cal-bar-in { flex-wrap: wrap; gap: 0 3px; line-height: 1.1; }
+  .cal-bar-t { font-size: .625rem; }
+  .cal-bar-x { flex-basis: 100%; }
+  .cal-kind { display: none; }
+  .cal-dow { font-size: .75rem; }
+}

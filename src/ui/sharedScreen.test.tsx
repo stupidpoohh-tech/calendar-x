@@ -200,7 +200,7 @@ describe('항목 편집', () => {
     mount({ items: [mirrored(task())], onSaveItem });
     const dialog = open('병원 예약');
 
-    fireEvent.click(within(dialog).getByRole('button', { name: '핑크' }));
+    fireEvent.click(within(dialog).getByRole('button', { name: '아이리스' }));
     fireEvent.click(within(dialog).getByRole('button', { name: '저장' }));
 
     const saved = onSaveItem.mock.calls[0]![0] as SharedTodoItem;
@@ -315,7 +315,7 @@ describe('달력', () => {
   it('항목의 색으로 그린다 — 전부 같은 색이면 달력이 아니다', () => {
     mount({ view: 'calendar', items: [mirrored(task({ color: 'pink' }))] });
     const bar = screen.getByText('병원 예약').closest('[style]');
-    expect(bar?.getAttribute('style')).toContain('#ec4899');
+    expect(bar?.getAttribute('style')).toContain('#a06dac');
   });
 
   it('다른 달을 보고 있으면 그 항목은 달력에 없다', () => {

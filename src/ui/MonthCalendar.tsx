@@ -86,17 +86,12 @@ function placeWeek(entries: readonly Entry[], weekISO: readonly string[]): { pla
 }
 
 /**
- * 항목을 숨기지 않는다. "+N개 더" 대신 개수에 따라 바 높이를 압축해 전부 보여 준다.
+ * 항목을 숨기지 않는다. 행 높이가 늘어나더라도 제목을 포함해 전부 보여 준다.
  * 이 프로젝트의 설계 원칙이라 그대로 지킨다.
  */
 const NO_BUDGETS: readonly Budget[] = [];
 const NO_RESERVES: readonly Reserve[] = [];
 
-function barMetrics(laneCount: number) {
-  if (laneCount <= 4) return { height: 21, gap: 23, showText: true };
-  if (laneCount <= 7) return { height: 14, gap: 16, showText: true };
-  return { height: 8, gap: 10, showText: false };
-}
 
 export function MonthCalendar({
   cursor, onCursorChange, entries, tideEntries, budgets = NO_BUDGETS, reserves = NO_RESERVES,
@@ -166,15 +161,15 @@ export function MonthCalendar({
       {weeks.map((week, wi) => {
         const weekISO = week.map(toISO);
         const { placed, laneCount } = placeWeek(entries, weekISO);
-        const { height, gap, showText } = barMetrics(laneCount);
-        const topOffset = 32;
+        const height = 28, gap = 32;
+        const topOffset = 38;
         // 한도 숫자는 바 아래 한 줄을 차지한다. 한도가 뜨는 주에만 그만큼을 더한다 —
         // 오늘 이전 주까지 키워 두면 지나간 자리에 빈 줄만 남는다.
         const weekHasLimit = limits !== null && weekISO.some((iso) => limits.has(iso));
         const minHeight = topOffset + laneCount * gap + 8 + (weekHasLimit ? 15 : 0);
 
         return (
-          <div className="cal-week" key={weekISO[0] ?? wi} style={{ minHeight }}>
+          <div className="cal-week" key={weekISO[0] ?? wi} style={{ ['--week-height' as string]: `${minHeight}px` }}>
             <div className="cal-cells">
               {week.map((d) => {
                 const iso = toISO(d);
@@ -231,14 +226,12 @@ export function MonthCalendar({
                     title={displayTitle(entry)}
                     onClick={(e) => { e.stopPropagation(); onEntryClick(entry); }}
                   >
-                    {showText && (
-                      <span className="cal-bar-in">
+                    <span className="cal-bar-in">
                         {lens === 'all' && <KindDot kind={entry.kind} />}
-                        {entry.startTime && <span className="cal-bar-t">{entry.startTime}</span>}
                         <span className="cal-bar-x">{displayTitle(entry)}</span>
+                        {entry.startTime && <span className="cal-bar-t">{entry.startTime}</span>}
                         {entry.isRecurring && <Icon.Repeat size={9} />}
-                      </span>
-                    )}
+                    </span>
                   </button>
                 );
               })}

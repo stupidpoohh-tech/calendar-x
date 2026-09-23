@@ -15,46 +15,46 @@
 :root {
   /* ---- surface / ink ---- */
   --bg: #ffffff;
-  --bg-soft: #fafafa;
+  --bg-soft: #f6f8fb;
   --bg-elev: #ffffff;
-  --line: #ececec;
-  --line-strong: #d4d4d4;
-  --ink: #0a0a0a;
-  --ink-2: #404040;
-  --ink-3: #737373;
-  --ink-4: #a3a3a3;
-  --accent: #0a0a0a;
-  --accent-soft: #f4f4f5;
+  --line: #e8edf4;
+  --line-strong: #c7d0df;
+  --ink: #18243b;
+  --ink-2: #41516b;
+  --ink-3: #65748b;
+  --ink-4: #8a96a9;
+  --accent: #3868c8;
+  --accent-soft: #edf2fc;
   /* 모달 뒤를 덮는 막. 다크에서는 더 진해야 아래 화면과 분리된다. */
   --scrim: rgba(10, 10, 10, .45);
 
   /* ---- lock screen ---- */
-  --lock-bg: #fafafa;
-  --lock-fg: #0a0a0a;
+  --lock-bg: #f6f8fb;
+  --lock-fg: #18243b;
   --lock-muted: #525252;
-  --lock-faint: #a3a3a3;
+  --lock-faint: #8a96a9;
   --lock-field-bg: #ffffff;
-  --lock-field-border: #ececec;
-  --lock-field-focus: #0a0a0a;
-  --lock-submit-bg: #0a0a0a;
+  --lock-field-border: #e8edf4;
+  --lock-field-focus: #18243b;
+  --lock-submit-bg: #18243b;
   --lock-submit-fg: #ffffff;
   --lock-err: #b91c1c;
 
   /* ---- 8 category colors ---- */
-  --c-red: #ef4444;
-  --c-orange: #f97316;
-  --c-amber: #eab308;
-  --c-green: #22c55e;
-  --c-cyan: #06b6d4;
-  --c-blue: #3b82f6;
-  --c-violet: #8b5cf6;
-  --c-pink: #ec4899;
+  --c-red: #ce6471;
+  --c-orange: #d48169;
+  --c-amber: #398b8a;
+  --c-green: #41997d;
+  --c-cyan: #548fae;
+  --c-blue: #517bd3;
+  --c-violet: #8873c4;
+  --c-pink: #a06dac;
 
   /* ---- lens accents (일정 / 아이디어 / 가계부 / 전체) ---- */
   --lens-task: #2563eb;
   --lens-idea: #7c3aed;
   --lens-money: #059669;
-  --lens-all: #0a0a0a;
+  --lens-all: #18243b;
   /*
    * 렌즈 강조색을 배경으로 쓸 때의 글자색.
    * 라이트에서는 강조색이 진하고 다크에서는 밝아지므로, 짝이 되는 전경색을
@@ -68,9 +68,9 @@
   --bad: #dc2626;
 
   /* ---- shape ---- */
-  --radius: 10px;
+  --radius: 8px;
   --radius-sm: 6px;
-  --radius-lg: 14px;
+  --radius-lg: 12px;
 
   --shadow-1: 0 1px 2px rgba(10, 10, 10, .04), 0 1px 1px rgba(10, 10, 10, .03);
   --shadow-2: 0 8px 24px rgba(10, 10, 10, .08), 0 2px 6px rgba(10, 10, 10, .04);
@@ -83,35 +83,35 @@
 
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme="light"]) {
-    --bg: #0a0a0a;
-    --bg-soft: #141414;
-    --bg-elev: #1a1a1a;
-    --line: #262626;
-    --line-strong: #404040;
-    --ink: #fafafa;
-    --ink-2: #d4d4d4;
-    --ink-3: #a3a3a3;
-    --ink-4: #737373;
-    --accent: #fafafa;
-    --accent-soft: #1f1f1f;
+    --bg: #18243b;
+    --bg-soft: #182131;
+    --bg-elev: #1c283a;
+    --line: #2b384c;
+    --line-strong: #41516b;
+    --ink: #f6f8fb;
+    --ink-2: #c7d0df;
+    --ink-3: #8a96a9;
+    --ink-4: #65748b;
+    --accent: #91b5ff;
+    --accent-soft: #23334d;
     --scrim: rgba(0, 0, 0, .72);
 
-    --lock-bg: #0a0a0a;
-    --lock-fg: #fafafa;
-    --lock-muted: #a3a3a3;
+    --lock-bg: #18243b;
+    --lock-fg: #f6f8fb;
+    --lock-muted: #8a96a9;
     --lock-faint: #525252;
     --lock-field-bg: rgba(255, 255, 255, .06);
     --lock-field-border: rgba(255, 255, 255, .08);
     --lock-field-focus: rgba(255, 255, 255, .4);
-    --lock-submit-bg: #fafafa;
-    --lock-submit-fg: #0a0a0a;
+    --lock-submit-bg: #f6f8fb;
+    --lock-submit-fg: #18243b;
     --lock-err: #fca5a5;
 
     --lens-task: #60a5fa;
     --lens-idea: #a78bfa;
     --lens-money: #34d399;
-    --lens-all: #fafafa;
-    --on-lens: #0a0a0a;
+    --lens-all: #f6f8fb;
+    --on-lens: #18243b;
 
     --good: #4ade80;
     --warn: #fbbf24;
@@ -124,35 +124,35 @@
 }
 
 :root[data-theme="dark"] {
-  --bg: #0a0a0a;
-  --bg-soft: #141414;
-  --bg-elev: #1a1a1a;
-  --line: #262626;
-  --line-strong: #404040;
-  --ink: #fafafa;
-  --ink-2: #d4d4d4;
-  --ink-3: #a3a3a3;
-  --ink-4: #737373;
-  --accent: #fafafa;
-  --accent-soft: #1f1f1f;
+  --bg: #18243b;
+  --bg-soft: #182131;
+  --bg-elev: #1c283a;
+  --line: #2b384c;
+  --line-strong: #41516b;
+  --ink: #f6f8fb;
+  --ink-2: #c7d0df;
+  --ink-3: #8a96a9;
+  --ink-4: #65748b;
+  --accent: #91b5ff;
+  --accent-soft: #23334d;
   --scrim: rgba(0, 0, 0, .72);
 
-  --lock-bg: #0a0a0a;
-  --lock-fg: #fafafa;
-  --lock-muted: #a3a3a3;
+  --lock-bg: #18243b;
+  --lock-fg: #f6f8fb;
+  --lock-muted: #8a96a9;
   --lock-faint: #525252;
   --lock-field-bg: rgba(255, 255, 255, .06);
   --lock-field-border: rgba(255, 255, 255, .08);
   --lock-field-focus: rgba(255, 255, 255, .4);
-  --lock-submit-bg: #fafafa;
-  --lock-submit-fg: #0a0a0a;
+  --lock-submit-bg: #f6f8fb;
+  --lock-submit-fg: #18243b;
   --lock-err: #fca5a5;
 
   --lens-task: #60a5fa;
   --lens-idea: #a78bfa;
   --lens-money: #34d399;
-  --lens-all: #fafafa;
-  --on-lens: #0a0a0a;
+  --lens-all: #f6f8fb;
+  --on-lens: #18243b;
 
   --good: #4ade80;
   --warn: #fbbf24;

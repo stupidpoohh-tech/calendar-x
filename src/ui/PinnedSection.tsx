@@ -52,11 +52,12 @@ export function PinnedSection({ lens, pins, collapsed, onToggleCollapsed, onSave
   };
 
   return (
-    <div className="pin">
+    <div className="pin" data-expanded={!collapsed}>
       <button className="pin-h" onClick={onToggleCollapsed} aria-expanded={!collapsed}>
         <Icon.Chevron size={13} dir={collapsed ? 'right' : 'down'} />
         <span className="pin-h-t">{LENS_TITLE[lens] ?? '고정 메모'}</span>
         {visible.length > 0 && <span className="pin-h-n">{visible.length}</span>}
+        {collapsed && visible[0] && <span className="pin-preview">{visible[0].text}</span>}
       </button>
 
       {!collapsed && (

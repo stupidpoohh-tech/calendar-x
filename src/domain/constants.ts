@@ -5,14 +5,14 @@ import type {
 export interface ColorDef { id: ColorId; hex: string; label: string }
 
 export const COLORS: readonly ColorDef[] = [
-  { id: 'red',    hex: '#ef4444', label: '레드' },
-  { id: 'orange', hex: '#f97316', label: '오렌지' },
-  { id: 'amber',  hex: '#eab308', label: '앰버' },
-  { id: 'green',  hex: '#22c55e', label: '그린' },
-  { id: 'cyan',   hex: '#06b6d4', label: '시안' },
-  { id: 'blue',   hex: '#3b82f6', label: '블루' },
-  { id: 'violet', hex: '#8b5cf6', label: '바이올렛' },
-  { id: 'pink',   hex: '#ec4899', label: '핑크' },
+  { id: 'red',    hex: '#ce6471', label: '코랄' },
+  { id: 'orange', hex: '#d48169', label: '살몬' },
+  { id: 'amber',  hex: '#398b8a', label: '터쿼이즈' },
+  { id: 'green',  hex: '#41997d', label: '민트' },
+  { id: 'cyan',   hex: '#548fae', label: '스카이' },
+  { id: 'blue',   hex: '#517bd3', label: '블루' },
+  { id: 'violet', hex: '#8873c4', label: '라벤더' },
+  { id: 'pink',   hex: '#a06dac', label: '아이리스' },
 ];
 
 export const COLOR_BY_ID: Record<ColorId, ColorDef> =
@@ -77,12 +77,12 @@ export interface MoneyTypeDef {
 }
 
 export const MONEY_TYPES: readonly MoneyTypeDef[] = [
-  { id: 'income',   label: '들어올 돈', color: '#22c55e', sign:  1, ranged: false, defaultColor: 'green',  hint: '입금 예정' },
-  { id: 'expense',  label: '나갈 돈',   color: '#ef4444', sign: -1, ranged: false, defaultColor: 'red',    hint: '지출 예정' },
-  { id: 'repay',    label: '갚을 거',   color: '#f97316', sign: -1, ranged: false, defaultColor: 'orange', hint: '상환 예정', legacy: true },
-  { id: 'priority', label: '우선 상환', color: '#8b5cf6', sign: -1, ranged: false, defaultColor: 'violet', hint: '먼저 갚을 것', legacy: true },
-  { id: 'living',   label: '생활비',    color: '#3b82f6', sign: -1, ranged: true,  defaultColor: 'blue',   hint: '기간에 걸쳐 나가는 돈', legacy: true },
-  { id: 'save',     label: '세이브',    color: '#06b6d4', sign:  0, ranged: false, defaultColor: 'cyan',   hint: '떼어 두는 돈 — 잔고에서 빠지지 않음', legacy: true },
+  { id: 'income',   label: '들어올 돈', color: '#41997d', sign:  1, ranged: false, defaultColor: 'green',  hint: '입금 예정' },
+  { id: 'expense',  label: '나갈 돈',   color: '#ce6471', sign: -1, ranged: false, defaultColor: 'red',    hint: '지출 예정' },
+  { id: 'repay',    label: '갚을 거',   color: '#d48169', sign: -1, ranged: false, defaultColor: 'orange', hint: '상환 예정', legacy: true },
+  { id: 'priority', label: '우선 상환', color: '#8873c4', sign: -1, ranged: false, defaultColor: 'violet', hint: '먼저 갚을 것', legacy: true },
+  { id: 'living',   label: '생활비',    color: '#517bd3', sign: -1, ranged: true,  defaultColor: 'blue',   hint: '기간에 걸쳐 나가는 돈', legacy: true },
+  { id: 'save',     label: '세이브',    color: '#548fae', sign:  0, ranged: false, defaultColor: 'cyan',   hint: '떼어 두는 돈 — 잔고에서 빠지지 않음', legacy: true },
   { id: 'free',     label: '가용',      color: '#6b7280', sign:  0, ranged: true,  defaultColor: 'blue',   hint: '쓸 수 있는 여유 — 참고용', legacy: true },
 ];
 
@@ -105,8 +105,8 @@ export interface StatusDef { id: TaskStatus; label: string; dot: string }
 
 export const STATUSES: readonly StatusDef[] = [
   { id: 'planned',     label: '예정',   dot: '#a3a3a3' },
-  { id: 'in-progress', label: '진행중', dot: '#3b82f6' },
-  { id: 'done',        label: '완료',   dot: '#22c55e' },
+  { id: 'in-progress', label: '진행중', dot: '#517bd3' },
+  { id: 'done',        label: '완료',   dot: '#41997d' },
 ];
 
 export const STATUS_BY_ID: Record<TaskStatus, StatusDef> =
