@@ -13,7 +13,7 @@ const DEFAULTS: Prefs = {
   pinCollapsed: {},
   debtsCollapsed: false,
   budgetsCollapsed: false,
-  todayCollapsed: false,
+  todayCollapsed: true,
   todayMoneyCollapsed: false,
   moneyCardCollapsed: false,
 };

@@ -801,8 +801,8 @@ function Workspace({ uid, user, onSignOut }: WorkspaceProps) {
     <PinnedSection
       lens={lens}
       pins={store.pins}
-      collapsed={!!prefs.pinCollapsed[lens]}
-      onToggleCollapsed={() => set('pinCollapsed', { ...prefs.pinCollapsed, [lens]: !prefs.pinCollapsed[lens] })}
+      collapsed={prefs.pinCollapsed[lens] ?? true}
+      onToggleCollapsed={() => set('pinCollapsed', { ...prefs.pinCollapsed, [lens]: !(prefs.pinCollapsed[lens] ?? true) })}
       onSave={(p) => {
         if (isAnon || !uid) { void promptLogin(); return; }
         commit({ kind: 'pin', label: '고정 메모', summary: p.text.slice(0, 40) || '(빈 메모)', payload: p });
@@ -834,6 +834,47 @@ function Workspace({ uid, user, onSignOut }: WorkspaceProps) {
           <span className="brand-name">캘린더X</span>
         </div>
 
+        {!sharedOpen && (
+      <div className="toolbar">
+        <div className="tool-l">
+          <button className="ico-btn sm" aria-label="이전 달"
+            onClick={() => setCursor((d) => new Date(d.getFullYear(), d.getMonth() - 1, 1))}>
+            <Icon.Chevron size={16} dir="left" />
+          </button>
+          <button className="month-btn" onClick={() => setShowPicker(true)}>
+            {monthLabel}<Icon.Chevron size={12} dir="down" />
+          </button>
+          <button className="ico-btn sm" aria-label="다음 달"
+            onClick={() => setCursor((d) => new Date(d.getFullYear(), d.getMonth() + 1, 1))}>
+            <Icon.Chevron size={16} />
+          </button>
+          <button className="today-btn" onClick={() => setCursor(new Date())}>오늘</button>
+        </div>
+
+        <div className="tool-r">
+          <div className="seg">
+            {(['calendar', 'list'] as ViewId[]).map((v) => (
+              <button key={v} className={'seg-btn' + (view === v ? ' on' : '')} aria-label={v === 'calendar' ? '캘린더 보기' : '리스트 보기'} aria-pressed={view === v} onClick={() => set('view', v)}>
+                {v === 'calendar' ? <Icon.Calendar size={14} /> : <Icon.List size={14} />}
+                <span className="lbl">{v === 'calendar' ? '캘린더' : '리스트'}</span>
+              </button>
+            ))}
+          </div>
+          <button
+            className={'ico-btn' + (showFilters || hasActiveFilter(filters) ? ' on' : '')}
+            onClick={() => setShowFilters((x) => !x)}
+            aria-label="필터" aria-expanded={showFilters}
+          >
+            <Icon.Filter size={15} />
+            {hasActiveFilter(filters) && <span className="badge" />}
+          </button>
+          <button className="add-btn" aria-label="일정 추가" onClick={() => openCreate()}>
+            <Icon.Plus size={16} /><span className="lbl">추가</span>
+          </button>
+        </div>
+      </div>
+        )}
+
         <nav className="lenses" role="tablist" aria-label="렌즈">
           {LENSES.map((l) => (
             <button
@@ -850,6 +891,10 @@ function Workspace({ uid, user, onSignOut }: WorkspaceProps) {
           ))}
         </nav>
 
+        {!isAnon && (
+          <SharedBar ready={shared.ready} board={shared.board} partner={shared.partner}
+            onOpen={() => setSharedOpen(true)} onStart={() => setSharedSheet('start')} />
+        )}
         {isAnon ? (
           <button className="landing-cta-sm" onClick={() => setShowAuth(true)}>로그인 · 가입</button>
         ) : (
@@ -913,44 +958,7 @@ function Workspace({ uid, user, onSignOut }: WorkspaceProps) {
         </main>
       ) : (
       <>
-      <div className="toolbar">
-        <div className="tool-l">
-          <button className="ico-btn sm" aria-label="이전 달"
-            onClick={() => setCursor((d) => new Date(d.getFullYear(), d.getMonth() - 1, 1))}>
-            <Icon.Chevron size={16} dir="left" />
-          </button>
-          <button className="month-btn" onClick={() => setShowPicker(true)}>
-            {monthLabel}<Icon.Chevron size={12} dir="down" />
-          </button>
-          <button className="ico-btn sm" aria-label="다음 달"
-            onClick={() => setCursor((d) => new Date(d.getFullYear(), d.getMonth() + 1, 1))}>
-            <Icon.Chevron size={16} />
-          </button>
-          <button className="today-btn" onClick={() => setCursor(new Date())}>오늘</button>
-        </div>
 
-        <div className="tool-r">
-          <div className="seg">
-            {(['calendar', 'list'] as ViewId[]).map((v) => (
-              <button key={v} className={'seg-btn' + (view === v ? ' on' : '')} onClick={() => set('view', v)}>
-                {v === 'calendar' ? <Icon.Calendar size={14} /> : <Icon.List size={14} />}
-                <span className="lbl">{v === 'calendar' ? '캘린더' : '리스트'}</span>
-              </button>
-            ))}
-          </div>
-          <button
-            className={'ico-btn' + (showFilters || hasActiveFilter(filters) ? ' on' : '')}
-            onClick={() => setShowFilters((x) => !x)}
-            aria-label="필터" aria-expanded={showFilters}
-          >
-            <Icon.Filter size={15} />
-            {hasActiveFilter(filters) && <span className="badge" />}
-          </button>
-          <button className="add-btn" onClick={() => openCreate()}>
-            <Icon.Plus size={16} /><span className="lbl">추가</span>
-          </button>
-        </div>
-      </div>
 
       {showFilters && (
         <FilterPanel
@@ -1004,6 +1012,7 @@ function Workspace({ uid, user, onSignOut }: WorkspaceProps) {
           렌즈와 무관하게 같은 자리에 두는 이유는, 밀렸다는 사실이 가계부를 보는 동안에도
           사라지면 안 되기 때문이다.
         */}
+        <div className="utility-strip">
         {!isAnon && (
           <RecoveryDebtBar
             rule={recovery.rule}
@@ -1014,6 +1023,9 @@ function Workspace({ uid, user, onSignOut }: WorkspaceProps) {
             }}
           />
         )}
+
+        {pinnedSection}
+        </div>
 
         {lens === 'all' && (
           <TodayPanel
@@ -1100,27 +1112,10 @@ function Workspace({ uid, user, onSignOut }: WorkspaceProps) {
                 if (ok) commit({ kind: 'debtDelete', label: '대출 삭제', summary: d.name, payload: { id: d.id } });
               }}
             />
-            {pinnedSection}
           </TideBar>
         )}
 
-        {/*
-          같이 보기 진입점 — TODO 화면 **안쪽**의 보조 액션이다. 상단 렌즈와 나란히 두면
-          축이 하나 더 있는 것처럼 보이고, 큰 세그먼트 토글로 상시 노출하면 1차
-          네비게이션과 위계가 겹친다.
-        */}
-        {lens === 'task' && !isAnon && (
-          <SharedBar
-            ready={shared.ready}
-            board={shared.board}
-            partner={shared.partner}
-            onOpen={() => setSharedOpen(true)}
-            onStart={() => setSharedSheet('start')}
-          />
-        )}
 
-        {/* 고정 메모는 각 축의 렌즈에서 본다. 전체 렌즈는 요약 카드 하나만 둔다. */}
-        {lens !== 'all' && lens !== 'money' && pinnedSection}
       </div>
 
       <main className="main">
