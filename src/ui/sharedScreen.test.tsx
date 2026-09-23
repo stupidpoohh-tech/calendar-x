@@ -195,6 +195,21 @@ describe('항목 편집', () => {
     expect(within(dialog).getByText(/내 TODO 에 반영되지 않고/)).toBeInTheDocument();
   });
 
+  it('색을 고르면 색만 override 가 된다', () => {
+    const onSaveItem = vi.fn();
+    mount({ items: [mirrored(task())], onSaveItem });
+    const dialog = open('병원 예약');
+
+    fireEvent.click(within(dialog).getByRole('button', { name: '핑크' }));
+    fireEvent.click(within(dialog).getByRole('button', { name: '저장' }));
+
+    const saved = onSaveItem.mock.calls[0]![0] as SharedTodoItem;
+    expect(Object.keys(saved.overrides)).toEqual(['color']);
+    expect(saved.overrides.color).toBe('pink');
+    // 원본 색은 그대로다.
+    expect(saved.source?.color).toBe('blue');
+  });
+
   it('제목만 고치면 제목만 override 가 된다', () => {
     const onSaveItem = vi.fn();
     mount({ items: [mirrored(task())], onSaveItem });
@@ -280,6 +295,7 @@ describe('항목 편집', () => {
     expect(saved.createdBy).toBe(ME);
     expect(saved.overrides.title).toBe('토요일 같이 장보기');
     expect(saved.overrides.startDate).toBe(TODAY);
+    expect(saved.overrides.color).toBe('blue');
   });
 });
 
@@ -294,6 +310,12 @@ describe('달력', () => {
     expect(screen.getByText('병원 예약')).toBeInTheDocument();
     // 요일 머리글이 있으면 월 그리드가 그려진 것이다.
     expect(screen.getByText('월')).toBeInTheDocument();
+  });
+
+  it('항목의 색으로 그린다 — 전부 같은 색이면 달력이 아니다', () => {
+    mount({ view: 'calendar', items: [mirrored(task({ color: 'pink' }))] });
+    const bar = screen.getByText('병원 예약').closest('[style]');
+    expect(bar?.getAttribute('style')).toContain('#ec4899');
   });
 
   it('다른 달을 보고 있으면 그 항목은 달력에 없다', () => {

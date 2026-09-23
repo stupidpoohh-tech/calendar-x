@@ -29,7 +29,7 @@
  * `Entry` 는 id 로 원래 항목을 되찾는 데만 쓰고, 그대로 저장하는 길은 없다.
  */
 import { useMemo, useState } from 'react';
-import { DEFAULT_COLOR } from '../domain/constants';
+import { colorHex } from '../domain/constants';
 import { fmtDayShort, fmtMonthTitle, ymOfDate } from '../domain/date';
 import { uid as newId } from '../domain/entry';
 import {
@@ -279,6 +279,8 @@ export function SharedScreen({
                         >
                           {done && <Icon.Check size={11} />}
                         </button>
+                        {/* 달력의 바와 같은 색. 두 화면에서 같은 항목이 같아 보여야 한다. */}
+                        <span className="sh-row-bar" style={{ background: colorHex(v.color) }} />
                         <button className="sh-row-main" onClick={() => openItem(item.id)}>
                           <span className={'sh-row-t' + (done ? ' done' : '')}>
                             {sharedTitle(item)}
@@ -344,7 +346,7 @@ function asDisplayEntries(items: readonly SharedTodoItem[]): Entry[] {
       kind: 'task',
       title: v.title,
       note: v.note,
-      color: DEFAULT_COLOR,
+      color: v.color,
       tags: [],
       location: '',
       startDate: v.startDate,

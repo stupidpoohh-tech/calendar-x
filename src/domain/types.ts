@@ -430,6 +430,14 @@ export interface SharedInvite {
 export interface SharedSource {
   title: string;
   note: string;
+  /**
+   * 달력에서 항목을 가르는 값.
+   *
+   * 원본의 색을 그대로 물려받는다 — 내 달력에서 빨강이던 일이 공유 화면에서 파랑이면
+   * 같은 일로 읽히지 않는다. 공유 화면에서 따로 고칠 수도 있다 (둘이 쓰는 기준이
+   * 내 기준과 다를 수 있다).
+   */
+  color: ColorId;
   startDate: DateISO;
   endDate: DateISO | null;
   startTime: TimeHM | null;
@@ -447,7 +455,7 @@ export interface SharedSource {
 
 /** 공유 화면에서 고칠 수 있는 필드. `recurring` 은 원본의 성질이라 뺀다. */
 export type SharedOverridableField =
-  'title' | 'note' | 'startDate' | 'endDate' | 'startTime' | 'status' | 'important' | 'urgent';
+  'title' | 'note' | 'color' | 'startDate' | 'endDate' | 'startTime' | 'status' | 'important' | 'urgent';
 
 /**
  * 공유 화면에서만 바뀐 값.

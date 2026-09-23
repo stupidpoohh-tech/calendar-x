@@ -17,6 +17,7 @@ import type { SharedSource } from '../domain/types';
 const source: SharedSource = {
   title: '병원 예약',
   note: '',
+  color: 'blue',
   startDate: '2026-09-25',
   endDate: null,
   startTime: null,
@@ -101,6 +102,27 @@ describe('항목 읽기', () => {
     });
     expect(item.overrides.endDate).toBe(null);
     expect(item.overrides.startTime).toBe(null);
+  });
+
+  it('모르는 색 override 는 버려 원본 색을 따라가게 둔다', () => {
+    const item = sharedItemFromDoc('task-a', {
+      sourceEntryId: 'task-a',
+      source: { ...source, color: 'pink' },
+      overrides: { color: 'ultraviolet' },
+    });
+    expect('color' in item.overrides).toBe(false);
+    expect(item.source?.color).toBe('pink');
+  });
+
+  /*
+    원본 쪽 색은 다르다. 뜻이 바뀌는 값이 아니라 보이는 값이라, 거절해서 항목이
+    통째로 안 보이는 것보다 기본색으로 그리는 편이 낫다.
+  */
+  it('모르는 색이 원본에 있으면 기본색으로 그린다', () => {
+    const item = sharedItemFromDoc('task-a', {
+      sourceEntryId: 'task-a', source: { ...source, color: 'ultraviolet' },
+    });
+    expect(item.source?.color).toBe('blue');
   });
 
   it('숫자로 적힌 제목 override 는 버린다', () => {

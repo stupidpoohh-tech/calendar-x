@@ -28,13 +28,14 @@
  * 필드를 전부 override 로 남기면 한 번 편집한 항목이 원본에서 통째로 떨어져 나간다 —
  * "고치지 않은 필드는 원본을 따라간다" 가 그 순간 거짓이 된다.
  */
+import { DEFAULT_COLOR } from './constants';
 import { normalizeDate } from './date';
 import type {
   DateISO, Entry, SharedOverridableField, SharedOverrides, SharedSource, SharedTodoItem,
 } from './types';
 
 export const SHARED_OVERRIDABLE_FIELDS: readonly SharedOverridableField[] = [
-  'title', 'note', 'startDate', 'endDate', 'startTime', 'status', 'important', 'urgent',
+  'title', 'note', 'color', 'startDate', 'endDate', 'startTime', 'status', 'important', 'urgent',
 ];
 
 /**
@@ -46,6 +47,7 @@ export const SHARED_OVERRIDABLE_FIELDS: readonly SharedOverridableField[] = [
 export const BLANK_SHARED_SOURCE: SharedSource = {
   title: '',
   note: '',
+  color: DEFAULT_COLOR,
   startDate: '',
   endDate: null,
   startTime: null,
@@ -104,6 +106,7 @@ export function sourceOf(e: Entry): SharedSource {
   return {
     title: e.title,
     note: e.note,
+    color: e.color,
     startDate: normalizeDate(e.startDate),
     endDate: normalizeDate(e.endDate) || null,
     startTime: e.startTime,
@@ -119,6 +122,7 @@ export function sameSource(a: SharedSource | null, b: SharedSource | null): bool
   if (a === null || b === null) return a === b;
   return a.title === b.title
     && a.note === b.note
+    && a.color === b.color
     && a.startDate === b.startDate
     && a.endDate === b.endDate
     && a.startTime === b.startTime
@@ -137,6 +141,7 @@ export function sharedView(item: SharedTodoItem): SharedView {
   return {
     title: pick('title'),
     note: pick('note'),
+    color: pick('color'),
     startDate: pick('startDate'),
     endDate: pick('endDate'),
     startTime: pick('startTime'),

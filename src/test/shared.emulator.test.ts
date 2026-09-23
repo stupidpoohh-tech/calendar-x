@@ -216,6 +216,28 @@ describe('원본 → 공유는 한 방향이다', () => {
     expect(sharedView((await readItem(member, entry.id))!).status).toBe('in-progress');
   });
 
+  it('색도 원본을 따라오고, 공유 화면에서 따로 고칠 수 있다', async () => {
+    const { owner, member } = await connect();
+    const entry = task({ color: 'pink' });
+    await saveEntry(owner, OWNER, entry);
+    await pushSource(owner, BOARD, entry.id, sourceOf(entry), OWNER, NOW);
+    expect(sharedView((await readItem(member, entry.id))!).color).toBe('pink');
+
+    const item = await readItem(member, entry.id);
+    await saveSharedItem(member, BOARD, applyOverrides(item!, { color: 'green' }));
+
+    // 원본의 색은 그대로다.
+    expect((await getDoc(doc(owner, `users/${OWNER}/entries/${entry.id}`))).data()?.color).toBe('pink');
+
+    // 원본 색이 바뀌어도 고쳐 둔 색을 지킨다.
+    const recolored = withDerived({ ...entry, color: 'amber' });
+    await saveEntry(owner, OWNER, recolored);
+    await pushSource(owner, BOARD, recolored.id, sourceOf(recolored), OWNER, NOW);
+    const after = await readItem(member, entry.id);
+    expect(sharedView(after!).color).toBe('green');
+    expect(after?.source?.color).toBe('amber');
+  });
+
   it('원본대로 되돌리면 원본 값이 보이고, 원본은 그대로다', async () => {
     const { owner, member } = await connect();
     const entry = task();

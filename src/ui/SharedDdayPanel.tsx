@@ -14,6 +14,7 @@ import { uid as newId } from '../domain/entry';
 import { isValidDate } from '../domain/date';
 import type { SharedDday } from '../domain/types';
 import { Icon } from './Icon';
+import { PICKER } from './pickerField';
 import { isComposingEnter } from './ime';
 
 /** 기본으로 보여 주는 개수. 나머지는 접힌다. */
@@ -102,6 +103,7 @@ export function SharedDdayPanel({ ddays, todayISO: today, myUid, onSave, onDelet
           <input
             className="shd-in date"
             type="date"
+            {...PICKER}
             value={draft.date}
             onChange={(e) => setDraft({ ...draft, date: e.target.value })}
           />

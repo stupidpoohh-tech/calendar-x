@@ -1468,12 +1468,14 @@
 .sh-empty { margin: 10px 0; font-size: 0.78125rem; color: var(--ink-4); }
 .sh-lst { margin-top: 2px; }
 .sh-row {
-  display: flex; align-items: flex-start; gap: 9px;
+  display: flex; align-items: stretch; gap: 9px;
   padding: 9px 11px; border: 1px solid var(--line); border-radius: var(--radius-sm);
   background: var(--bg);
 }
 .sh-row:hover { border-color: var(--ink-4); }
-.sh-row .tp-check { margin-top: 1px; flex-shrink: 0; }
+.sh-row .tp-check { align-self: flex-start; margin-top: 1px; flex-shrink: 0; }
+/* 달력의 바와 같은 색. 목록과 달력에서 같은 항목이 같아 보여야 한다. */
+.sh-row-bar { width: 3px; align-self: stretch; border-radius: 3px; flex-shrink: 0; }
 .sh-row-main {
   appearance: none; border: none; background: transparent; cursor: pointer;
   flex: 1; min-width: 0; text-align: left;

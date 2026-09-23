@@ -17,6 +17,7 @@ import { fmtDayShort } from '../domain/date';
 import { formatAmount, minorToInput, parseAmountToMinor } from '../domain/money';
 import type { Budget, Entry, Reserve } from '../domain/types';
 import { Icon } from './Icon';
+import { PICKER } from './pickerField';
 
 interface Props {
   budgets: readonly Budget[];
@@ -262,13 +263,13 @@ function BudgetForm({
       <div className="debt-grid">
         <label>시작일
           <input
-            type="date" className="mod-input" value={draft.startDate}
+            type="date" className="mod-input" {...PICKER} value={draft.startDate}
             onChange={(e) => onDraft({ ...draft, startDate: e.target.value || draft.startDate })}
           />
         </label>
         <label>종료일
           <input
-            type="date" className="mod-input" value={draft.endDate} min={draft.startDate}
+            type="date" className="mod-input" {...PICKER} value={draft.endDate} min={draft.startDate}
             onChange={(e) => onDraft({ ...draft, endDate: e.target.value || draft.endDate })}
           />
         </label>

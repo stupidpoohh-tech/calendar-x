@@ -17,11 +17,11 @@
  * 그래서 이 파일의 읽기 쪽은 **세 필드가 아예 없는 문서**를 정상으로 다뤄야 한다 —
  * 없으면 `{}` · false 다.
  */
-import { STATUS_BY_ID } from '../domain/constants';
+import { COLOR_BY_ID, DEFAULT_COLOR, STATUS_BY_ID } from '../domain/constants';
 import { normalizeDate } from '../domain/date';
 import { BLANK_SHARED_SOURCE, SHARED_OVERRIDABLE_FIELDS } from '../domain/shared';
 import type {
-  SharedBoard, SharedDday, SharedInvite, SharedOverrides, SharedPin,
+  ColorId, SharedBoard, SharedDday, SharedInvite, SharedOverrides, SharedPin,
   SharedSource, SharedTodoItem, TaskStatus,
 } from '../domain/types';
 
@@ -36,6 +36,10 @@ const strArr = (v: unknown): string[] =>
 
 const asStatus = (v: unknown): TaskStatus | null =>
   (typeof v === 'string' && v in STATUS_BY_ID ? (v as TaskStatus) : null);
+
+/** 모르는 색은 null 이다. 부르는 쪽이 기본색으로 떨어뜨릴지 키를 버릴지 정한다. */
+const asColor = (v: unknown): ColorId | null =>
+  (typeof v === 'string' && v in COLOR_BY_ID ? (v as ColorId) : null);
 
 const asTime = (v: unknown): string | null =>
   (typeof v === 'string' && /^\d{2}:\d{2}$/.test(v) ? v : null);
@@ -108,6 +112,9 @@ function sourceFromRaw(v: unknown): SharedSource | null {
   return {
     title: str(r.title),
     note: str(r.note),
+    // 모르는 색은 기본색으로 떨어뜨린다. 뜻이 바뀌는 값이 아니라 보이는 값이라,
+    // 거절하면 항목 전체가 안 보이는 쪽이 더 나쁘다.
+    color: asColor(r.color) ?? DEFAULT_COLOR,
     startDate,
     // 뒤집힌 기간은 기간이 아니다. 원본 읽기(`entryFromDoc`)와 같은 규칙으로 접는다.
     endDate: endRaw && startDate && endRaw >= startDate ? endRaw : null,
@@ -139,6 +146,12 @@ function overridesFromRaw(v: unknown): SharedOverrides {
       case 'note':
         if (typeof value === 'string') out.note = value;
         break;
+      case 'color': {
+        // override 는 다르다. 모르는 값이면 키를 버려 원본 색을 따라가게 둔다.
+        const c = asColor(value);
+        if (c) out.color = c;
+        break;
+      }
       case 'startDate': {
         const d = normalizeDate(typeof value === 'string' ? value : '');
         if (d) out.startDate = d;
@@ -198,6 +211,7 @@ function sourceToDoc(s: SharedSource): Raw {
   return {
     title: s.title,
     note: s.note,
+    color: s.color,
     startDate: s.startDate,
     endDate: s.endDate,
     startTime: s.startTime,

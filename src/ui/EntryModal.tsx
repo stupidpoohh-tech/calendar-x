@@ -12,6 +12,7 @@ import type {
   Budget, Debt, Entry, EntryKind, NewMoneyType, RepeatFreq, TaskStatus,
 } from '../domain/types';
 import { Icon } from './Icon';
+import { PICKER } from './pickerField';
 import { isComposingEnter } from './ime';
 
 interface Props {
@@ -405,13 +406,13 @@ export function EntryModal({
             </label>
             <div className="mod-dt">
               <input
-                id="start" type="date" className="mod-input"
+                id="start" type="date" className="mod-input" {...PICKER}
                 value={form.startDate}
                 onChange={(e) => patch({ startDate: e.target.value || computeToday() })}
               />
               {!isMoney && (
                 <input
-                  type="time" className="mod-input time" value={form.startTime ?? ''}
+                  type="time" className="mod-input time" {...PICKER} value={form.startTime ?? ''}
                   onChange={(e) => patch({ startTime: e.target.value || null })}
                   aria-label="시작 시각"
                 />
@@ -424,13 +425,13 @@ export function EntryModal({
               <label className="mod-lbl" htmlFor="end">종료일</label>
               <div className="mod-dt">
                 <input
-                  id="end" type="date" className="mod-input"
+                  id="end" type="date" className="mod-input" {...PICKER}
                   value={form.endDate ?? ''} min={form.startDate}
                   onChange={(e) => patch({ endDate: e.target.value || null })}
                 />
                 {isTask && (
                   <input
-                    type="time" className="mod-input time" value={form.endTime ?? ''}
+                    type="time" className="mod-input time" {...PICKER} value={form.endTime ?? ''}
                     onChange={(e) => patch({ endTime: e.target.value || null })}
                     aria-label="종료 시각"
                   />
@@ -453,7 +454,7 @@ export function EntryModal({
                 </select>
                 {form.recurrence && (
                   <input
-                    type="date" className="mod-input" value={form.recurrence.until ?? ''}
+                    type="date" className="mod-input" {...PICKER} value={form.recurrence.until ?? ''}
                     min={form.startDate}
                     onChange={(e) => patch({
                       recurrence: form.recurrence ? { ...form.recurrence, until: e.target.value || null } : null,

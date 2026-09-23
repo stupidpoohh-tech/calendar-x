@@ -10,6 +10,7 @@ import { addDaysISO } from '../domain/date';
 import { debtLabel, recoveryWindow } from '../domain/recovery';
 import type { RecoveryRule, TimeHM } from '../domain/types';
 import { Icon } from './Icon';
+import { PICKER } from './pickerField';
 
 interface Props {
   rule: RecoveryRule;
@@ -44,12 +45,12 @@ export function RecoveryDebtBar({ rule, todayISO, onSchedule }: Props) {
         <div className="rdebt-b">
           <div className="rdebt-f">
             <input
-              type="date" className="mod-input" value={date} min={todayISO}
+              type="date" className="mod-input" {...PICKER} value={date} min={todayISO}
               onChange={(e) => setDate(e.target.value || todayISO)}
               aria-label="회복할 날짜"
             />
             <input
-              type="time" className="mod-input time" value={time}
+              type="time" className="mod-input time" {...PICKER} value={time}
               onChange={(e) => setTime(e.target.value)}
               aria-label="회복할 시각"
             />

@@ -14,12 +14,13 @@
  * 어느 칸이 지금 공유 화면 값인지 칸마다 '수정됨' 으로 적어 둔다.
  */
 import { useState } from 'react';
-import { STATUSES } from '../domain/constants';
+import { COLORS, STATUSES } from '../domain/constants';
 import {
   applyOverrides, canRevert, revertToSource, sharedView,
 } from '../domain/shared';
-import type { SharedOverridableField, SharedOverrides, SharedTodoItem } from '../domain/types';
+import type { ColorId, SharedOverridableField, SharedOverrides, SharedTodoItem } from '../domain/types';
 import { Icon } from './Icon';
+import { PICKER } from './pickerField';
 import { isComposingEnter } from './ime';
 
 interface Props {
@@ -36,6 +37,7 @@ interface Props {
 interface Form {
   title: string;
   note: string;
+  color: ColorId;
   startDate: string;
   startTime: string;
   status: string;
@@ -67,6 +69,7 @@ export function SharedItemSheet({ item, mode, onSave, onHide, onDelete, onClose 
     const patchFields: SharedOverrides = {
       title,
       note: form.note,
+      color: form.color,
       startDate: form.startDate,
       startTime: form.startTime || null,
       status: asStatus(form.status),
@@ -112,16 +115,33 @@ export function SharedItemSheet({ item, mode, onSave, onHide, onDelete, onClose 
             }}
           />
 
+          {/* 달력에서 항목을 가르는 값이라 제목 바로 아래에 둔다. */}
+          <div className="mod-row">
+            <span className="mod-lbl">색상{mark('color')}</span>
+            <div className="mod-colors">
+              {COLORS.map((c) => (
+                <button
+                  key={c.id}
+                  className={'mod-color' + (form.color === c.id ? ' on' : '')}
+                  style={{ background: c.hex }}
+                  onClick={() => patch({ color: c.id })}
+                  aria-label={c.label}
+                  aria-pressed={form.color === c.id}
+                />
+              ))}
+            </div>
+          </div>
+
           <div className="mod-row">
             <label className="mod-lbl" htmlFor="sh-date">날짜{mark('startDate')}</label>
             <div className="mod-dt">
               <input
-                id="sh-date" type="date" className="mod-input"
+                id="sh-date" type="date" className="mod-input" {...PICKER}
                 value={form.startDate}
                 onChange={(e) => patch({ startDate: e.target.value })}
               />
               <input
-                type="time" className="mod-input time" value={form.startTime}
+                type="time" className="mod-input time" {...PICKER} value={form.startTime}
                 onChange={(e) => patch({ startTime: e.target.value })}
                 aria-label="시각"
               />
@@ -214,6 +234,7 @@ function toForm(item: SharedTodoItem): Form {
   return {
     title: v.title,
     note: v.note,
+    color: v.color,
     startDate: v.startDate,
     startTime: v.startTime ?? '',
     status: v.status,

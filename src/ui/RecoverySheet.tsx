@@ -16,6 +16,7 @@ import {
 } from '../domain/recovery';
 import type { Entry, RecoveryRule, TimeHM } from '../domain/types';
 import { Icon } from './Icon';
+import { PICKER } from './pickerField';
 import { RecoveryOptionAdd, RecoveryOptionManager } from './RecoveryOptionManager';
 
 interface Props {
@@ -155,12 +156,12 @@ export function RecoverySheet({
                 <label className="mod-lbl" htmlFor="rec-date">옮길 날</label>
                 <div className="mod-dt">
                   <input
-                    id="rec-date" type="date" className="mod-input"
+                    id="rec-date" type="date" className="mod-input" {...PICKER}
                     value={moveDate} min={todayISO}
                     onChange={(e) => setMoveDate(e.target.value || entry.startDate)}
                   />
                   <input
-                    type="time" className="mod-input time" value={moveTime}
+                    type="time" className="mod-input time" {...PICKER} value={moveTime}
                     onChange={(e) => setMoveTime(e.target.value)}
                     aria-label="옮길 시각"
                   />

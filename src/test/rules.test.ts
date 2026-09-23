@@ -498,7 +498,8 @@ describe('같이 보기 — 보드 안의 자료', () => {
   const item = (over: Record<string, unknown> = {}) => ({
     sourceEntryId: 'task-a',
     source: {
-      title: '병원 예약', note: '', startDate: '2026-09-25', endDate: null, startTime: null,
+      title: '병원 예약', note: '', color: 'blue',
+      startDate: '2026-09-25', endDate: null, startTime: null,
       status: 'planned', important: false, urgent: false, recurring: false,
     },
     localOnly: false,
@@ -573,6 +574,20 @@ describe('같이 보기 — 보드 안의 자료', () => {
     await assertFails(setDoc(
       doc(db(ME), `sharedBoards/${BOARD}/items/task-b`),
       item({ overrides: { title: 'x'.repeat(501) } }),
+    ));
+  });
+
+  it('색을 함께 받는다 — 달력에서 항목을 가르는 값이다', async () => {
+    await assertSucceeds(setDoc(
+      doc(db(ME), `sharedBoards/${BOARD}/items/task-a`),
+      item({ source: { ...item().source, color: 'pink' }, overrides: { color: 'green' } }),
+    ));
+  });
+
+  it('색 자리에 긴 문자열을 넣으면 거부한다', async () => {
+    await assertFails(setDoc(
+      doc(db(ME), `sharedBoards/${BOARD}/items/task-a`),
+      item({ overrides: { color: 'x'.repeat(41) } }),
     ));
   });
 

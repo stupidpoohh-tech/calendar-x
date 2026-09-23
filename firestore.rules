@@ -241,6 +241,8 @@ service cloud.firestore {
           && (!('source' in data()) || data().source == null || (
                data().source.title is string && data().source.title.size() <= 500
                && isDateISO(data().source.startDate)
+               && data().source.get('color', '') is string
+               && data().source.get('color', '').size() <= 40
              ))
           && (!('overrides' in data()) || (
                data().overrides is map
@@ -248,6 +250,8 @@ service cloud.firestore {
                && data().overrides.get('title', '').size() <= 500
                && data().overrides.get('note', '') is string
                && data().overrides.get('note', '').size() <= 20000
+               && data().overrides.get('color', '') is string
+               && data().overrides.get('color', '').size() <= 40
              ))
           && (!('hidden' in data()) || data().hidden is bool)
           && (!('localOnly' in data()) || data().localOnly is bool);

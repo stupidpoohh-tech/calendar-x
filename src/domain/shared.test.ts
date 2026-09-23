@@ -46,11 +46,21 @@ describe('공유 대상', () => {
     expect(isShareableTask({ ...task(), virtual: true }, TODAY)).toBe(false);
   });
 
-  it('공유하는 필드만 뽑는다 — 색·태그·장소는 가지 않는다', () => {
+  it('공유하는 필드만 뽑는다 — 태그·장소는 가지 않는다', () => {
     const source = sourceOf(task({ color: 'pink', tags: ['비밀'], location: '강남' }));
     expect(Object.keys(source).sort()).toEqual([
-      'endDate', 'important', 'note', 'recurring', 'startDate', 'startTime', 'status', 'title', 'urgent',
+      'color', 'endDate', 'important', 'note', 'recurring',
+      'startDate', 'startTime', 'status', 'title', 'urgent',
     ]);
+  });
+
+  /*
+    색은 달력에서 항목을 가르는 값이다. 내 달력에서 빨강이던 일이 공유 화면에서
+    파랑이면 같은 일로 읽히지 않는다.
+  */
+  it('원본의 색을 물려받는다', () => {
+    expect(sourceOf(task({ color: 'pink' })).color).toBe('pink');
+    expect(sharedView(mirrored(task({ color: 'green' }))).color).toBe('green');
   });
 
   it('반복 여부는 표식으로만 넘긴다', () => {
@@ -245,6 +255,22 @@ describe('고치지 않은 필드는 원본을 따라간다', () => {
     expect(overriddenFields(back)).toEqual([]);
   });
 
+  it('색만 고쳐 두면 원본 색이 바뀌어도 고친 색을 지킨다', () => {
+    const edited = applyOverrides(mirrored(task({ color: 'blue' })), { color: 'pink' });
+    expect(sharedView(edited).color).toBe('pink');
+
+    const afterOwner = withSource(edited, 'task-a', sourceOf(task({ color: 'green' })), OWNER);
+    expect(sharedView(afterOwner).color).toBe('pink');
+    // 원본 쪽 값은 따라왔다 — 되돌리면 초록이 보인다.
+    expect(afterOwner.source?.color).toBe('green');
+    expect(sharedView(revertToSource(afterOwner)).color).toBe('green');
+  });
+
+  it('원본과 같은 색으로 고르면 override 가 되지 않는다', () => {
+    const saved = applyOverrides(mirrored(task({ color: 'blue' })), { color: 'blue' });
+    expect(overriddenFields(saved)).toEqual([]);
+  });
+
   it('기간 없음으로 고친 것과 고치지 않은 것은 다르다', () => {
     const withRange = mirrored(task({ endDate: '2026-09-28' }));
     expect(sharedView(withRange).endDate).toBe('2026-09-28');
@@ -289,6 +315,8 @@ describe('공유 화면 전용 항목', () => {
     expect(local.localOnly).toBe(true);
     expect(local.createdBy).toBe('member-uid');
     expect(sharedView(local).title).toBe('토요일 같이 장보기');
+    // 원본이 없어도 색은 있다 — 달력에 그릴 값이 필요하다.
+    expect(sharedView(local).color).toBe('blue');
   });
 
   it('값은 전부 자기 것이다 — 비교할 원본이 없어 override 가 지워지지 않는다', () => {
