@@ -99,6 +99,16 @@ export function BudgetPanel({
         {summary && <span className="debt-h-n num">{summary}</span>}
       </button>
 
+      {collapsed && states.length > 0 && (
+        <div className="bp-compact">
+          {states.map(({ budget, spentMinor, remainingMinor }) => (
+            <p key={budget.id}>
+              <span>{budget.name}</span>
+              <span className="num">사용 {formatAmount(spentMinor)} · 남음 {formatAmount(remainingMinor)} {budget.currency}</span>
+            </p>
+          ))}
+        </div>
+      )}
       {!collapsed && (
         <div className="debt-b">
           {states.map((s) => (
