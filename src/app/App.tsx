@@ -936,7 +936,7 @@ function Workspace({ uid, user, onSignOut }: WorkspaceProps) {
 
   return (
     <div className="app" data-lens={lens} style={{ ['--lens' as string]: `var(${lensDef.accentVar})` }}>
-      <header className="topbar">
+      <header className="topbar" data-space={sharedOpen ? 'shared' : 'me'}>
         <div className="header-left">
         <div className="brand">
           {/*
@@ -957,13 +957,13 @@ function Workspace({ uid, user, onSignOut }: WorkspaceProps) {
           캘린더가 그만큼 밀린다. 로그인해야 공유가 뜻이 있으므로 그 전에는 띄우지 않는다.
         */}
         {!isAnon && (
-          <SpaceSwitch
+          <div className="space-context"><SpaceSwitch
             space={sharedOpen ? 'shared' : 'me'}
             hasBoard={!!shared.board}
             ready={shared.ready}
             onChange={(next) => setSharedOpen(next === 'shared')}
             onStart={() => setSharedSheet('start')}
-          />
+          /></div>
         )}
 
           {!sharedOpen && (
@@ -1032,7 +1032,7 @@ function Workspace({ uid, user, onSignOut }: WorkspaceProps) {
               if ((e.target as HTMLElement).closest('button')) e.currentTarget.closest('details')?.removeAttribute('open');
             }}>
               {!sharedOpen && <>
-                <button onClick={() => set('view', 'calendar')} aria-pressed={view === 'calendar'}><Icon.Calendar size={16} />캘린더 보기</button>
+                <button onClick={() => set('view', 'calendar')} aria-pressed={view === 'calendar'}><Icon.Calendar size={16} />월간 보기</button>
                 <button onClick={() => set('view', 'list')} aria-pressed={view === 'list'}><Icon.List size={16} />리스트 보기</button>
                 <button onClick={() => setShowFilters((x) => !x)} aria-expanded={showFilters}><Icon.Filter size={16} />필터{hasActiveFilter(filters) ? ' · 적용 중' : ''}</button>
               </>}
@@ -1049,7 +1049,7 @@ function Workspace({ uid, user, onSignOut }: WorkspaceProps) {
             {(['calendar', 'list'] as ViewId[]).map((v) => (
               <button key={v} className={'seg-btn' + (view === v ? ' on' : '')} aria-label={v === 'calendar' ? '캘린더 보기' : '리스트 보기'} aria-pressed={view === v} onClick={() => set('view', v)}>
                 {v === 'calendar' ? <Icon.Calendar size={14} /> : <Icon.List size={14} />}
-                <span className="lbl">{v === 'calendar' ? '캘린더' : '리스트'}</span>
+                <span className="lbl">{v === 'calendar' ? '월간' : '리스트'}</span>
               </button>
             ))}
           </div>
