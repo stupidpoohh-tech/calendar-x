@@ -306,8 +306,17 @@ service cloud.firestore {
           && (sourceUntouched() || ownsIt());
 
         // 원본이 있는 항목은 주인만 지운다. 남의 것을 지워 봐야 맞추기가 되살린다.
+        /*
+          없는 문서를 지우는 것은 아무 일도 아니다.
+
+          `resource` 는 문서가 없으면 null 이고, 그때 `resource.data` 를 보면 규칙이
+          거절한다. 지우려던 것이 이미 없다는 이유로 쓰기가 실패하면, 화면은 "저장하지
+          못했습니다" 를 띄우고 그 쓰기는 다시 보내도 영영 실패한다.
+        */
         allow delete: if isBoardMember(boardId)
-          && (resource.data.get('localOnly', false) == true || ownsIt());
+          && (resource == null
+              || resource.data.get('localOnly', false) == true
+              || ownsIt());
       }
 
       /** 공유 고정메모. 개인 `users/{uid}/pins` 와 다른 자료다. */

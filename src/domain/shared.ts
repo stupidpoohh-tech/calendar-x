@@ -97,6 +97,35 @@ export function isShareableTask(e: Entry, todayISO: DateISO): boolean {
   return !isPastTask(e, todayISO);
 }
 
+/**
+ * 저장 한 번이 공유에 무엇을 해야 하는가.
+ *
+ *   push    올린다 (새로 올리거나 값을 갱신한다)
+ *   remove  내린다
+ *   none    **아무것도 보내지 않는다**
+ *
+ * ── 올라간 적 없는 것은 지우지 않는다 ──────────────────────────
+ *
+ * 예전에는 공유 대상이 아니면 무조건 지우기를 보냈다. 그래서 아이디어나 가계부를
+ * 새로 적을 때마다 보드에 있지도 않은 문서를 지우는 쓰기가 나갔고, 규칙이 그것을
+ * 거절해 "저장하지 못했습니다" 가 떴다 — 개인 항목은 멀쩡히 저장됐는데도 실패한
+ * 것처럼 보였다.
+ *
+ * 그래서 **직전 값이 공유 대상이었을 때만** 내린다. `before` 가 null 이면 새 항목이고,
+ * 새 항목은 보드에 있을 수 없다.
+ *
+ * 시간이 흘러 지난 일정이 된 것은 여기서 잡히지 않는다 (직전 값도 이미 지난 일정이라
+ * `remove` 가 아니라 `none` 이다). 그것은 저장과 무관하게 일어나는 일이고, 화면을
+ * 열 때 맞추기가 정리한다 (`planMirrorSync`).
+ */
+export function sharedChange(
+  before: Entry | null, after: Entry, todayISO: DateISO,
+): 'push' | 'remove' | 'none' {
+  if (isShareableTask(after, todayISO)) return 'push';
+  if (before && isShareableTask(before, todayISO)) return 'remove';
+  return 'none';
+}
+
 /** 이 항목이 오늘보다 앞에서 끝났는가. */
 export function isPastTask(e: Pick<Entry, 'startDate' | 'endDate' | 'isRecurring' | 'recurrence'>, todayISO: DateISO): boolean {
   const today = normalizeDate(todayISO);

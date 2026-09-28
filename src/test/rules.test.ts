@@ -698,6 +698,20 @@ describe('같이 보기 — 보드 안의 자료', () => {
     await assertSucceeds(deleteDoc(doc(db(ME), `sharedBoards/${BOARD}/items/task-a`)));
   });
 
+  /*
+    지우려던 것이 이미 없다는 이유로 쓰기가 실패하면 화면은 "저장하지 못했습니다" 를
+    띄우고, 그 쓰기는 다시 보내도 영영 실패한다. 아무 일도 아닌 것은 통과시킨다.
+  */
+  it('없는 항목을 지우는 것은 통과한다 — 아무 일도 아니다', async () => {
+    await assertSucceeds(deleteDoc(doc(db(ME), `sharedBoards/${BOARD}/items/nothing-here`)));
+    await assertSucceeds(deleteDoc(doc(db(OTHER), `sharedBoards/${BOARD}/items/nothing-here`)));
+  });
+
+  it('그래도 남의 항목은 지우지 못한다', async () => {
+    await seedItem('mine', { createdBy: ME });
+    await assertFails(deleteDoc(doc(db(OTHER), `sharedBoards/${BOARD}/items/mine`)));
+  });
+
   it('공유 전용 항목은 member 누구나 지운다', async () => {
     await seedItem('local-1', { sourceEntryId: null, source: null, localOnly: true, createdBy: ME });
     await assertSucceeds(deleteDoc(doc(db(OTHER), `sharedBoards/${BOARD}/items/local-1`)));

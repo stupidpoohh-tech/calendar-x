@@ -7,12 +7,12 @@
  *   3. 고친 필드는 원본이 바뀌어도 유지된다.
  */
 import { describe, expect, it } from 'vitest';
-import { newEntry, withDerived } from './entry';
+import { convertKind, newEntry, withDerived } from './entry';
 import {
   applyOverrides, canRevert, collectionProgress, isHiddenFor, isOverridden, isPastTask,
   isShareableTask, itemsOfCollection, newCollection, newCollectionItem, newLocalItem, newNote,
   noteSummary, noteTitle, overriddenFields, ownsMirror, pinnedNote, repinNotes, revertToSource,
-  sameSource, scheduleFromCollectionItem, scheduleGroups, setHiddenFor, sharedSortKey,
+  sameSource, scheduleFromCollectionItem, scheduleGroups, setHiddenFor, sharedChange, sharedSortKey,
   sharedTitle, sharedView, shortName, sortNotes, sourceOf, toggleCollectionItem, withSource,
   partnerName, newInviteCode, inviteUrl,
 } from './shared';
@@ -561,5 +561,58 @@ describe('메모', () => {
     const changed = repinNotes(notes, 'a', false, 'NOW');
     expect(changed.map((n) => n.id)).toEqual(['a']);
     expect(changed[0]!.pinned).toBe(false);
+  });
+});
+
+/*
+  저장 한 번이 공유에 무엇을 해야 하는가.
+
+  한때 공유 대상이 아니면 무조건 지우기를 보냈다. 그래서 아이디어나 가계부를 **새로
+  적을 때마다** 보드에 있지도 않은 문서를 지우는 쓰기가 나갔고, 규칙이 그것을 거절해
+  "저장하지 못했습니다" 가 떴다 — 개인 항목은 멀쩡히 저장됐는데도 실패로 보였다.
+*/
+describe('저장이 공유에 하는 일', () => {
+  const idea = (patch: Partial<Entry> = {}) =>
+    newEntry('idea', { id: 'i1', title: '떠오른 것', startDate: '2026-09-25', ...patch });
+  const money = (patch: Partial<Entry> = {}) =>
+    newEntry('money', { id: 'm1', title: '커피', startDate: '2026-09-25', ...patch });
+
+  it('새 아이디어 · 가계부는 아무것도 보내지 않는다', () => {
+    expect(sharedChange(null, idea(), TODAY)).toBe('none');
+    expect(sharedChange(null, money(), TODAY)).toBe('none');
+  });
+
+  it('아이디어를 고쳐도 아무것도 보내지 않는다', () => {
+    expect(sharedChange(idea(), idea({ title: '고친 것' }), TODAY)).toBe('none');
+  });
+
+  it('새 할 일은 올린다', () => {
+    expect(sharedChange(null, task(), TODAY)).toBe('push');
+  });
+
+  it('할 일을 아이디어로 내리면 공유에서 지운다', () => {
+    expect(sharedChange(task(), convertKind(task(), 'idea'), TODAY)).toBe('remove');
+  });
+
+  it('비공개로 표시하면 공유에서 지운다', () => {
+    expect(sharedChange(task(), withDerived({ ...task(), keepPrivate: true }), TODAY)).toBe('remove');
+  });
+
+  it('이미 비공개였으면 다시 지우지 않는다', () => {
+    const hidden = withDerived({ ...task(), keepPrivate: true });
+    expect(sharedChange(hidden, withDerived({ ...hidden, title: '고침' }), TODAY)).toBe('none');
+  });
+
+  /*
+    시간이 흘러 지난 것이 된 항목은 저장과 무관하게 생긴다. 직전 값도 이미 지난 일정이라
+    여기서는 `none` 이고, 보드 정리는 화면을 열 때 맞추기가 한다.
+  */
+  it('이미 지나간 일정은 저장 때 건드리지 않는다', () => {
+    const past = task({ startDate: '2026-09-01' });
+    expect(sharedChange(past, task({ startDate: '2026-09-02' }), TODAY)).toBe('none');
+  });
+
+  it('앞으로 오는 일정을 지난 날로 옮기면 지운다', () => {
+    expect(sharedChange(task(), task({ startDate: '2026-09-01' }), TODAY)).toBe('remove');
   });
 });

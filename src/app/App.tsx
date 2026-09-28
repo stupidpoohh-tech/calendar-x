@@ -18,7 +18,7 @@ import { LENSES, LENS_BY_ID, SHARED_TABS } from '../domain/constants';
 import { endOfMonth, fmtMonthTitle, startOfMonth, toISO } from '../domain/date';
 import { convertKind, displayTitle, newEntry, uid as newId, withDerived } from '../domain/entry';
 import {
-  INVITE_PARAM, isShareableTask, newNote, repinNotes, sharedTitle,
+  INVITE_PARAM, isShareableTask, newNote, repinNotes, sharedChange, sharedTitle,
 } from '../domain/shared';
 import { formatAmount } from '../domain/money';
 import { applyFilters, collectTags, emptyFilters, hasActiveFilter } from '../domain/filters';
@@ -369,16 +369,22 @@ function Workspace({ uid, user, onSignOut }: WorkspaceProps) {
    * 정합성보다 나쁘다. 실패한 공유 갱신은 다른 쓰기와 같은 목록에 남고, 남은 차이는
    * 같이 보기 화면을 열 때 맞추기가 메운다.
    *
-   * 공유 대상이 아닌 항목은 공유에서 **지운다.** 아이디어 · 가계부로 옮겼거나, 날짜를
-   * 지난 날로 고쳤거나, 애초에 지난 일정이면 상대 화면에 남을 이유가 없다. 보드가
-   * 없으면 두 호출 모두 아무것도 하지 않는다.
+   * 공유 대상이 아닌 항목은 공유에서 **지운다.** 할 일을 아이디어 · 가계부로 옮겼거나,
+   * 비공개로 표시했으면 상대 화면에 남을 이유가 없다. 보드가 없으면 두 호출 모두
+   * 아무것도 하지 않는다.
+   *
+   * **올라간 적 없는 것은 지우지 않는다** (`sharedChange`). 무엇을 보낼지는 저장 전
+   * 값과 함께 봐야 정해진다 — 그 판정은 도메인에 있다.
    */
   const persist = useCallback((e: Entry) => {
     if (isAnon || !uid) { void promptLogin(); return; }
     commit({ kind: 'entry', label: '항목', summary: displayTitle(e), payload: e });
-    if (isShareableTask(e, today)) shared.pushEntry(e);
-    else shared.removeEntry(e.id);
-  }, [uid, isAnon, promptLogin, commit, shared, today]);
+    // 저장 전 값. 새 항목이면 없고, 없으면 보드에도 없다.
+    const before = store.entries.find((x) => x.id === baseIdOf(e.id)) ?? null;
+    const change = sharedChange(before, e, today);
+    if (change === 'push') shared.pushEntry(e);
+    else if (change === 'remove') shared.removeEntry(e.id);
+  }, [uid, isAnon, promptLogin, commit, shared, today, store.entries]);
 
   const handleSave = useCallback((e: Entry) => {
     persist(e);
@@ -533,7 +539,8 @@ function Workspace({ uid, user, onSignOut }: WorkspaceProps) {
       kind: 'entryDelete', label: '항목 삭제',
       summary: displayTitle(e), payload: { id: baseIdOf(e.id) },
     });
-    shared.removeEntry(baseIdOf(e.id));
+    // 올라간 적 없는 항목은 지울 것도 없다 — 보내 봐야 규칙이 거절한다.
+    if (isShareableTask(e, today)) shared.removeEntry(baseIdOf(e.id));
     dialog.toast('삭제했습니다.');
   }, [uid, isAnon, promptLogin, dialog, closeModal, recovery, commit, shared, today]);
 
