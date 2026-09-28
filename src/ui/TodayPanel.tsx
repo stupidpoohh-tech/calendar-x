@@ -124,9 +124,9 @@ export function TodayPanel({
           <h2 className="tp-t">오늘 <span className="tp-d">{fmtDayShort(todayISO)}</span></h2>
           <span className="tp-sum">
             할 일 {doneCount}/{tasks.length}
-            {money.length > 0 && ` · 가계부 ${money.length}건`}
-            {ideas.length > 0 && ` · 아이디어 ${ideas.length}건`}
-            {collapsed && tideLimit != null && ` · ₩ ${formatAmount(tideLimit)}`}
+            {money.length > 0 && ` · 입출금 ${money.length}`}
+            {ideas.length > 0 && ` · 노트 ${ideas.length}`}
+            
           </span>
         </span>
         <Icon.Chevron size={14} dir={collapsed ? 'right' : 'down'} />

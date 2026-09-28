@@ -22,8 +22,8 @@ const DEFAULTS: Prefs = {
   sharedView: 'list',
   weekStart: 'mon',
   pinCollapsed: {},
-  debtsCollapsed: false,
-  budgetsCollapsed: false,
+  debtsCollapsed: true,
+  budgetsCollapsed: true,
   todayCollapsed: true,
   todayMoneyCollapsed: false,
   moneyCardCollapsed: false,
@@ -33,8 +33,10 @@ function read(): Prefs {
   try {
     const raw = localStorage.getItem(PREF_KEY);
     if (!raw) return DEFAULTS;
-    const parsed = JSON.parse(raw) as Partial<Prefs>;
-    return { ...DEFAULTS, ...parsed, pinCollapsed: { ...(parsed.pinCollapsed ?? {}) } };
+    const parsed = JSON.parse(raw) as Partial<Prefs> & { summaryLayoutVersion?: number };
+    // Apply the compact summary layout once; subsequent expand/collapse choices persist.
+    const compact = parsed.summaryLayoutVersion === 1 ? {} : { todayCollapsed: true, budgetsCollapsed: true, debtsCollapsed: true };
+    return { ...DEFAULTS, ...parsed, ...compact, pinCollapsed: { ...(parsed.pinCollapsed ?? {}) } };
   } catch {
     return DEFAULTS;
   }
@@ -49,7 +51,7 @@ export function usePrefs() {
   }, []);
 
   useEffect(() => {
-    try { localStorage.setItem(PREF_KEY, JSON.stringify(prefs)); } catch { /* 저장소 접근 불가 */ }
+    try { localStorage.setItem(PREF_KEY, JSON.stringify({ ...prefs, summaryLayoutVersion: 1 })); } catch { /* 저장소 접근 불가 */ }
   }, [prefs]);
 
   // 'system' 이면 data-theme 을 지워 prefers-color-scheme 이 결정하게 둔다.
