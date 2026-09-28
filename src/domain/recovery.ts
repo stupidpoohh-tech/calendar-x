@@ -86,6 +86,8 @@ export function defaultRecoveryRule(): RecoveryRule {
     nextDueAt: null,
     activeEntryId: null,
     debtCount: 0,
+    completedEntryId: null,
+    prevCompletedAt: null,
     defaultMemo: '',
     defaultOptionIds: DEFAULT_RECOVERY_OPTIONS.map((o) => o.id),
     options: DEFAULT_RECOVERY_OPTIONS.map((o) => ({ ...o })),
@@ -187,7 +189,8 @@ export interface RecoveryTransition {
 export function generateRecovery(rule: RecoveryRule, todayISO: DateISO): RecoveryTransition | null {
   if (!shouldGenerate(rule, todayISO) || !rule.nextDueAt) return null;
   const entry = buildRecoveryEntry(rule, rule.nextDueAt);
-  return { rule: { ...rule, activeEntryId: entry.id }, entry };
+  // 새 회차가 생기면 앞 회차의 되돌리기는 끝난다.
+  return { rule: { ...rule, activeEntryId: entry.id, completedEntryId: null, prevCompletedAt: null }, entry };
 }
 
 /**
@@ -213,8 +216,54 @@ export function completeRecovery(
       lastCompletedAt: on,
       nextDueAt: debt === 0 ? nextDueFrom(on, rule.intervalDays) : null,
       activeEntryId: null,
+      // 되돌리기 한 번을 위한 자리. 직전 값을 여기에 옮겨 둔다.
+      completedEntryId: entry.id,
+      prevCompletedAt: rule.lastCompletedAt,
     },
     entry: withDerived({ ...entry, task: { ...task, status: 'done' } }),
+  };
+}
+
+/**
+ * 방금 완료한 회차를 되돌릴 수 있는가.
+ *
+ * 완료는 항목의 상태만 바꾸는 것이 아니라 빚과 다음 예정일까지 옮긴다. 그래서 잘못
+ * 체크했을 때 체크만 푸는 것으로는 모자라고, 규칙도 함께 물러나야 한다.
+ *
+ * 되돌릴 수 있는 것은 **방금 완료한 그 한 회차**뿐이다. 다음 회차가 이미 만들어졌으면
+ * (`activeEntryId`) 되돌리지 않는다 — 그러면 같은 규칙이 회차 둘을 동시에 가리킨다.
+ */
+export function canUndoComplete(rule: RecoveryRule, entry: Entry): boolean {
+  return entry.recovery != null
+    && entry.task?.status === 'done'
+    && rule.activeEntryId === null
+    && rule.completedEntryId === entry.id;
+}
+
+/**
+ * 완료 되돌리기.
+ *
+ * `completeRecovery` 가 옮긴 것을 그대로 물린다 — 빚은 갚기 전으로, 마지막 완료일은
+ * 그 전 값으로, 예정일은 이 회차의 날짜로, 활성 회차는 다시 이 항목으로.
+ *
+ * 예정일을 `nextDueFrom` 으로 다시 계산하지 않는다. 이 회차는 옮겨졌을 수도 있고,
+ * 그때의 날짜는 항목이 들고 있다.
+ */
+export function undoCompleteRecovery(rule: RecoveryRule, entry: Entry): RecoveryTransition {
+  if (!canUndoComplete(rule, entry)) return { rule, entry };
+  const task = entry.task ?? { status: 'planned' as const, important: false, urgent: false, order: 0 };
+  return {
+    rule: {
+      ...rule,
+      // 빚을 갚는 회차였다면 그 빚이 되살아난다.
+      debtCount: entry.recovery?.repayment ? rule.debtCount + 1 : rule.debtCount,
+      lastCompletedAt: rule.prevCompletedAt,
+      nextDueAt: normalizeDate(entry.startDate) || rule.nextDueAt,
+      activeEntryId: entry.id,
+      completedEntryId: null,
+      prevCompletedAt: null,
+    },
+    entry: withDerived({ ...entry, task: { ...task, status: 'planned' } }),
   };
 }
 
@@ -260,7 +309,10 @@ export function scheduleDebtRecovery(
 ): RecoveryTransition {
   const date = normalizeDate(dateISO);
   const entry = buildRecoveryEntry(rule, date, { repayment: true, startTime: time });
-  return { rule: { ...rule, nextDueAt: date, activeEntryId: entry.id }, entry };
+  return {
+    rule: { ...rule, nextDueAt: date, activeEntryId: entry.id, completedEntryId: null, prevCompletedAt: null },
+    entry,
+  };
 }
 
 // ---------- 옵션 관리 ----------

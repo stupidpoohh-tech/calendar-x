@@ -10,7 +10,8 @@
  */
 import { describe, expect, it } from 'vitest';
 import {
-  addOptionFromEntry, addRecoveryOption, buildRecoveryEntry, completeRecovery, defaultRecoveryRule,
+  addOptionFromEntry, addRecoveryOption, buildRecoveryEntry, canUndoComplete,
+  completeRecovery, defaultRecoveryRule, undoCompleteRecovery,
   generateRecovery, moveRecovery, moveRecoveryOption, nextDueFrom, primeRule,
   recoveryOptionChoices, removeRecoveryOption, renameRecoveryOption,
   scheduleDebtRecovery, setEntryMemo, setRecoveryInterval, shouldGenerate,
@@ -509,5 +510,102 @@ describe('항목의 모습', () => {
     const e = buildRecoveryEntry(r, '2026-09-04');
     e.recovery!.options[0]!.label = '바뀜';
     expect(r.options[0]!.label).toBe('개인 프로젝트');
+  });
+});
+
+/*
+  완료는 항목의 상태만 바꾸는 것이 아니라 **빚과 다음 예정일까지** 옮긴다. 그래서 잘못
+  체크했을 때 체크만 푸는 것으로는 모자라다 — 규칙도 함께 물러나야, 되돌린 사람이 설정을
+  손으로 맞추지 않아도 된다.
+*/
+describe('완료 되돌리기', () => {
+  /** 9/1 완료 → 9/4 예정 → 지평선에서 한 건 생성 → 9/4 완료. */
+  function completedOnce() {
+    const start = primeRule(rule({ lastCompletedAt: '2026-09-01', nextDueAt: '2026-09-04' }), '2026-09-03');
+    const made = generateRecovery(start, '2026-09-03')!;
+    return completeRecovery(made.rule, made.entry!, '2026-09-04');
+  }
+
+  it('되돌리면 항목이 예정으로 돌아간다', () => {
+    const done = completedOnce();
+    const back = undoCompleteRecovery(done.rule, done.entry!);
+    expect(back.entry?.task?.status).toBe('planned');
+  });
+
+  it('마지막 완료일이 그 전 값으로 돌아간다', () => {
+    const done = completedOnce();
+    expect(done.rule.lastCompletedAt).toBe('2026-09-04');
+
+    const back = undoCompleteRecovery(done.rule, done.entry!);
+    // 완료하기 전의 값이다. 오늘로 메우거나 비우지 않는다.
+    expect(back.rule.lastCompletedAt).toBe('2026-09-01');
+  });
+
+  /** 예정일은 다시 계산하지 않는다 — 이 회차는 옮겨졌을 수도 있고, 날짜는 항목이 안다. */
+  it('예정일과 활성 회차가 이 항목으로 돌아간다', () => {
+    const done = completedOnce();
+    expect(done.rule.nextDueAt).toBe('2026-09-07');
+
+    const back = undoCompleteRecovery(done.rule, done.entry!);
+    expect(back.rule.nextDueAt).toBe('2026-09-04');
+    expect(back.rule.activeEntryId).toBe(done.entry!.id);
+  });
+
+  it('옮겨 둔 회차는 옮긴 날짜로 돌아간다', () => {
+    const start = primeRule(rule({ lastCompletedAt: '2026-09-01', nextDueAt: '2026-09-04' }), '2026-09-03');
+    const made = generateRecovery(start, '2026-09-03')!;
+    const moved = moveRecovery(made.rule, made.entry!, '2026-09-06', '19:00');
+    const done = completeRecovery(moved.rule, moved.entry!, '2026-09-06');
+
+    const back = undoCompleteRecovery(done.rule, done.entry!);
+    expect(back.rule.nextDueAt).toBe('2026-09-06');
+  });
+
+  /** 빚을 갚는 회차였다면 그 빚이 되살아난다. 갚지 않은 것이 되니까. */
+  it('빚을 갚은 회차를 되돌리면 빚이 되살아난다', () => {
+    const missed = skipRecovery(rule({ nextDueAt: '2026-09-04', activeEntryId: 'e1' }));
+    expect(missed.rule.debtCount).toBe(1);
+
+    const again = scheduleDebtRecovery(missed.rule, '2026-09-06', '19:00');
+    const done = completeRecovery(again.rule, again.entry!, '2026-09-06');
+    expect(done.rule.debtCount).toBe(0);
+
+    const back = undoCompleteRecovery(done.rule, done.entry!);
+    expect(back.rule.debtCount).toBe(1);
+    // 빚이 남았으므로 다음 예정은 이 회차 그대로다.
+    expect(back.rule.activeEntryId).toBe(done.entry!.id);
+  });
+
+  it('되돌린 뒤에는 다시 되돌릴 것이 없다', () => {
+    const done = completedOnce();
+    expect(canUndoComplete(done.rule, done.entry!)).toBe(true);
+
+    const back = undoCompleteRecovery(done.rule, done.entry!);
+    expect(canUndoComplete(back.rule, back.entry!)).toBe(false);
+    // 못 되돌릴 것을 넣으면 아무것도 바꾸지 않는다.
+    expect(undoCompleteRecovery(back.rule, back.entry!)).toEqual({ rule: back.rule, entry: back.entry });
+  });
+
+  /*
+    다음 회차가 이미 만들어졌으면 되돌리지 않는다. 그때 되돌리면 같은 규칙이 회차 둘을
+    동시에 가리킨다.
+  */
+  it('다음 회차가 잡혔으면 되돌릴 수 없다', () => {
+    const done = completedOnce();
+    const next = generateRecovery(primeRule(done.rule, '2026-09-06'), '2026-09-06');
+    expect(next).not.toBe(null);
+    expect(canUndoComplete(next!.rule, done.entry!)).toBe(false);
+  });
+
+  it('완료한 적 없는 회차는 되돌릴 수 없다', () => {
+    const start = primeRule(rule({ nextDueAt: '2026-09-04' }), '2026-09-03');
+    const made = generateRecovery(start, '2026-09-03')!;
+    expect(canUndoComplete(made.rule, made.entry!)).toBe(false);
+  });
+
+  it('회복이 아닌 항목은 되돌릴 수 없다', () => {
+    const done = completedOnce();
+    const plain = newEntry('task', { id: done.entry!.id, title: '보통 할 일' });
+    expect(canUndoComplete(done.rule, { ...plain, task: { status: 'done', important: false, urgent: false, order: 0 } })).toBe(false);
   });
 });

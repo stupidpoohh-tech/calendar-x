@@ -553,7 +553,23 @@ function Workspace({ uid, user, onSignOut }: WorkspaceProps) {
     */
     if (isRecoveryEntry(base) && status === 'done') {
       recovery.complete(base, today);
-      dialog.toast('회복을 완료했습니다.');
+      dialog.toast('회복을 완료했습니다. 잘못 눌렀으면 체크를 다시 풀면 됩니다.');
+      return;
+    }
+    /*
+      체크를 푸는 길도 같다. 완료가 빚과 예정일까지 옮겼으므로, 상태만 되돌리면 규칙은
+      앞서 나간 채로 남는다 — 잘못 누른 사람이 되돌릴 방법이 없어진다.
+
+      다음 회차가 이미 만들어졌으면 되돌리지 않는다. 그때 되돌리면 같은 규칙이 회차 둘을
+      동시에 가리키므로, 조용히 지나가지 않고 왜 안 되는지 말한다.
+    */
+    if (isRecoveryEntry(base) && base.task.status === 'done') {
+      if (!recovery.canUndo(base)) {
+        dialog.toast('다음 회복이 이미 잡혀 있어 되돌릴 수 없습니다.', 'bad');
+        return;
+      }
+      recovery.undoComplete(base);
+      dialog.toast('완료를 되돌렸습니다.');
       return;
     }
     persist(withDerived({ ...base, task: { ...base.task, status } }));
@@ -1377,7 +1393,13 @@ function Workspace({ uid, user, onSignOut }: WorkspaceProps) {
           onComplete={(e) => {
             recovery.complete(e, today);
             setRecoveryId(null);
-            dialog.toast('회복을 완료했습니다.');
+            dialog.toast('회복을 완료했습니다. 잘못 눌렀으면 체크를 다시 풀면 됩니다.');
+          }}
+          canUndo={recovery.canUndo(recoveryEntry)}
+          onUndo={(e) => {
+            recovery.undoComplete(e);
+            setRecoveryId(null);
+            dialog.toast('완료를 되돌렸습니다.');
           }}
           onMove={(e, toDate, toTime) => {
             recovery.move(e, toDate, toTime);

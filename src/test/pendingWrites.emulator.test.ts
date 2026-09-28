@@ -192,7 +192,8 @@ describe('다른 종류의 쓰기도 같은 길로 간다', () => {
         rule: {
           enabled: true, intervalDays: 3, window: 'evening', generationHorizonDays: 1,
           lastCompletedAt: null, nextDueAt: '2026-09-12', activeEntryId: 'r1',
-          debtCount: 0, defaultMemo: '', defaultOptionIds: [], options: [],
+          debtCount: 0, completedEntryId: null, prevCompletedAt: null,
+          defaultMemo: '', defaultOptionIds: [], options: [],
         },
         entry: e, removeEntryId: null,
       },

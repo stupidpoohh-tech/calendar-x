@@ -15,8 +15,8 @@ import { getFirebase } from '../data/firebase';
 import { subscribeRecoveryRule } from '../data/repo';
 import { displayTitle } from '../domain/entry';
 import {
-  completeRecovery, defaultRecoveryRule, generateRecovery, moveRecovery,
-  primeRule, scheduleDebtRecovery, skipRecovery,
+  canUndoComplete, completeRecovery, defaultRecoveryRule, generateRecovery, moveRecovery,
+  primeRule, scheduleDebtRecovery, skipRecovery, undoCompleteRecovery,
   type RecoveryTransition,
 } from '../domain/recovery';
 import type { Entry, RecoveryRule, TimeHM } from '../domain/types';
@@ -29,6 +29,10 @@ export interface RecoveryApi {
   /** 이 회차만 고친다 (메모 · OFF 항목). 규칙 기본값은 건드리지 않는다. */
   saveEntryOnly: (entry: Entry) => void;
   complete: (entry: Entry, onISO: string) => void;
+  /** 방금 완료한 회차인가. 다음 회차가 이미 잡혔으면 되돌릴 수 없다. */
+  canUndo: (entry: Entry) => boolean;
+  /** 완료를 물린다. 빚 · 마지막 완료일 · 예정일이 함께 되돌아간다. */
+  undoComplete: (entry: Entry) => void;
   move: (entry: Entry, toDate: string, toTime: TimeHM | null) => void;
   skip: (entry: Entry) => void;
   scheduleDebt: (dateISO: string, time: TimeHM | null) => void;
@@ -128,6 +132,21 @@ export function useRecovery({ uid, todayISO, onError, commit }: Options): Recove
     },
 
     complete: (entry, onISO) => push(completeRecovery(rule, entry, onISO)),
+
+    canUndo: (entry) => canUndoComplete(rule, entry),
+
+    /*
+      되돌리기도 항목과 규칙을 **한 배치**로 쓴다. 이어 붙여 쓰면 그 사이 새로고침에
+      항목만 예정으로 돌아가고 규칙은 앞서 나간 채로 남는다.
+
+      다음 회차 생성 표식도 함께 푼다 — 안 그러면 되돌린 회차가 다시 지평선에 들어왔을 때
+      생성 경로가 "이미 만들었다" 로 보고 건너뛴다.
+    */
+    undoComplete: (entry) => {
+      if (!canUndoComplete(rule, entry)) return;
+      generatedFor.current = null;
+      push(undoCompleteRecovery(rule, entry));
+    },
 
     move: (entry, toDate, toTime) => push(moveRecovery(rule, entry, toDate, toTime)),
 

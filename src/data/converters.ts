@@ -103,6 +103,9 @@ export function recoveryRuleFromDoc(v: unknown): RecoveryRule {
     nextDueAt: normalizeDate(str(r.nextDueAt)) || null,
     activeEntryId: typeof r.activeEntryId === 'string' && r.activeEntryId ? r.activeEntryId : null,
     debtCount: Math.max(0, Math.trunc(num(r.debtCount))),
+    // 되돌리기용 자리. 옛 문서에는 없고, 없으면 되돌릴 것도 없다.
+    completedEntryId: typeof r.completedEntryId === 'string' && r.completedEntryId ? r.completedEntryId : null,
+    prevCompletedAt: normalizeDate(str(r.prevCompletedAt)) || null,
     defaultMemo: str(r.defaultMemo),
     // 지워진 옵션이 기본 선택에 남아 있으면 새 회차가 빈 스냅샷을 안고 태어난다.
     defaultOptionIds: strArr(r.defaultOptionIds).filter((id) => known.has(id)),
@@ -120,6 +123,8 @@ export function recoveryRuleToDoc(r: RecoveryRule): Raw {
     nextDueAt: r.nextDueAt,
     activeEntryId: r.activeEntryId,
     debtCount: r.debtCount,
+    completedEntryId: r.completedEntryId,
+    prevCompletedAt: r.prevCompletedAt,
     defaultMemo: r.defaultMemo,
     defaultOptionIds: r.defaultOptionIds,
     options: r.options.map((o) => ({ id: o.id, label: o.label, order: o.order })),

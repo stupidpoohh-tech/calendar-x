@@ -345,6 +345,17 @@ export interface RecoveryRule {
   activeEntryId: string | null;
   /** 놓친 회복 횟수. 시간도 점수도 아니다. */
   debtCount: number;
+  /**
+   * 마지막으로 완료한 회차의 항목 id.
+   *
+   * **되돌리기 한 번을 위해서만 둔다.** 완료는 항목의 상태만 바꾸는 것이 아니라 빚과
+   * 다음 예정일까지 옮기므로, 잘못 체크했을 때 체크만 풀면 규칙이 앞서 나간 채로 남는다.
+   * 이 값이 "지금 풀고 있는 것이 방금 완료한 그 회차인가" 를 가른다 — 다음 회차가 이미
+   * 만들어졌으면(`activeEntryId`) 되돌리지 않는다.
+   */
+  completedEntryId: string | null;
+  /** 그 완료 **직전**의 `lastCompletedAt`. 되돌리면 이 값으로 돌아간다. */
+  prevCompletedAt: DateISO | null;
   /** 새 회차에 기본값으로 들어가는 메모. */
   defaultMemo: string;
   /** 새 회차에 기본으로 켜 둘 옵션. */

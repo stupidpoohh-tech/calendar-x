@@ -28,14 +28,24 @@ interface Props {
   /** 항목 목록 자체를 고친다. 다음 회차부터 함께 바뀐다. */
   onChangeRule: (next: RecoveryRule) => void;
   onComplete: (e: Entry) => void;
+  /**
+   * 완료 되돌리기. 방금 완료한 회차일 때만 준다 (`canUndo`).
+   *
+   * 완료는 항목의 상태만 바꾸는 것이 아니라 빚과 다음 예정일까지 옮긴다. 잘못 눌렀을 때
+   * 물릴 자리가 없으면 설정을 손으로 되돌려야 하고, 그 값들은 화면에 다 보이지도 않는다.
+   */
+  onUndo: (e: Entry) => void;
+  canUndo: boolean;
   onMove: (e: Entry, toDate: string, toTime: TimeHM | null) => void;
   onSkip: (e: Entry) => void;
   onClose: () => void;
 }
 
 export function RecoverySheet({
-  entry, rule, todayISO, onSaveEntry, onChangeRule, onComplete, onMove, onSkip, onClose,
+  entry, rule, todayISO, onSaveEntry, onChangeRule, onComplete, onUndo, canUndo,
+  onMove, onSkip, onClose,
 }: Props) {
+  const done = entry.task?.status === 'done';
   const [memo, setMemo] = useState(entry.note);
   const [managing, setManaging] = useState(false);
   const [moving, setMoving] = useState(false);
@@ -181,13 +191,32 @@ export function RecoverySheet({
           )}
         </div>
 
+        {/*
+          이미 끝낸 회차에는 완료·옮기기·건너뛰기가 뜻이 없다. 있는 것은 되돌리기 하나다 —
+          다음 회차가 이미 잡혔으면 그것도 없고, 왜 없는지 한 줄로 적는다.
+        */}
         <footer className="mod-foot rec-foot">
-          <button className="btn danger ghost" onClick={() => onSkip(entry)}>건너뛰기</button>
-          <div className="spacer" />
-          {!moving && <button className="btn" onClick={() => setMoving(true)}>옮기기</button>}
-          <button className="btn primary" onClick={() => { commitMemo(); onComplete(entry); }}>
-            <Icon.Check size={14} /> 완료
-          </button>
+          {done ? (
+            <>
+              <div className="spacer" />
+              {canUndo ? (
+                <button className="btn" onClick={() => { commitMemo(); onUndo(entry); }}>
+                  <Icon.Undo size={14} /> 완료 되돌리기
+                </button>
+              ) : (
+                <span className="mod-hint">다음 회복이 이미 잡혀 있어 되돌릴 수 없습니다.</span>
+              )}
+            </>
+          ) : (
+            <>
+              <button className="btn danger ghost" onClick={() => onSkip(entry)}>건너뛰기</button>
+              <div className="spacer" />
+              {!moving && <button className="btn" onClick={() => setMoving(true)}>옮기기</button>}
+              <button className="btn primary" onClick={() => { commitMemo(); onComplete(entry); }}>
+                <Icon.Check size={14} /> 완료
+              </button>
+            </>
+          )}
         </footer>
       </div>
     </div>
