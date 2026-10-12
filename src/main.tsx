@@ -6,6 +6,7 @@ import { ErrorBoundary } from './ui/ErrorBoundary';
 import './styles/base.css';
 import './styles/app.css';
 import './styles/calendar-design.css';
+import './styles/ledger.css';
 
 /**
  * 캘린더X 의 진입점. 이 번들에는 캘린더X 만 들어 있다.

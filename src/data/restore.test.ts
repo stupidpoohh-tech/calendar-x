@@ -33,7 +33,8 @@ const pin = (p: Partial<Pin> = {}): Pin => ({
   id: 'p1', lens: 'task', text: '이번 분기 목표', order: 0, createdAt: '', updatedAt: '', ...p,
 });
 const data = (p: Partial<BackupData> = {}): BackupData => ({
-  entries: [], accounts: [], debts: [], pins: [], budgets: [], reserves: [], recovery: null, ...p,
+  entries: [], accounts: [], debts: [], pins: [], budgets: [], reserves: [],
+  categories: [], categoryBudgets: [], ledger: null, recovery: null, ...p,
 });
 
 describe('검증 — 온전한 파일은 통과한다', () => {
@@ -273,10 +274,14 @@ function fakeStore(seed: BackupData, opts: { failWrites?: Set<string> } = {}) {
   const state: BackupData = {
     entries: [...seed.entries], accounts: [...seed.accounts],
     debts: [...seed.debts], pins: [...seed.pins],
-    budgets: [...seed.budgets], reserves: [...seed.reserves], recovery: seed.recovery,
+    budgets: [...seed.budgets], reserves: [...seed.reserves],
+    categories: [...seed.categories], categoryBudgets: [...seed.categoryBudgets],
+    ledger: seed.ledger, recovery: seed.recovery,
   };
   const log: string[] = [];
-  const keys: BackupCollection[] = ['entries', 'accounts', 'debts', 'pins', 'budgets', 'reserves'];
+  const keys: BackupCollection[] = [
+    'entries', 'accounts', 'debts', 'pins', 'budgets', 'reserves', 'categories', 'categoryBudgets',
+  ];
 
   const io: RestoreIO = {
     fetchAll: async () => {
@@ -285,6 +290,7 @@ function fakeStore(seed: BackupData, opts: { failWrites?: Set<string> } = {}) {
         entries: [...state.entries], accounts: [...state.accounts],
         debts: [...state.debts], pins: [...state.pins],
         budgets: [...state.budgets], reserves: [...state.reserves],
+        categories: [...state.categories], categoryBudgets: [...state.categoryBudgets],
       };
     },
     createIfAbsent: async (payload) => {

@@ -21,7 +21,7 @@ describe('buildBackup', () => {
   it('내보낸 파일을 그대로 되읽는다', () => {
     const data = {
       entries: [newEntry('task', { id: 't1', title: '치과', startDate: '2026-08-20' })],
-      accounts: [account], debts: [], pins: [], budgets: [], reserves: [], recovery: null,
+      accounts: [account], debts: [], pins: [], budgets: [], reserves: [], categories: [], categoryBudgets: [], ledger: null, recovery: null,
     };
     const r = readBackupFile(JSON.stringify(buildBackup(data)));
     expect(r.ok).toBe(true);
@@ -38,7 +38,7 @@ describe('buildBackup', () => {
     // 조용히 흘리게 된다.
     const rule = { ...defaultRecoveryRule(), enabled: true, intervalDays: 5, debtCount: 2 };
     const r = readBackupFile(JSON.stringify(buildBackup({
-      entries: [], accounts: [], debts: [], pins: [], budgets: [], reserves: [], recovery: rule,
+      entries: [], accounts: [], debts: [], pins: [], budgets: [], reserves: [], categories: [], categoryBudgets: [], ledger: null, recovery: rule,
     })));
     expect(r.ok).toBe(true);
     if (r.ok) {
@@ -58,11 +58,11 @@ describe('buildBackup', () => {
     const reserve = newReserve({ id: 'r1', name: '비상금', amountMinor: 500_000 });
     const r = readBackupFile(JSON.stringify(buildBackup({
       entries: [], accounts: [], debts: [], pins: [],
-      budgets: [budget], reserves: [reserve], recovery: null,
+      budgets: [budget], reserves: [reserve], categories: [], categoryBudgets: [], ledger: null, recovery: null,
     })));
     expect(r.ok).toBe(true);
     if (r.ok) {
-      expect(r.file.format).toBe('v5');
+      expect(r.file.format).toBe('v6');
       expect(r.file.data.budgets[0]).toEqual(budget);
       expect(r.file.data.reserves[0]).toEqual(reserve);
       // 건수는 파일 총계와 맞아떨어져야 한다.
@@ -75,15 +75,15 @@ describe('buildBackup', () => {
     const theirs = newBudget({ id: 'b1', name: '파일 것', amountMinor: 100_000 });
     const added = newReserve({ id: 'r2', name: '여행', amountMinor: 300_000 });
     const merged = mergeBackup(
-      { entries: [], accounts: [], debts: [], pins: [], budgets: [mine], reserves: [], recovery: null },
-      { entries: [], accounts: [], debts: [], pins: [], budgets: [theirs], reserves: [added], recovery: null },
+      { entries: [], accounts: [], debts: [], pins: [], budgets: [mine], reserves: [], categories: [], categoryBudgets: [], ledger: null, recovery: null },
+      { entries: [], accounts: [], debts: [], pins: [], budgets: [theirs], reserves: [added], categories: [], categoryBudgets: [], ledger: null, recovery: null },
     );
     expect(merged.budgets).toEqual([mine]);
     expect(merged.reserves).toEqual([added]);
   });
 
   it('내보낸 파일에는 앱 이름과 버전이 들어 있다', () => {
-    const payload = buildBackup({ entries: [], accounts: [], debts: [], pins: [], budgets: [], reserves: [], recovery: null });
+    const payload = buildBackup({ entries: [], accounts: [], debts: [], pins: [], budgets: [], reserves: [], categories: [], categoryBudgets: [], ledger: null, recovery: null });
     expect(payload.app).toBe('Dada Calendar');
     expect(payload.version).toBe(BACKUP_VERSION);
   });

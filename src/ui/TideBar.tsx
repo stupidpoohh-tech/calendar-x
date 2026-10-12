@@ -127,6 +127,20 @@ export function TideBar({
         {!collapsed && (
           <>
             <p className="tide-empty">{calcScopeNotice(scope)}</p>
+            {/* 무엇을 고치면 풀리는지 바로 누를 수 있게 그 거래들을 세운다. */}
+            {scope.reason === 'unassigned' && (
+              <ul className="tide-list" aria-label="계좌를 정해야 하는 거래">
+                {scope.entries.slice(0, 8).map((e) => (
+                  <li key={e.id}>
+                    <button className="tide-row" onClick={() => onEntryClick?.(e)}>
+                      <span className="tide-when num">{fmtDayShort(e.startDate)}</span>
+                      <span className="tide-name">{e.title.trim() || '(내역 없음)'} — 계좌 정하기</span>
+                      <span className="tide-amt num minus">{formatAmount(Math.abs(e.money?.amountMinor ?? 0))}</span>
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            )}
             {editor.editing ? <BalanceInput editor={editor} /> : <BalanceNote editor={editor} />}
             {children && <div className="tide-more">{children}</div>}
           </>

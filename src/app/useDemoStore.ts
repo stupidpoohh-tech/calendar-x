@@ -7,6 +7,7 @@
  */
 import { useMemo } from 'react';
 import { tideWindow } from '../data/repo';
+import { defaultCategories } from '../domain/category';
 import { addDaysISO, todayISO } from '../domain/date';
 import { newEntry, newMoney, setRecurrence } from '../domain/entry';
 import { FEED_DEMO, type StoreState } from './useStore';
@@ -108,6 +109,11 @@ export function useDemoStore(): StoreState {
         text: '이번 분기 목표: 상용화',
         order: 0, createdAt: '', updatedAt: '',
       }],
+      // 미리보기에는 기본 카테고리를 보여 준다. 저장하는 순간 로그인을 묻는다.
+      categories: defaultCategories(''),
+      categoryBudgets: [],
+      ledger: { settleDay: 1 },
+      ledgerMeta: FEED_DEMO,
       // 메모리에서 만든 값이라 기다릴 것이 없다. 두 갈래 모두 받아 둔 상태다.
       display: FEED_DEMO, calc: FEED_DEMO,
       loading: false, error: null, rulesBlocked: false,

@@ -86,6 +86,22 @@ export function spendingIn(
     .sort((a, b) => a.startDate.localeCompare(b.startDate) || a.title.localeCompare(b.title));
 }
 
+/**
+ * 그 주머니 기간 안의 실제 지출인데 어느 주머니에도 걸려 있지 않은 것.
+ *
+ * 생활비에서 쓴 돈을 연결하지 않으면 그 돈은 일반 지출로 한도를 한 번 더 깎고, 주머니는
+ * 쓴 것이 없는 것처럼 남는다. 자동으로 걸지 않는다 — 여행 경비처럼 생활비가 아닌 지출일
+ * 수 있다. 화면이 보여 주고 사용자가 고른다.
+ */
+export function unlinkedSpendingFor(budget: Budget, entries: readonly Entry[]): Entry[] {
+  return entries
+    .filter((e) => isActual(e) && e.money?.type === 'expense'
+      && moneyFlowOf(e.money) === 'normal'
+      && !e.money.budgetId && !e.money.debtId && !e.recurrence
+      && e.startDate >= budget.startDate && e.startDate <= budget.endDate)
+    .sort((a, b) => a.startDate.localeCompare(b.startDate));
+}
+
 /** 예산 하나의 상태. 화면이 그대로 그릴 수 있는 값만 담는다. */
 export interface BudgetState {
   budget: Budget;

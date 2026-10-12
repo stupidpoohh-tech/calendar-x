@@ -129,8 +129,24 @@ service cloud.firestore {
       return data().size() < 60;
     }
 
+    /*
+      가계부 설정 (`users/{uid}` 문서의 `ledger`). 정산 시작일 1~31.
+
+      문서 자체는 회복 규칙 · 이관 표식과 함께 쓰는 자리라 **필드 하나만** 본다. 없는 것이
+      정상이다 — 1일 정산으로 읽는다.
+    */
+    function validLedgerSettings(d) {
+      return !('ledger' in d) || (
+        d.ledger is map
+        && d.ledger.keys().hasOnly(['settleDay'])
+        && d.ledger.settleDay is int
+        && d.ledger.settleDay >= 1 && d.ledger.settleDay <= 31
+      );
+    }
+
     match /users/{uid} {
-      allow read, write: if isOwner(uid);
+      allow read, delete: if isOwner(uid);
+      allow create, update: if isOwner(uid) && validLedgerSettings(data());
 
       match /entries/{entryId} {
         allow read, delete: if isOwner(uid);
@@ -205,6 +221,39 @@ service cloud.firestore {
           && data().name is string && data().name.size() <= 100
           && data().amountMinor is int
           && data().currency is string;
+      }
+
+      /*
+        거래 카테고리. 화면은 지우지 않고 보관한다(`archived`) — 지우면 그 카테고리를 가리키던
+        지난 거래가 미분류로 떨어져 지난 결산이 바뀐다.
+      */
+      match /categories/{categoryId} {
+        allow read, delete: if isOwner(uid);
+        allow create, update: if isOwner(uid)
+          && withinSize()
+          && data().kind in ['income', 'expense']
+          && data().name is string && data().name.size() > 0 && data().name.size() <= 100
+          && data().order is int
+          && data().archived is bool;
+      }
+
+      /*
+        카테고리 예산. 문서 id 는 `카테고리id~scope~period` 로 정해진다 — 같은 기간의 같은
+        카테고리에 예산 두 줄이 생기면 어느 쪽이 맞는지 알 수 없다. 규칙이 그 모양을 강제한다.
+        결산용이고 한도 계산에 들어가지 않는다.
+      */
+      match /categoryBudgets/{budgetId} {
+        allow read, delete: if isOwner(uid);
+        allow create, update: if isOwner(uid)
+          && withinSize()
+          && data().categoryId is string
+          && data().categoryId.size() > 0 && data().categoryId.size() <= 200
+          && data().scope in ['default', 'period']
+          && data().period is string && data().period.matches('^\\d{4}-(0[1-9]|1[0-2])$')
+          && (data().amountMinor == null
+              || (data().amountMinor is int && data().amountMinor >= 0))
+          && data().currency is string
+          && budgetId == data().categoryId + '~' + data().scope + '~' + data().period;
       }
 
       match /pins/{pinId} {

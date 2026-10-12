@@ -234,3 +234,27 @@ export function ambiguousActuals(
   return entries.filter((e) =>
     isActual(e) && cashSignOf(e) !== 0 && balanceInclusion(e, accounts) === 'ambiguous');
 }
+
+/**
+ * 이 계좌의 오늘 잔고에 들어 있을 수 있는 실제 거래 — 잔고를 적을 때 고르는 목록.
+ *
+ * 다른 계좌로 정한 거래, 계좌를 정하지 않았지만 다른 계좌의 오늘 목록에 이미 골라진 거래는
+ * 빠진다(그 계좌의 것이다). 현금이 움직이지 않는 거래(카드 사용)도 빠진다.
+ */
+export function reflectableOn(
+  account: Account | null, accounts: readonly Account[], entries: readonly Entry[], today: string,
+): Entry[] {
+  if (!account) return [];
+  const seen = new Set<string>();
+  return entries.filter((e) => {
+    if (seen.has(e.id) || !isActual(e) || cashSignOf(e) === 0 || e.startDate !== today) return false;
+    const owner = e.money?.accountId;
+    const known = owner ? accounts.some((a) => a.id === owner) : false;
+    if (known && owner !== account.id) return false;
+    // 계좌를 정하지 않은 거래가 다른 계좌의 오늘 잔고에 이미 들어 있다고 골라져 있으면 그 계좌의 것이다.
+    if (!known && accounts.some((a) => a.id !== account.id && a.asOf === today
+      && (a.reflectedEntryIds ?? []).includes(e.id))) return false;
+    seen.add(e.id);
+    return true;
+  });
+}

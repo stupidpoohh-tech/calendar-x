@@ -7,9 +7,10 @@
 import { DEFAULT_COLOR, DEFAULT_CURRENCY, MONEY_TYPE_BY_ID, STATUS_BY_ID } from '../domain/constants';
 import { normalizeDate, todayISO, ymOf, ymRange } from '../domain/date';
 import { MONEY_FLOWS, moneyFlowOf, moneyStatusOf } from '../domain/ledger';
+import { clampSettleDay } from '../domain/period';
 import type {
-  Account, Budget, ColorId, Debt, Entry, EntryKind, MoneyFields, MoneyFlow, MoneyType,
-  Pin, PlannedRef, Reserve,
+  Account, Budget, Category, CategoryBudget, ColorId, Debt, Entry, EntryKind, LedgerSettings,
+  MoneyFields, MoneyFlow, MoneyType, Pin, PlannedRef, Reserve,
   RecoveryFields, RecoveryOption, RecoveryRule, RecoveryWindowId,
   Recurrence, RepeatFreq, TaskStatus,
 } from '../domain/types';
@@ -418,4 +419,60 @@ export function reserveToDoc(r: Reserve): Raw {
     createdAt: r.createdAt,
     updatedAt: r.updatedAt,
   };
+}
+
+// ---------- 가계부 결산 ----------
+
+export function categoryFromDoc(id: string, raw: Raw): Category {
+  return {
+    id,
+    kind: raw.kind === 'income' ? 'income' : 'expense',
+    name: str(raw.name),
+    order: Math.trunc(num(raw.order, 0)),
+    archived: bool(raw.archived),
+    createdAt: str(raw.createdAt),
+    updatedAt: str(raw.updatedAt),
+  };
+}
+
+export function categoryToDoc(c: Category): Raw {
+  return {
+    kind: c.kind, name: c.name, order: c.order, archived: c.archived,
+    createdAt: c.createdAt, updatedAt: c.updatedAt,
+  };
+}
+
+const isPeriodKey = (v: unknown): v is string => typeof v === 'string' && /^\d{4}-(0[1-9]|1[0-2])$/.test(v);
+
+/** 기간 열쇠가 깨진 줄은 어느 기간에도 걸리지 않게 아주 먼 미래로 둔다 — 지난 결산을 바꾸지 않는다. */
+export function categoryBudgetFromDoc(id: string, raw: Raw): CategoryBudget {
+  const amount = raw.amountMinor;
+  return {
+    id,
+    categoryId: str(raw.categoryId),
+    scope: raw.scope === 'period' ? 'period' : 'default',
+    period: isPeriodKey(raw.period) ? raw.period : '9999-12',
+    amountMinor: typeof amount === 'number' && Number.isFinite(amount) ? Math.trunc(amount) : null,
+    currency: str(raw.currency, DEFAULT_CURRENCY),
+    createdAt: str(raw.createdAt),
+    updatedAt: str(raw.updatedAt),
+  };
+}
+
+export function categoryBudgetToDoc(b: CategoryBudget): Raw {
+  return {
+    categoryId: b.categoryId, scope: b.scope, period: b.period,
+    amountMinor: b.amountMinor, currency: b.currency,
+    createdAt: b.createdAt, updatedAt: b.updatedAt,
+  };
+}
+
+/** `users/{uid}` 문서의 `ledger` 필드. 없으면 1일 정산이다. */
+export function ledgerSettingsFromDoc(raw: unknown): LedgerSettings {
+  const o = obj(raw);
+  return { settleDay: clampSettleDay(o?.settleDay) };
+}
+
+export function ledgerSettingsToDoc(s: LedgerSettings): Raw {
+  return { settleDay: clampSettleDay(s.settleDay) };
 }

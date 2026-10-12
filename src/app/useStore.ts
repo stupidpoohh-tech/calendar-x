@@ -2,12 +2,16 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { describeFirestoreError, isPermissionDenied } from '../data/errors';
 import { getFirebase } from '../data/firebase';
 import {
-  monthWindow, subscribeAccounts, subscribeBudgets, subscribeDebts, subscribeEntriesForMonths,
+  monthWindow, subscribeAccounts, subscribeBudgets, subscribeCategories, subscribeCategoryBudgets,
+  subscribeDebts, subscribeEntriesForMonths, subscribeLedgerSettings,
   subscribePins, subscribeRecurringEntries, subscribeReserves, tideWindow, tideWindowReaches,
   earliestAsOfOf,
   type SnapMeta,
 } from '../data/repo';
-import type { Account, Budget, Debt, Entry, Pin, Reserve, YearMonth } from '../domain/types';
+import { DEFAULT_SETTLE_DAY } from '../domain/period';
+import type {
+  Account, Budget, Category, CategoryBudget, Debt, Entry, LedgerSettings, Pin, Reserve, YearMonth,
+} from '../domain/types';
 
 export interface StoreState {
   /**
@@ -35,6 +39,16 @@ export interface StoreState {
   budgets: Budget[];
   /** 세이브. 마찬가지로 한도를 깎는다. */
   reserves: Reserve[];
+  /**
+   * 가계부 결산 — 카테고리 · 카테고리 예산 · 정산 시작일.
+   *
+   * 한도 계산에 들어가지 않으므로 `calc` 와 따로 상태를 낸다(`ledgerMeta`). 아직 안 온
+   * 사이에 카테고리가 "없음" 으로 보이면 기본 카테고리 만들기를 권하게 된다.
+   */
+  categories: Category[];
+  categoryBudgets: CategoryBudget[];
+  ledger: LedgerSettings;
+  ledgerMeta: FeedState;
   /**
    * 화면용 자료의 상태. `loading` 은 이 값에서 나온다.
    */
@@ -142,9 +156,12 @@ interface Keyed<T> { key: string; value: T }
 
 const NO_ENTRIES: Entry[] = [];
 
+const DEFAULT_LEDGER: LedgerSettings = { settleDay: DEFAULT_SETTLE_DAY };
+
 const EMPTY: StoreState = {
   entries: [], tideEntries: [], tideMonths: [],
   accounts: [], debts: [], pins: [], budgets: [], reserves: [],
+  categories: [], categoryBudgets: [], ledger: DEFAULT_LEDGER, ledgerMeta: FEED_LOADING,
   display: FEED_LOADING, calc: FEED_LOADING,
   loading: false, error: null, rulesBlocked: false,
 };
@@ -194,6 +211,12 @@ export function useStore(uid: string | null, cursorISO: string, todayISO: string
   const [budgetsFeed, setBudgetsFeed] = useState<FeedState>(FEED_LOADING);
   const [reserves, setReserves] = useState<Reserve[]>([]);
   const [reservesFeed, setReservesFeed] = useState<FeedState>(FEED_LOADING);
+  const [categories, setCategories] = useState<Category[]>([]);
+  const [categoriesFeed, setCategoriesFeed] = useState<FeedState>(FEED_LOADING);
+  const [categoryBudgets, setCategoryBudgets] = useState<CategoryBudget[]>([]);
+  const [categoryBudgetsFeed, setCategoryBudgetsFeed] = useState<FeedState>(FEED_LOADING);
+  const [ledger, setLedger] = useState<LedgerSettings>(DEFAULT_LEDGER);
+  const [ledgerFeed, setLedgerFeed] = useState<FeedState>(FEED_LOADING);
   const [error, setError] = useState<string | null>(null);
   const [rulesBlocked, setRulesBlocked] = useState(false);
 
@@ -217,6 +240,9 @@ export function useStore(uid: string | null, cursorISO: string, todayISO: string
     setDebts([]); setPins([]);
     setBudgets([]); setBudgetsFeed(FEED_LOADING);
     setReserves([]); setReservesFeed(FEED_LOADING);
+    setCategories([]); setCategoriesFeed(FEED_LOADING);
+    setCategoryBudgets([]); setCategoryBudgetsFeed(FEED_LOADING);
+    setLedger(DEFAULT_LEDGER); setLedgerFeed(FEED_LOADING);
     setError(null); setRulesBlocked(false);
   }
 
@@ -322,6 +348,22 @@ export function useStore(uid: string | null, cursorISO: string, todayISO: string
         own(uid, (items, meta) => { setReserves(items); setReservesFeed(feedFrom(items.length, meta)); }),
         own(uid, (scope, err) => failWith(setReservesFeed, scope, err)),
       ),
+      subscribeCategories(
+        db, uid,
+        own(uid, (items, meta) => { setCategories(items); setCategoriesFeed(feedFrom(items.length, meta)); }),
+        own(uid, (scope, err) => failWith(setCategoriesFeed, scope, err)),
+      ),
+      subscribeCategoryBudgets(
+        db, uid,
+        own(uid, (items, meta) => { setCategoryBudgets(items); setCategoryBudgetsFeed(feedFrom(items.length, meta)); }),
+        own(uid, (scope, err) => failWith(setCategoryBudgetsFeed, scope, err)),
+      ),
+      subscribeLedgerSettings(
+        db, uid,
+        // 설정은 늘 값이 있다(없으면 1일). "비어 있다" 로 읽힐 것이 없으므로 1건으로 센다.
+        own(uid, (s, meta) => { setLedger(s); setLedgerFeed(feedFrom(1, meta)); }),
+        own(uid, (scope, err) => failWith(setLedgerFeed, scope, err)),
+      ),
     ];
     return () => {
       unsubs.forEach((u) => u());
@@ -361,12 +403,18 @@ export function useStore(uid: string | null, cursorISO: string, todayISO: string
     [tideOutOfRange, tideNow?.feed, recurringFeed, accountsFeed, budgetsFeed, reservesFeed],
   );
 
+  const ledgerMeta = useMemo(
+    () => combineFeeds([categoriesFeed, categoryBudgetsFeed, ledgerFeed]),
+    [categoriesFeed, categoryBudgetsFeed, ledgerFeed],
+  );
+
   // 계정이 막 바뀐 렌더에서는 아직 앞 계정의 값이 상태에 남아 있다. 내보내지 않는다.
   if (!uid || dataUid !== uid) return EMPTY;
 
   return {
     entries, tideEntries, tideMonths,
     accounts, debts, pins, budgets, reserves,
+    categories, categoryBudgets, ledger, ledgerMeta,
     display, calc,
     loading: !display.ready, error, rulesBlocked,
   };

@@ -1,0 +1,61 @@
+/*
+  가계부 — 실제 거래 입력 · 확정 · 잔고 반영 · 결산 화면.
+
+  새 디자인 언어를 만들지 않는다. 토큰(tokens.css)과 기존 부품(.chip · .seg · .btn ·
+  .mod-*)을 그대로 쓰고, 여기에는 그것들을 배치하는 규칙만 둔다. 글씨는 rem 으로만 적는다.
+*/
+
+/* ---------- 입력 창 ---------- */
+.mod-status { align-self: flex-start; }
+.mod-status .seg-btn { padding: 6px 14px; font-size: 0.8125rem; }
+.mod-status-l { margin: 0; font-size: 0.75rem; color: var(--ink-3); }
+.mod-status-l b { color: var(--ink-2); font-weight: 600; }
+.mod-h { margin: 0; font-size: 0.9375rem; font-weight: 700; color: var(--ink); }
+.mod-hint.warn { color: var(--warn); line-height: 1.5; display: block; }
+.mod-more {
+  align-self: flex-start; margin-left: 64px; padding: 2px 0;
+  background: none; border: 0; border-bottom: 1px dashed var(--ink-4);
+  font: inherit; font-size: 0.71875rem; color: var(--ink-3); cursor: pointer;
+}
+.mod-more:hover { color: var(--ink); border-bottom-color: var(--ink); }
+.mod-confirm {
+  display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+  padding: 10px 16px; border-top: 1px solid var(--line); background: var(--bg-soft);
+}
+.mod-confirm .mod-hint { margin: 0; }
+
+/* ---------- 잔고 반영 목록 ---------- */
+.bal-edit { display: flex; flex-direction: column; gap: 8px; width: 100%; }
+.bal-refl {
+  margin: 0; padding: 10px 12px; border: 1px solid var(--line); border-radius: var(--radius-sm);
+  background: var(--bg-soft); display: flex; flex-direction: column; gap: 6px;
+}
+.bal-refl legend {
+  display: flex; align-items: center; gap: 8px; width: 100%; padding: 0;
+  font-size: 0.75rem; color: var(--ink-2);
+}
+.bal-refl-all {
+  margin-left: auto; background: none; border: 0; padding: 0; cursor: pointer;
+  font: inherit; font-size: 0.71875rem; color: var(--accent);
+}
+.bal-refl ul { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 2px; }
+.bal-refl label {
+  display: flex; align-items: center; gap: 8px; padding: 6px 4px; border-radius: 4px;
+  font-size: 0.8125rem; color: var(--ink); cursor: pointer;
+}
+.bal-refl label:hover { background: var(--accent-soft); }
+.bal-refl input { width: 16px; height: 16px; flex: none; }
+.bal-refl-t { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.bal-refl-n { margin: 0; font-size: 0.6875rem; color: var(--ink-4); line-height: 1.5; }
+.bal-refl-a { display: flex; justify-content: flex-end; gap: 6px; }
+
+/* ---------- 생활비 — 연결되지 않은 실제 지출 ---------- */
+.bp-loose {
+  align-self: flex-start; margin: 0 0 6px 10px; padding: 0; background: none; border: 0;
+  font: inherit; font-size: 0.6875rem; color: var(--warn); cursor: pointer; text-align: left;
+}
+.bp-loose:hover { text-decoration: underline; }
+.bp-loose-l { padding-left: 10px; }
+.bp-loose-i { display: flex; align-items: center; gap: 6px; }
+.bp-loose-i .bp-li { flex: 1; min-width: 0; }
+.bp-loose-i .chip { flex: none; padding: 2px 8px; font-size: 0.6875rem; }

@@ -27,6 +27,7 @@ const DEFAULTS: Prefs = {
   todayCollapsed: true,
   todayMoneyCollapsed: false,
   moneyCardCollapsed: false,
+  ledgerTab: 'history',
 };
 
 function read(): Prefs {

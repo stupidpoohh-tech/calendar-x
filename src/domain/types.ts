@@ -433,8 +433,70 @@ export interface RecoveryRule {
   options: RecoveryOption[];
 }
 
-/** 백업이 담는 네 컬렉션. 전체 교체는 이 넷 모두에 똑같이 적용된다. */
-export type BackupCollection = 'entries' | 'accounts' | 'debts' | 'pins' | 'budgets' | 'reserves';
+// ---------- 가계부 결산 (카테고리 · 정산 기간 · 카테고리 예산) ----------
+
+/**
+ * 거래 카테고리. 수입과 지출을 따로 관리한다.
+ *
+ * **지우지 않고 보관한다** (`archived`). 거래는 `money.categoryId` 로 가리키므로,
+ * 카테고리 문서를 지우면 지난 거래가 "미분류" 로 떨어져 지난 결산이 바뀐다. 보관한
+ * 카테고리는 새 입력에서 고르는 자리에서만 빠지고, 지난 기록과 통계에는 이름 그대로 남는다.
+ */
+export interface Category {
+  id: string;
+  /** 수입 카테고리인가 지출 카테고리인가. 거래의 흐름(`money.type`)과 짝이다. */
+  kind: 'income' | 'expense';
+  name: string;
+  order: number;
+  archived: boolean;
+  createdAt: string;
+  updatedAt: string;
+}
+
+/**
+ * 정산 기간의 열쇠. 기간이 **시작하는 달**의 `YYYY-MM` 이다.
+ *
+ * 정산 시작일이 25일이면 `2026-09` 는 9/25 ~ 10/24 다. 시작일을 바꿔도 열쇠는 그대로라
+ * 기간별 예산이 사라지지 않고 같은 이름의 기간을 따라간다 (`domain/period.ts`).
+ */
+export type PeriodKey = YearMonth;
+
+/**
+ * 카테고리 예산 한 줄.
+ *
+ *   default  기본 예산. `period` 기간**부터** 적용된다. 다음 default 가 나올 때까지 이어진다
+ *   period   그 기간 하나만의 예산. default 보다 앞선다
+ *
+ * 기본 예산을 바꾸는 것은 **새 default 를 하나 더 쓰는 것**이다 — 앞 기간들은 앞의 default
+ * 를 그대로 보므로 소급되지 않는다. `amountMinor: null` 은 "이 기간(부터)은 예산 없음" 이다.
+ *
+ * 문서 id 는 `카테고리id~scope~period` 로 정해진다 (`categoryBudgetId`). 같은 자리를
+ * 두 번 만들 수 없다.
+ *
+ * 생활비 주머니(`Budget`)와는 다른 기능이다. 이것은 비교 · 결산용이고 한도에서 미리
+ * 빼지 않는다.
+ */
+export interface CategoryBudget {
+  id: string;
+  categoryId: string;
+  scope: 'default' | 'period';
+  period: PeriodKey;
+  amountMinor: number | null;
+  currency: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+/** 가계부 설정. `users/{uid}` 문서의 `ledger` 필드에 산다. */
+export interface LedgerSettings {
+  /** 매월 정산 시작일 1~31. 그 달에 없는 날이면 말일로 당긴다. */
+  settleDay: number;
+}
+
+/** 백업이 담는 컬렉션. */
+export type BackupCollection =
+  | 'entries' | 'accounts' | 'debts' | 'pins' | 'budgets' | 'reserves'
+  | 'categories' | 'categoryBudgets';
 
 export type ThemePref = 'system' | 'light' | 'dark';
 /** 글씨 크기. 'auto' 는 브라우저·OS 설정을 따른다는 뜻이다. */
@@ -482,7 +544,12 @@ export interface Prefs {
   todayCollapsed: boolean;
   todayMoneyCollapsed: boolean;
   moneyCardCollapsed: boolean;
+  /** 가계부 렌즈 아래 상세 보기의 마지막 탭. */
+  ledgerTab: LedgerTabId;
 }
+
+/** 가계부 상세 보기. 캘린더와 카드 아래에 붙는다 — 대체하지 않는다. */
+export type LedgerTabId = 'history' | 'budget' | 'monthly' | 'stats';
 
 export interface Filters {
   colors: Set<ColorId>;

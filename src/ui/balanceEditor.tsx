@@ -14,6 +14,7 @@ import { DEFAULT_CURRENCY } from '../domain/constants';
 import { fmtDayShort, todayISO as domainToday } from '../domain/date';
 import { uid } from '../domain/entry';
 import { formatAmount, formatSigned, minorToInput, parseAmountToMinor } from '../domain/money';
+import { reflectableOn } from '../domain/ledger';
 import { settle, summarize, type Settlement } from '../domain/tide';
 import type { Account, Entry } from '../domain/types';
 import { useDialog } from './Dialog';
@@ -32,6 +33,18 @@ export interface BalanceEditor {
   start: () => void;
   cancel: () => void;
   commit: () => void;
+  /**
+   * 오늘 적은 실제 거래 가운데 이 계좌의 것(또는 계좌를 정하지 않은 것).
+   *
+   * 잔고를 오늘 적으면 오늘 거래가 그 숫자에 **이미 들어 있는지** 날짜로는 알 수 없다 —
+   * 오전 커피를 오후에 적을 수 있다. 그래서 사용자가 고른다. 새 거래는 기본으로 고르지
+   * 않는다(고르지 않은 것은 아직 잔고 밖으로 보고 한도에서 뺀다 — 덜 쓸 수 있다고 말하는
+   * 쪽이 덜 위험하다). 같은 날 이미 골라 둔 것은 그대로 남는다.
+   */
+  candidates: Entry[];
+  reflected: ReadonlySet<string>;
+  toggleReflected: (id: string) => void;
+  setAllReflected: (on: boolean) => void;
 }
 
 export function useBalanceEditor(
@@ -55,10 +68,21 @@ export function useBalanceEditor(
   const primary = accounts.find((a) => a.id === targetId) ?? accounts[0] ?? null;
   const [editing, setEditing] = useState(false);
   const [text, setText] = useState('');
+  const [reflected, setReflected] = useState<ReadonlySet<string>>(new Set());
   const dialog = useDialog();
+  const dayNow = todayISO ?? domainToday();
+  const candidates = reflectableOn(primary, accounts, entries, dayNow);
+
+  /** 같은 날 이미 골라 둔 것만 살린다. 날이 바뀌면 앞 기준일의 목록은 뜻이 없다. */
+  const initialReflected = (a: Account | null): ReadonlySet<string> => {
+    if (!a || a.asOf !== dayNow) return new Set();
+    const ok = new Set(reflectableOn(a, accounts, entries, dayNow).map((e) => e.id));
+    return new Set((a.reflectedEntryIds ?? []).filter((id) => ok.has(id)));
+  };
 
   const start = () => {
     setText(primary ? minorToInput(primary.balanceMinor, primary.currency) : '');
+    setReflected(initialReflected(primary));
     setEditing(true);
   };
 
@@ -67,7 +91,15 @@ export function useBalanceEditor(
     if (!next) return;
     setTargetId(id);
     setText(minorToInput(next.balanceMinor, next.currency));
+    setReflected(initialReflected(next));
   };
+
+  const toggleReflected = (id: string) => setReflected((cur) => {
+    const next = new Set(cur);
+    if (next.has(id)) next.delete(id); else next.add(id);
+    return next;
+  });
+  const setAllReflected = (on: boolean) => setReflected(on ? new Set(candidates.map((e) => e.id)) : new Set());
 
   /**
    * 잔고를 갈아엎는 순간이 정산이다. 예정된 것과 실제 잔고 사이 차이(diff)를
@@ -92,12 +124,18 @@ export function useBalanceEditor(
       asOf: today,
       checkedAt: now,
       /*
-        기준일 당일 실제 거래 중 이 잔고에 들어 있다고 고른 것. 같은 날 다시 적으면
-        고른 것이 그대로 유효하고, 날이 바뀌면 뜻이 없어지므로 비운다 — 그 거래들은
-        이제 기준일보다 앞서 날짜만으로 들어 있다고 판정된다 (`ledger.balanceInclusion`).
-        고르는 자리는 아직 없다. 없는 동안 새로 고른 것으로 넘겨짚지 않는다.
+        기준일(오늘) 실제 거래 중 이 잔고에 들어 있다고 고른 것 (`BalanceInput` 의 목록).
+        앞 기준일의 목록은 날이 바뀌면 뜻이 없다 — 그 거래들은 이제 기준일보다 앞서 날짜만으로
+        들어 있다고 판정된다 (`ledger.balanceInclusion`). 지금 고를 수 있는 것만 남긴다.
       */
-      reflectedEntryIds: primary?.asOf === today ? primary.reflectedEntryIds ?? [] : [],
+      reflectedEntryIds: [
+        ...candidates.map((e) => e.id).filter((id) => reflected.has(id)),
+        // 목록에 없는 거래(이 화면이 아직 못 받았거나 다른 기기에서 적은 것)는 판정할 수
+        // 없으므로 같은 날 골라 둔 상태를 그대로 둔다. 지우면 그 거래가 한도에서 또 빠진다.
+        ...(primary?.asOf === today
+          ? (primary.reflectedEntryIds ?? []).filter((id) => !entries.some((e) => e.id === id))
+          : []),
+      ],
       order: primary?.order ?? 0,
       createdAt: primary?.createdAt || now,
       updatedAt: now,
@@ -176,6 +214,7 @@ export function useBalanceEditor(
   return {
     primary, accounts, pick,
     editing, text, setText, start, cancel: () => setEditing(false), commit,
+    candidates, reflected, toggleReflected, setAllReflected,
   };
 }
 
@@ -237,7 +276,12 @@ function SettleGap({ settlement: r }: { settlement: Settlement }) {
 
 /** 큰 숫자를 누르면 그 자리에 뜨는 입력칸. */
 export function BalanceInput({ editor, size = 'lg' }: { editor: BalanceEditor; size?: 'lg' | 'sm' }) {
+  // 오늘 실제 거래가 있으면 고를 목록이 붙는다. 그때는 칸을 벗어나도 저장하지 않는다 —
+  // 목록을 누르는 순간 칸에서 벗어나기 때문이다. 저장 버튼으로 끝낸다.
+  const withList = editor.candidates.length > 0;
+  const allOn = withList && editor.candidates.every((e) => editor.reflected.has(e.id));
   return (
+    <div className="bal-edit">
     <div className={'bal-edit-row ' + size}>
       {/* 계좌가 하나면 고를 것이 없다. 여럿일 때만 어느 계좌를 고치는지 밝힌다. */}
       {editor.accounts.length > 1 && (
@@ -262,10 +306,42 @@ export function BalanceInput({ editor, size = 'lg' }: { editor: BalanceEditor; s
           if (e.key === 'Enter') editor.commit();
           if (e.key === 'Escape') editor.cancel();
         }}
-        onBlur={editor.commit}
+        onBlur={withList ? undefined : editor.commit}
         placeholder="0"
         aria-label="잔고 금액"
       />
+    </div>
+    {withList && (
+      <fieldset className="bal-refl">
+        <legend>
+          오늘 거래 중 <b>이 잔고에 이미 빠져 있는 것</b>
+          <button type="button" className="bal-refl-all" onClick={() => editor.setAllReflected(!allOn)}>
+            {allOn ? '전체 해제' : '전체 선택'}
+          </button>
+        </legend>
+        <ul>
+          {editor.candidates.map((e) => (
+            <li key={e.id}>
+              <label>
+                <input
+                  type="checkbox" checked={editor.reflected.has(e.id)}
+                  onChange={() => editor.toggleReflected(e.id)}
+                />
+                <span className="bal-refl-t">{e.title.trim() || (e.money?.type === 'income' ? '수입' : '지출')}</span>
+                <span className="num">{formatSigned((e.money?.type === 'income' ? 1 : -1) * Math.abs(e.money?.amountMinor ?? 0))}</span>
+              </label>
+            </li>
+          ))}
+        </ul>
+        <p className="bal-refl-n">
+          고르지 않은 거래는 아직 잔고에 반영되지 않은 것으로 보고 한도에서 뺍니다.
+        </p>
+        <div className="bal-refl-a">
+          <button type="button" className="btn" onClick={editor.cancel}>취소</button>
+          <button type="button" className="btn primary" onClick={editor.commit}>저장</button>
+        </div>
+      </fieldset>
+    )}
     </div>
   );
 }

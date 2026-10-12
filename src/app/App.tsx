@@ -9,7 +9,7 @@ import {
 import { getFirebase } from '../data/firebase';
 import { convertLegacyItems, readLegacyItems, summarize } from '../data/migrate';
 import {
-  createManyIfAbsent, fetchAll, markMigrated, readMigrationMark, writeMany,
+  createManyIfAbsent, fetchAll, fetchLedgerSettings, markMigrated, readMigrationMark, writeMany,
 } from '../data/repo';
 import {
   MERGE_SKIPS_RECOVERY, REPLACE_DISABLED_REASON, safeMerge, type RestoreIO,
@@ -22,12 +22,16 @@ import {
 } from '../domain/shared';
 import { formatAmount } from '../domain/money';
 import { applyFilters, collectTags, emptyFilters, hasActiveFilter } from '../domain/filters';
-import { baseIdOf, materialize } from '../domain/recurrence';
+import { baseIdOf, materialize, occurrenceDateOf } from '../domain/recurrence';
+import { defaultCategories } from '../domain/category';
+import { confirmationOf } from '../domain/confirm';
+import { isActual } from '../domain/ledger';
 import { isRecoveryEntry } from '../domain/recovery';
 import type {
-  Account, Entry, Filters, LensId, SharedInvite, SharedNote, SharedTodoItem,
+  Account, Budget, Entry, Filters, LensId, SharedInvite, SharedNote, SharedTodoItem,
   TaskStatus, ViewId, YearMonth,
 } from '../domain/types';
+import { ConfirmSheet } from '../ui/ConfirmSheet';
 import { Auth } from '../ui/Auth';
 import { BrandFooter } from '../ui/BrandFooter';
 import { DaySheet } from '../ui/DaySheet';
@@ -105,9 +109,13 @@ function Workspace({ uid, user, onSignOut }: WorkspaceProps) {
   const [showSettings, setShowSettings] = useState(false);
   const [showPicker, setShowPicker] = useState(false);
   const [daySheet, setDaySheet] = useState<string | null>(null);
-  const [modal, setModal] = useState<{ open: boolean; mode: 'create' | 'edit'; entry: Entry | null }>(
-    { open: false, mode: 'create', entry: null },
-  );
+  const [modal, setModal] = useState<{
+    open: boolean; mode: 'create' | 'edit'; entry: Entry | null;
+    /** 반복 발생분을 눌렀으면 그 회차 날짜. 편집은 원본을 향하지만 확정은 이 회차를 향한다. */
+    occurrence?: string | null;
+  }>({ open: false, mode: 'create', entry: null });
+  /** 실제 거래로 확정할 예정 회차. 편집 창을 닫고 이것을 연다 — 창을 겹쳐 띄우지 않는다. */
+  const [confirming, setConfirming] = useState<{ plan: Entry; date: string } | null>(null);
   const [legacy, setLegacy] = useState<{ count: number; migratedAt: string | null } | null>(null);
   /** 회복 상세를 띄운 항목의 id. 항목 자체가 아니라 id 를 들고 있어야 스냅샷을 따라간다. */
   const [recoveryId, setRecoveryId] = useState<string | null>(null);
@@ -348,16 +356,31 @@ function Workspace({ uid, user, onSignOut }: WorkspaceProps) {
   const openCreate = useCallback((patch: Partial<Entry> = {}) => {
     if (isAnon) { void promptLogin(); return; }
     const kind = LENS_BY_ID[lens]?.kind ?? 'task';
-    setModal({ open: true, mode: 'create', entry: newEntry(kind, { startDate: cursorISOForCreate(today, cursor), ...patch }) });
+    const startDate = patch.startDate ?? cursorISOForCreate(today, cursor);
+    /*
+      가계부는 날짜로 시작 상태를 정한다. 오늘까지는 이미 일어난 돈(실제 거래)이고, 앞날은
+      예정이다. 편집 창 맨 위에서 언제든 바꿀 수 있고, 고른 쪽이 늘 보인다.
+    */
+    const entry = newEntry(kind, { startDate, ...patch });
+    if (entry.money && !patch.money) {
+      entry.money = { ...entry.money, status: startDate <= today ? 'actual' : 'planned' };
+    }
+    setModal({ open: true, mode: 'create', entry: withDerived(entry) });
   }, [lens, today, cursor, isAnon, promptLogin]);
+
+  /** 원본 찾기. 화면용 목록에 없으면(창 밖의 달) 계산용 목록에서 찾는다. */
+  const findBase = useCallback((id: string): Entry | undefined => {
+    const base = baseIdOf(id);
+    return store.entries.find((x) => x.id === base) ?? store.tideEntries.find((x) => x.id === base);
+  }, [store.entries, store.tideEntries]);
 
   const openEdit = useCallback((e: Entry) => {
     // 반복 전개분을 눌러도 편집은 항상 원본을 향한다.
-    const base = store.entries.find((x) => x.id === baseIdOf(e.id)) ?? e;
+    const base = findBase(e.id) ?? e;
     // 회복은 저장·삭제가 아니라 완료·옮기기·건너뛰기가 기본 행동이라 전용 상세로 보낸다.
     if (isRecoveryEntry(base)) { setRecoveryId(base.id); return; }
-    setModal({ open: true, mode: 'edit', entry: base });
-  }, [store.entries]);
+    setModal({ open: true, mode: 'edit', entry: base, occurrence: occurrenceDateOf(e.id) ?? base.startDate });
+  }, [findBase]);
 
   const closeModal = useCallback(() => setModal((m) => ({ ...m, open: false })), []);
 
@@ -390,6 +413,73 @@ function Workspace({ uid, user, onSignOut }: WorkspaceProps) {
     persist(e);
     closeModal();
   }, [persist, closeModal]);
+
+  /**
+   * 예정 회차를 확정하러 간다. 이미 확정된 회차면 새로 만들지 않고 그 실제 거래를 연다 —
+   * 같은 회차는 같은 문서라 덮어쓰기는 되지만, 고친 실제 금액을 예정 값으로 되돌리게 된다.
+   */
+  const startConfirm = useCallback((plan: Entry, date: string) => {
+    closeModal();
+    const existing = confirmationOf([...store.entries, ...store.tideEntries], plan.id, date);
+    if (existing) {
+      dialog.toast('이미 확정한 회차입니다. 그 실제 거래를 엽니다.');
+      setModal({ open: true, mode: 'edit', entry: existing, occurrence: null });
+      return;
+    }
+    setConfirming({ plan, date });
+  }, [closeModal, store.entries, store.tideEntries, dialog]);
+
+  /** 확정 취소 = 실제 거래 삭제. 예정 원본은 처음부터 그대로라 그 회차가 다시 보인다. */
+  const unconfirm = useCallback(async (actual: Entry) => {
+    if (isAnon || !uid) { void promptLogin(); return; }
+    const ok = await dialog.confirm({
+      title: '확정을 취소할까요?',
+      body: '이 실제 거래를 지우고 예정 회차를 되살립니다. 여기서 고친 실제 금액 · 날짜 · 카테고리는 함께 사라집니다.',
+      confirmLabel: '확정 취소',
+      danger: true,
+    });
+    if (!ok) return;
+    closeModal();
+    commit({ kind: 'entryDelete', label: '확정 취소', summary: displayTitle(actual), payload: { id: actual.id } });
+    dialog.toast('확정을 취소했습니다. 예정이 다시 보입니다.');
+  }, [isAnon, uid, promptLogin, dialog, closeModal, commit]);
+
+  /**
+   * 기본 카테고리 만들기. id 가 정해져 있어 두 기기에서 동시에 눌러도 같은 문서로 모인다.
+   * 이미 있는 것은 다시 쓰지 않는다 — 고쳐 둔 이름 · 보관 상태를 덮지 않는다.
+   */
+  const seedCategories = useCallback(() => {
+    if (isAnon || !uid) { void promptLogin(); return; }
+    const have = new Set(store.categories.map((c) => c.id));
+    const items = defaultCategories().filter((c) => !have.has(c.id));
+    if (items.length === 0) return;
+    commit({ kind: 'categories', label: '카테고리', summary: `기본 카테고리 ${items.length}개`, payload: { items } });
+    dialog.toast('기본 카테고리를 만들었습니다. 설정에서 이름을 바꾸거나 보관할 수 있습니다.');
+  }, [isAnon, uid, promptLogin, store.categories, commit, dialog]);
+
+  /** 생활비에 연결되지 않은 실제 지출을 그 주머니에 건다. 사용처는 하나만 — 대출 연결은 푼다. */
+  const linkToPocket = useCallback((e: Entry, b: Budget) => {
+    const base = findBase(e.id) ?? e;
+    if (!base.money) return;
+    persist(withDerived({ ...base, money: { ...base.money, budgetId: b.id, debtId: null } }));
+    dialog.toast(`'${b.name}'에 연결했습니다.`);
+  }, [findBase, persist, dialog]);
+
+  /** 전에 적은 결제수단. 최근 것부터 열 개. */
+  const methods = useMemo(() => {
+    const seen = new Map<string, string>();
+    for (const e of [...store.entries, ...store.tideEntries]) {
+      const m = e.money?.method?.trim();
+      if (!m || !isActual(e)) continue;
+      const prev = seen.get(m);
+      if (!prev || e.updatedAt > prev) seen.set(m, e.updatedAt);
+    }
+    return [...seen.entries()].sort((a, b) => b[1].localeCompare(a[1])).slice(0, 10).map(([m]) => m);
+  }, [store.entries, store.tideEntries]);
+
+  /** 카테고리가 "없음" 을 확정할 수 있는가. 캐시가 비어 있으면 아직 모른다. */
+  const categoriesReady = store.ledgerMeta.ready
+    && !(store.ledgerMeta.fromCache && store.categories.length === 0);
 
   /**
    * 내가 올린 항목을 보드에서 내린다.
@@ -515,11 +605,14 @@ function Workspace({ uid, user, onSignOut }: WorkspaceProps) {
     const sharedNote = shared.board && isShareableTask(e, today)
       ? ' 같이 보기에서도 사라집니다 — 거기서 고쳐 둔 내용이 있으면 함께 지워집니다.'
       : '';
+    const confirmedFrom = isActual(e) ? e.money?.plannedRef : null;
     const ok = await dialog.confirm({
       title: '이 항목을 삭제할까요?',
       body: (e.isRecurring
-        ? '반복 항목입니다. 모든 발생분이 함께 사라집니다.'
-        : '되돌릴 수 없습니다.') + sharedNote,
+        ? '반복 항목입니다. 모든 발생분이 함께 사라집니다. 이미 실제 거래로 확정한 회차는 그대로 남습니다.'
+        : confirmedFrom
+          ? '예정 회차를 확정한 실제 거래입니다. 지우면 그 예정 회차가 다시 보입니다.'
+          : '되돌릴 수 없습니다.') + sharedNote,
       confirmLabel: '삭제',
       danger: true,
     });
@@ -615,10 +708,10 @@ function Workspace({ uid, user, onSignOut }: WorkspaceProps) {
   const handleExport = useCallback(async () => {
     if (isAnon || !uid) { void promptLogin(); return; }
     try {
-      const all = await fetchAll(db, uid);
-      // 회복 규칙은 users/{uid} 문서에 있어 fetchAll 이 보지 않는다.
-      // 구독으로 이미 들고 있으니 그대로 실어 보낸다.
-      downloadJSON(buildBackup({ ...all, recovery: recovery.rule }), backupFilename());
+      const [all, ledger] = await Promise.all([fetchAll(db, uid), fetchLedgerSettings(db, uid)]);
+      // 회복 규칙 · 정산 시작일은 users/{uid} 문서에 있어 fetchAll 이 보지 않는다.
+      // 회복 규칙은 구독으로 이미 들고 있으니 그대로 실어 보낸다.
+      downloadJSON(buildBackup({ ...all, ledger, recovery: recovery.rule }), backupFilename());
       dialog.toast(`${countBackup(all).toLocaleString('ko-KR')}건을 내려받았습니다.`);
     } catch (err) {
       dialog.toast(`백업하지 못했습니다. ${describeFirestoreError(err)}`, 'bad');
@@ -1306,6 +1399,7 @@ function Workspace({ uid, user, onSignOut }: WorkspaceProps) {
                 if (ok) commit({ kind: 'reserveDelete', label: '세이브 삭제', summary: r.name, payload: { id: r.id } });
               }}
               onEntryClick={openEdit}
+              onLinkEntry={linkToPocket}
             />
             <MoneyPanel
               debts={store.debts}
@@ -1420,10 +1514,38 @@ function Workspace({ uid, user, onSignOut }: WorkspaceProps) {
         budgets={store.budgets}
         debts={store.debts}
         sharedActive={!!shared.board}
+        categories={store.categories}
+        categoriesReady={categoriesReady}
+        onSeedCategories={seedCategories}
+        accounts={store.accounts}
+        methods={methods}
+        occurrenceDate={modal.occurrence ?? null}
+        onConfirm={startConfirm}
+        onUnconfirm={(a) => void unconfirm(a)}
         onSave={handleSave}
         onDelete={(e) => void handleDelete(e)}
         onClose={closeModal}
       />
+
+      {confirming && (
+        <ConfirmSheet
+          plan={confirming.plan}
+          occurrenceDate={confirming.date}
+          categories={store.categories}
+          categoriesReady={categoriesReady}
+          onSeedCategories={seedCategories}
+          accounts={store.accounts}
+          budgets={store.budgets}
+          debts={store.debts}
+          methods={methods}
+          onSave={(actual) => {
+            setConfirming(null);
+            persist(actual);
+            dialog.toast('실제 거래로 확정했습니다. 예정은 그대로 남고 이 회차만 빠집니다.');
+          }}
+          onClose={() => setConfirming(null)}
+        />
+      )}
 
       {sharedSheet === 'start' && (
         <SharedStartSheet

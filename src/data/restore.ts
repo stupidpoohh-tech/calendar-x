@@ -31,7 +31,9 @@
  * 존재를 확인한다 (`createManyIfAbsent`). 이미 있는 문서는 충돌로 남기고 건드리지 않는다.
  */
 import { isValidDate, normalizeDate } from '../domain/date';
-import type { Account, BackupCollection, Budget, Debt, Entry, Pin, Reserve } from '../domain/types';
+import type {
+  Account, BackupCollection, Budget, Category, CategoryBudget, Debt, Entry, Pin, Reserve,
+} from '../domain/types';
 import type { BackupData } from './backup';
 import type { CreateManyResult } from './repo';
 
@@ -187,6 +189,22 @@ function checkReserve(r: Reserve): string | null {
   return null;
 }
 
+function checkCategory(c: Category): string | null {
+  if (!c.name.trim()) return '이름이 비어 있습니다.';
+  if (c.name.length > LIMITS.name) return `이름이 ${LIMITS.name}자를 넘습니다.`;
+  if (c.kind !== 'income' && c.kind !== 'expense') return `흐름을 알 수 없습니다: ${String(c.kind)}`;
+  if (!isInt(c.order)) return '순서가 정수가 아닙니다.';
+  return null;
+}
+
+function checkCategoryBudget(b: CategoryBudget): string | null {
+  if (!b.categoryId) return '카테고리가 비어 있습니다.';
+  if (b.scope !== 'default' && b.scope !== 'period') return `범위를 알 수 없습니다: ${String(b.scope)}`;
+  if (!/^\d{4}-(0[1-9]|1[0-2])$/.test(b.period)) return `기간이 YYYY-MM 이 아닙니다: ${b.period}`;
+  if (b.amountMinor !== null && (!isInt(b.amountMinor) || b.amountMinor < 0)) return '예산이 0 이상의 정수가 아닙니다.';
+  return null;
+}
+
 function scan<T extends { id: string }>(
   collection: BackupCollection, list: readonly T[],
   check: (v: T) => string | null, out: BackupProblem[],
@@ -221,6 +239,8 @@ export function validateBackup(data: BackupData): BackupProblem[] {
   scan('pins', data.pins, checkPin, out);
   scan('budgets', data.budgets, checkBudget, out);
   scan('reserves', data.reserves, checkReserve, out);
+  scan('categories', data.categories, checkCategory, out);
+  scan('categoryBudgets', data.categoryBudgets, checkCategoryBudget, out);
   return out;
 }
 
@@ -247,6 +267,10 @@ export function planMerge(current: BackupData, incoming: BackupData): BackupData
     pins: only(current.pins, incoming.pins),
     budgets: only(current.budgets, incoming.budgets),
     reserves: only(current.reserves, incoming.reserves),
+    categories: only(current.categories, incoming.categories),
+    categoryBudgets: only(current.categoryBudgets, incoming.categoryBudgets),
+    // 정산 시작일도 설정이다. 회복 규칙과 같은 이유로 병합이 적용하지 않는다.
+    ledger: current.ledger ?? incoming.ledger,
     /*
       회복 규칙은 컬렉션이 아니라 `users/{uid}` 문서의 필드 하나다. 병합 실행 경로
       (`createIfAbsent`)는 컬렉션 네 개만 쓰므로 이 값은 **어디에도 반영되지 않는다.**
@@ -268,9 +292,18 @@ export const MERGE_SKIPS_RECOVERY =
   + '회복 규칙은 항목이 아니라 계정 설정이라, 지금 쓰고 있는 설정을 덮지 않습니다. '
   + '간격·기본 메모·OFF 항목은 설정 화면에서 직접 맞춰 주세요.';
 
-export function countDocs(d: Omit<BackupData, 'recovery'>): number {
+/**
+ * 병합이 정산 시작일을 적용하지 않는다는 사실. 회복 규칙과 같은 이유다 — 지금 쓰고 있는
+ * 설정을 파일 값으로 조용히 덮지 않는다. 다르면 화면이 미리 알린다.
+ */
+export function mergeSkipsLedger(fileDay: number, currentDay: number): string {
+  return `파일의 정산 시작일은 매월 ${fileDay}일이고 지금은 ${currentDay}일입니다. `
+    + '“더하기”로는 이 설정을 바꾸지 않습니다. 필요하면 설정에서 직접 바꿔 주세요.';
+}
+
+export function countDocs(d: Omit<BackupData, 'recovery' | 'ledger'>): number {
   return d.entries.length + d.accounts.length + d.debts.length + d.pins.length
-    + d.budgets.length + d.reserves.length;
+    + d.budgets.length + d.reserves.length + d.categories.length + d.categoryBudgets.length;
 }
 
 // ---------- 실행 순서 ----------
@@ -282,7 +315,7 @@ export function countDocs(d: Omit<BackupData, 'recovery'>): number {
  * 돌려 봐야 "무엇이 보존되는가" 를 시험할 수 있다.
  */
 export interface RestoreIO {
-  fetchAll: () => Promise<Omit<BackupData, 'recovery'>>;
+  fetchAll: () => Promise<Omit<BackupData, 'recovery' | 'ledger'>>;
   /** 없는 것만 만든다. 이미 있으면 충돌로 남기고 건드리지 않는다. */
   createIfAbsent: (payload: Partial<BackupData>) => Promise<CreateManyResult>;
 }
@@ -353,7 +386,7 @@ export async function safeMerge(incoming: BackupData, io: RestoreIO): Promise<Me
   if (problems.length > 0) return { kind: 'invalid', problems };
 
   const current = await io.fetchAll();
-  const candidates = planMerge({ ...current, recovery: null }, incoming);
+  const candidates = planMerge({ ...current, recovery: null, ledger: null }, incoming);
   const skippedExisting = countDocs(incoming) - countDocs(candidates);
 
   if (countDocs(candidates) === 0) return { kind: 'ok', created: NO_CREATES, skippedExisting };

@@ -23,6 +23,7 @@
  * | v3 | `version: 3` | v2 + `recovery` (null 허용) |
  * | v4 | `version: 4` | v3 + `budgets` · `reserves` **두 배열 모두 필수** |
  * | v5 | `version: 5` | v4 와 같은 구조. 가계부 원장 필드(실제 거래 · 흐름 · 확정한 회차)가 실릴 수 있다 |
+ * | v6 | `version: 6` | v5 + `categories` · `categoryBudgets` **두 배열 모두 필수** + `ledger`(정산 시작일, null 허용) |
  *
  * 없는 컬렉션을 빈 배열로 넘겨 짚지 않는다. v2·v3 파일에 `debts` 가 없다면 그건
  * 빈 백업이 아니라 깨진 파일이다.
@@ -37,15 +38,15 @@ import { MONEY_FLOWS, MONEY_STATUSES, OUTFLOW_ONLY_FLOWS } from '../domain/ledge
 import type { BackupCollection } from '../domain/types';
 import type { BackupData } from './backup';
 import {
-  accountFromDoc, budgetFromDoc, debtFromDoc, entryFromDoc, pinFromDoc,
-  recoveryRuleFromDoc, reserveFromDoc,
+  accountFromDoc, budgetFromDoc, categoryBudgetFromDoc, categoryFromDoc, debtFromDoc,
+  entryFromDoc, ledgerSettingsFromDoc, pinFromDoc, recoveryRuleFromDoc, reserveFromDoc,
 } from './converters';
 import { convertLegacyItems } from './migrate';
 
-export const SUPPORTED_VERSIONS = [1, 2, 3, 4, 5] as const;
-export const LATEST_VERSION = 5;
+export const SUPPORTED_VERSIONS = [1, 2, 3, 4, 5, 6] as const;
+export const LATEST_VERSION = 6;
 
-export type BackupFormat = 'legacy' | 'v2' | 'v3' | 'v4' | 'v5';
+export type BackupFormat = 'legacy' | 'v2' | 'v3' | 'v4' | 'v5' | 'v6';
 
 /** 파일 한 곳이 왜 들어갈 수 없는지. */
 export interface FileProblem {
@@ -416,6 +417,40 @@ function checkReserveRaw(c: Collector, where: string, r: Raw): void {
   optStr(c, `${where}.updatedAt`, r.updatedAt, LIMITS.checkedAt);
 }
 
+function checkCategoryRaw(c: Collector, where: string, r: Raw): void {
+  reqStr(c, `${where}.name`, r.name, LIMITS.name);
+  if (typeof r.name === 'string' && !r.name.trim()) c.add(`${where}.name`, '이름이 비어 있습니다.');
+  // 흐름은 뜻이 바뀌는 값이다. 모르는 값을 지출로 떨어뜨리면 수입 카테고리가 지출 쪽에 선다.
+  if (r.kind !== 'income' && r.kind !== 'expense') {
+    c.add(`${where}.kind`, `흐름을 알 수 없습니다: ${describe(r.kind)} — 쓸 수 있는 값: income · expense`);
+  }
+  optInt(c, `${where}.order`, r.order);
+  if (r.archived !== undefined && r.archived !== null && typeof r.archived !== 'boolean') {
+    c.add(`${where}.archived`, `참·거짓이 아닙니다: ${describe(r.archived)}`);
+  }
+  optStr(c, `${where}.createdAt`, r.createdAt, LIMITS.checkedAt);
+  optStr(c, `${where}.updatedAt`, r.updatedAt, LIMITS.checkedAt);
+}
+
+function checkCategoryBudgetRaw(c: Collector, where: string, r: Raw): void {
+  reqStr(c, `${where}.categoryId`, r.categoryId, LIMITS.categoryId);
+  if (r.scope !== 'default' && r.scope !== 'period') {
+    c.add(`${where}.scope`, `범위를 알 수 없습니다: ${describe(r.scope)} — 쓸 수 있는 값: default · period`);
+  }
+  if (typeof r.period !== 'string' || !/^\d{4}-(0[1-9]|1[0-2])$/.test(r.period)) {
+    c.add(`${where}.period`, `기간(YYYY-MM)이 아닙니다: ${describe(r.period)}`);
+  }
+  if (r.amountMinor !== null) {
+    reqInt(c, `${where}.amountMinor`, r.amountMinor);
+    if (isIntNum(r.amountMinor) && r.amountMinor < 0) {
+      c.add(`${where}.amountMinor`, `음수입니다: ${r.amountMinor}`);
+    }
+  }
+  reqStr(c, `${where}.currency`, r.currency);
+  optStr(c, `${where}.createdAt`, r.createdAt, LIMITS.checkedAt);
+  optStr(c, `${where}.updatedAt`, r.updatedAt, LIMITS.checkedAt);
+}
+
 const CHECKERS: Record<BackupCollection, (c: Collector, where: string, v: Raw) => void> = {
   entries: checkEntryRaw,
   accounts: checkAccountRaw,
@@ -423,6 +458,8 @@ const CHECKERS: Record<BackupCollection, (c: Collector, where: string, v: Raw) =
   pins: checkPinRaw,
   budgets: checkBudgetRaw,
   reserves: checkReserveRaw,
+  categories: checkCategoryRaw,
+  categoryBudgets: checkCategoryBudgetRaw,
 };
 
 /** 컬렉션 하나를 통째로 본다. 없으면 그 자체가 문제다 (v2·v3 명세). */
@@ -531,8 +568,10 @@ export function readBackupFile(text: string): ReadResult {
     return { ok: false, problems: [{ where: 'version', reason: '버전이 없습니다. 백업 파일이 맞는지 확인해 주세요.' }] };
   }
 
-  const format: BackupFormat = version >= 5 ? 'v5' : version === 4 ? 'v4' : version === 3 ? 'v3' : 'v2';
-  const hasPockets = format === 'v4' || format === 'v5';
+  const format: BackupFormat = version >= 6 ? 'v6' : version === 5 ? 'v5' : version === 4 ? 'v4'
+    : version === 3 ? 'v3' : 'v2';
+  const hasPockets = format === 'v4' || format === 'v5' || format === 'v6';
+  const hasCategories = format === 'v6';
 
   // ---- 컬렉션 ----
   const entries = checkCollection(c, 'entries', obj.entries);
@@ -545,6 +584,21 @@ export function readBackupFile(text: string): ReadResult {
   const reserves = hasPockets
     ? checkCollection(c, 'reserves', obj.reserves)
     : checkOptionalCollection(c, 'reserves', obj.reserves);
+  // v6 부터 필수다. 그 앞 파일에는 없는 것이 정상이고, 있으면 검증은 한다.
+  const categories = hasCategories
+    ? checkCollection(c, 'categories', obj.categories)
+    : checkOptionalCollection(c, 'categories', obj.categories);
+  const categoryBudgets = hasCategories
+    ? checkCollection(c, 'categoryBudgets', obj.categoryBudgets)
+    : checkOptionalCollection(c, 'categoryBudgets', obj.categoryBudgets);
+  if (obj.ledger !== undefined && obj.ledger !== null) {
+    if (!isObj(obj.ledger)) {
+      c.add('ledger', `객체가 아닙니다: ${describe(obj.ledger)}`);
+    } else {
+      const d = obj.ledger.settleDay;
+      if (!isIntNum(d) || d < 1 || d > 31) c.add('ledger.settleDay', `1~31 의 정수가 아닙니다: ${describe(d)}`);
+    }
+  }
 
   // v2 에는 recovery 가 없다. v3 에서는 있어도 되고 null 이어도 된다.
   if (format === 'v2' && obj.recovery !== undefined && obj.recovery !== null) {
@@ -570,6 +624,9 @@ export function readBackupFile(text: string): ReadResult {
         pins: pins.map((r) => pinFromDoc(r.id as string, r)),
         budgets: budgets.map((r) => budgetFromDoc(r.id as string, r)),
         reserves: reserves.map((r) => reserveFromDoc(r.id as string, r)),
+        categories: categories.map((r) => categoryFromDoc(r.id as string, r)),
+        categoryBudgets: categoryBudgets.map((r) => categoryBudgetFromDoc(r.id as string, r)),
+        ledger: isObj(obj.ledger) ? ledgerSettingsFromDoc(obj.ledger) : null,
         recovery: isObj(obj.recovery) ? recoveryRuleFromDoc(obj.recovery) : null,
       },
     },
@@ -608,6 +665,9 @@ function readLegacy(c: Collector, items: unknown[]): ReadResult {
         // 이관 전 구조에는 예산·세이브·회복이 없었다.
         budgets: [],
         reserves: [],
+        categories: [],
+        categoryBudgets: [],
+        ledger: null,
         recovery: null,
       },
     },

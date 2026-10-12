@@ -415,6 +415,65 @@ describe('가계부 원장', () => {
   });
 });
 
+describe('가계부 결산 — 카테고리 · 카테고리 예산 · 정산 시작일', () => {
+  const cat = (over: Record<string, unknown> = {}) => ({
+    kind: 'expense', name: '식비', order: 0, archived: false, createdAt: '', updatedAt: '', ...over,
+  });
+  const cb = (over: Record<string, unknown> = {}) => ({
+    categoryId: 'food', scope: 'default', period: '2026-09', amountMinor: 300000,
+    currency: 'KRW', createdAt: '', updatedAt: '', ...over,
+  });
+
+  it('카테고리를 쓰고 읽는다. 남의 것은 안 된다', async () => {
+    await assertSucceeds(setDoc(doc(db(ME), `users/${ME}/categories/food`), cat()));
+    await assertSucceeds(getDoc(doc(db(ME), `users/${ME}/categories/food`)));
+    await assertFails(getDoc(doc(db(OTHER), `users/${ME}/categories/food`)));
+    await assertFails(setDoc(doc(db(OTHER), `users/${ME}/categories/x`), cat()));
+  });
+
+  it('카테고리 모양을 본다 — 흐름 · 이름 · 순서 · 보관', async () => {
+    await assertFails(setDoc(doc(db(ME), `users/${ME}/categories/a`), cat({ kind: 'transfer' })));
+    await assertFails(setDoc(doc(db(ME), `users/${ME}/categories/b`), cat({ name: '' })));
+    await assertFails(setDoc(doc(db(ME), `users/${ME}/categories/c`), cat({ name: 'x'.repeat(101) })));
+    await assertFails(setDoc(doc(db(ME), `users/${ME}/categories/d`), cat({ order: 1.5 })));
+    await assertFails(setDoc(doc(db(ME), `users/${ME}/categories/e`), cat({ archived: 'yes' })));
+    await assertSucceeds(setDoc(doc(db(ME), `users/${ME}/categories/f`), cat({ kind: 'income', archived: true })));
+  });
+
+  it('카테고리 예산은 정해진 id 로만 쓴다 — 같은 자리에 두 줄이 생기지 않는다', async () => {
+    await assertSucceeds(setDoc(doc(db(ME), `users/${ME}/categoryBudgets/food~default~2026-09`), cb()));
+    await assertFails(setDoc(doc(db(ME), `users/${ME}/categoryBudgets/random-id`), cb()));
+    await assertFails(setDoc(doc(db(ME), `users/${ME}/categoryBudgets/food~period~2026-09`), cb()));
+    await assertSucceeds(setDoc(
+      doc(db(ME), `users/${ME}/categoryBudgets/food~period~2026-10`), cb({ scope: 'period', period: '2026-10' }),
+    ));
+  });
+
+  it('카테고리 예산 모양을 본다', async () => {
+    const at = (id: string) => doc(db(ME), `users/${ME}/categoryBudgets/${id}`);
+    await assertSucceeds(setDoc(at('food~default~2026-11'), cb({ period: '2026-11', amountMinor: null })));
+    await assertFails(setDoc(at('food~default~2026-13'), cb({ period: '2026-13' })));
+    await assertFails(setDoc(at('food~weekly~2026-09'), cb({ scope: 'weekly' })));
+    await assertFails(setDoc(at('food~default~2026-09'), cb({ amountMinor: -1 })));
+    await assertFails(setDoc(at('food~default~2026-09'), cb({ amountMinor: 1.5 })));
+    await assertFails(setDoc(doc(db(OTHER), `users/${ME}/categoryBudgets/food~default~2026-09`), cb()));
+  });
+
+  it('정산 시작일은 1~31 정수다. 이웃 필드(회복 규칙)는 그대로 쓴다', async () => {
+    const me = doc(db(ME), `users/${ME}`);
+    await assertSucceeds(setDoc(me, { ledger: { settleDay: 25 } }, { merge: true }));
+    await assertSucceeds(setDoc(me, { recovery: recoveryRule }, { merge: true }));
+    await assertFails(setDoc(me, { ledger: { settleDay: 0 } }, { merge: true }));
+    await assertFails(setDoc(me, { ledger: { settleDay: 32 } }, { merge: true }));
+    await assertFails(setDoc(me, { ledger: { settleDay: '25' } }, { merge: true }));
+    await assertFails(setDoc(me, { ledger: { settleDay: 25, extra: 1 } }, { merge: true }));
+    await assertFails(setDoc(doc(db(OTHER), `users/${ME}`), { ledger: { settleDay: 25 } }, { merge: true }));
+    const snap = await getDoc(me);
+    expect(snap.data()?.ledger?.settleDay).toBe(25);
+    expect(snap.data()?.recovery?.intervalDays).toBe(3);
+  });
+});
+
 /*
   회복은 규칙을 고치지 않고 들어왔다. 항목 규칙은 필수 필드의 타입만 보고 나머지를
   통과시키도록 쓰여 있고(그래서 새 필드가 조용히 막히지 않는다), 회복 규칙은

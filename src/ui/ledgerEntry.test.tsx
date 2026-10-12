@@ -1,0 +1,229 @@
+/**
+ * 실제 거래 입력 · 예정 확정 · 확정 취소 — 화면에서 사람이 누르는 순서대로.
+ *
+ * 도메인 함수(`confirmOccurrence` · `balanceInclusion`)는 따로 시험했다. 여기서는 그 값이
+ * 화면에서 실제로 만들어지는지 본다 — 빠른 입력이 정말 짧은지, 기본 주머니가 저장 전에
+ * 보이는지, 확정이 결정적 id 로 나가는지.
+ */
+import { cleanup, fireEvent, render, screen, within } from '@testing-library/react';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import { defaultCategories } from '../domain/category';
+import { newEntry, newMoney } from '../domain/entry';
+import { materialize } from '../domain/recurrence';
+import type { Account, Budget, Entry } from '../domain/types';
+import { BudgetPanel } from './BudgetPanel';
+import { ConfirmSheet } from './ConfirmSheet';
+import { EntryModal } from './EntryModal';
+
+afterEach(cleanup);
+
+const TODAY = '2026-10-12';
+const categories = defaultCategories('');
+const budget = (over: Partial<Budget> = {}): Budget => ({
+  id: 'b1', name: '10월 생활비', startDate: '2026-10-01', endDate: '2026-10-31',
+  amountMinor: 700_000, currency: 'KRW', createdAt: '', updatedAt: '', ...over,
+});
+const account = (over: Partial<Account> = {}): Account => ({
+  id: 'a1', name: '주계좌', balanceMinor: 1_000_000, currency: 'KRW', asOf: TODAY,
+  checkedAt: `${TODAY}T09:00:00+09:00`, reflectedEntryIds: [], order: 0, createdAt: '', updatedAt: '', ...over,
+});
+
+function openModal(props: Partial<Parameters<typeof EntryModal>[0]> & { initial: Entry }) {
+  const onSave = vi.fn();
+  render(
+    <EntryModal
+      open mode="create" allTags={[]} linkableTasks={[]} budgets={[]} debts={[]}
+      categories={categories} accounts={[account()]}
+      onSave={onSave} onDelete={() => {}} onClose={() => {}}
+      {...props}
+    />,
+  );
+  return { onSave };
+}
+
+const actualDraft = (over: Partial<Entry> = {}) => newEntry('money', {
+  id: 'n1', startDate: TODAY, money: newMoney({ status: 'actual' }), ...over,
+});
+
+describe('실제 거래 빠른 입력', () => {
+  it('금액과 카테고리만 고르면 실제 지출로 저장된다 — 유형을 고르게 하지 않는다', () => {
+    const { onSave } = openModal({ initial: actualDraft() });
+    expect(screen.getByRole('radio', { name: '실제 거래' })).toHaveAttribute('aria-checked', 'true');
+    // 반복은 실제 거래에 없다. 거래 유형은 접혀 있다.
+    expect(screen.queryByLabelText('반복')).toBeNull();
+    expect(screen.queryByRole('radiogroup', { name: '거래 유형' })).toBeNull();
+
+    fireEvent.change(screen.getByLabelText('금액'), { target: { value: '12,000' } });
+    fireEvent.click(screen.getByRole('button', { name: '식비' }));
+    fireEvent.click(screen.getByRole('button', { name: '저장' }));
+
+    const saved = onSave.mock.calls[0]![0] as Entry;
+    expect(saved.money).toMatchObject({
+      status: 'actual', type: 'expense', flow: 'normal', amountMinor: 12_000, categoryId: 'default-food',
+    });
+    expect(saved.recurrence).toBeNull();
+  });
+
+  it('수입으로 바꾸면 수입 카테고리만 보인다', () => {
+    openModal({ initial: actualDraft() });
+    fireEvent.click(screen.getByRole('button', { name: /수입/ }));
+    expect(screen.getByRole('button', { name: '급여' })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: '식비' })).toBeNull();
+  });
+
+  it('상세를 펼치면 거래 유형을 고른다 — 카드 사용은 생활비 연결을 푼다', () => {
+    const { onSave } = openModal({ initial: actualDraft(), budgets: [budget()] });
+    // 기간에 주머니가 하나면 기본으로 걸려 있다.
+    expect(screen.getByRole('button', { name: '10월 생활비' })).toHaveAttribute('aria-pressed', 'true');
+    fireEvent.click(screen.getByRole('button', { name: /상세/ }));
+    fireEvent.click(screen.getByRole('radio', { name: '카드 사용' }));
+    fireEvent.change(screen.getByLabelText('금액'), { target: { value: '30000' } });
+    fireEvent.click(screen.getByRole('button', { name: '저장' }));
+    expect((onSave.mock.calls[0]![0] as Entry).money).toMatchObject({ flow: 'cardSpend', budgetId: null });
+  });
+
+  it('생활비 주머니가 여럿이면 고르지 않고 고르라고 말한다', () => {
+    openModal({ initial: actualDraft(), budgets: [budget(), budget({ id: 'b2', name: '여행 경비' })] });
+    expect(screen.getByRole('button', { name: '연결 안 함' })).toHaveAttribute('aria-pressed', 'true');
+    expect(screen.getByText(/주머니가 여럿입니다|생활비가 여럿입니다/)).toBeInTheDocument();
+  });
+
+  it('예정으로 바꾸면 반복을 고를 수 있다', () => {
+    openModal({ initial: actualDraft() });
+    fireEvent.click(screen.getByRole('radio', { name: '예정' }));
+    expect(screen.getByLabelText('반복')).toBeInTheDocument();
+  });
+
+  it('계좌가 여럿이고 판정이 갈리면 계좌를 정하라고 말한다', () => {
+    openModal({
+      initial: actualDraft({ startDate: '2026-10-05' }),
+      accounts: [account({ id: 'a', asOf: '2026-10-01' }), account({ id: 'b', name: '부계좌', asOf: '2026-10-10' })],
+    });
+    expect(screen.getByText(/계좌를 정해 주세요/)).toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText('계좌'), { target: { value: 'b' } });
+    expect(screen.queryByText(/계좌를 정해 주세요/)).toBeNull();
+  });
+
+  it('기존 할 일 입력은 그대로다', () => {
+    const { onSave } = openModal({ initial: newEntry('task', { id: 't1', startDate: TODAY }) });
+    expect(screen.queryByRole('radio', { name: '실제 거래' })).toBeNull();
+    fireEvent.change(screen.getByPlaceholderText('제목'), { target: { value: '치과' } });
+    fireEvent.click(screen.getByRole('button', { name: '저장' }));
+    expect((onSave.mock.calls[0]![0] as Entry).kind).toBe('task');
+  });
+});
+
+describe('예정 확정 · 확정 취소', () => {
+  const rent = newEntry('money', {
+    id: 'rent', title: '월세', startDate: '2026-01-25',
+    recurrence: { freq: 'monthly', interval: 1, until: null, count: null },
+    money: newMoney({ amountMinor: 500_000, categoryId: 'default-housing' }),
+  });
+
+  it('예정을 편집하면 누른 회차를 확정하는 버튼이 있다', () => {
+    const onConfirm = vi.fn();
+    openModal({ initial: rent, mode: 'edit', occurrenceDate: '2026-10-25', onConfirm });
+    fireEvent.click(screen.getByRole('button', { name: /실제 지출로 확정/ }));
+    expect(onConfirm).toHaveBeenCalledWith(rent, '2026-10-25');
+  });
+
+  it('기간형 · legacy 생활비 예정에는 확정 버튼이 없다', () => {
+    const living = newEntry('money', {
+      id: 'l', startDate: '2026-10-01', endDate: '2026-10-31', money: newMoney({ type: 'living' }),
+    });
+    openModal({ initial: living, mode: 'edit', onConfirm: vi.fn() });
+    expect(screen.queryByRole('button', { name: /로 확정/ })).toBeNull();
+  });
+
+  it('확정 창은 예정 금액 · 날짜로 시작하고, 고친 값으로 결정적 id 의 실제 거래를 만든다', () => {
+    const onSave = vi.fn();
+    render(
+      <ConfirmSheet
+        plan={rent} occurrenceDate="2026-10-25" categories={categories} categoriesReady
+        accounts={[account()]} budgets={[]} debts={[]} methods={[]}
+        onSave={onSave} onClose={() => {}}
+      />,
+    );
+    expect(screen.getByLabelText('실제 금액')).toHaveValue('500000');
+    expect(screen.getByLabelText('실제 날짜')).toHaveValue('2026-10-25');
+    fireEvent.change(screen.getByLabelText('실제 금액'), { target: { value: '520000' } });
+    fireEvent.change(screen.getByLabelText('실제 날짜'), { target: { value: '2026-11-02' } });
+    fireEvent.click(screen.getByRole('button', { name: '확정' }));
+    const actual = onSave.mock.calls[0]![0] as Entry;
+    expect(actual.id).toBe('rent~2026-10-25');
+    expect(actual.startDate).toBe('2026-11-02');
+    expect(actual.ymSpan).toEqual(['2026-10', '2026-11']);
+    expect(actual.money).toMatchObject({
+      status: 'actual', amountMinor: 520_000, categoryId: 'default-housing',
+      plannedRef: { entryId: 'rent', date: '2026-10-25' },
+    });
+    // 확정한 회차는 화면에서 빠지고 다른 회차는 남는다.
+    const shown = materialize([rent, actual], '2026-10-01', '2026-11-30');
+    expect(shown.filter((e) => e.virtual).map((e) => e.startDate)).toEqual(['2026-11-25']);
+  });
+
+  it('legacy 상환은 수입 · 지출과 유형을 고르기 전에는 확정하지 않는다', () => {
+    const onSave = vi.fn();
+    const repay = newEntry('money', { id: 'loan', startDate: '2026-10-15', money: newMoney({ type: 'repay', amountMinor: 300_000 }) });
+    render(
+      <ConfirmSheet
+        plan={repay} occurrenceDate="2026-10-15" categories={categories} categoriesReady
+        accounts={[]} budgets={[]} debts={[]} methods={[]}
+        onSave={onSave} onClose={() => {}}
+      />,
+    );
+    fireEvent.click(screen.getByRole('button', { name: '확정' }));
+    expect(onSave).not.toHaveBeenCalled();
+    expect(screen.getByRole('alert')).toHaveTextContent('골라 주세요');
+    fireEvent.click(screen.getByRole('radio', { name: '지출' }));
+    fireEvent.click(screen.getByRole('radio', { name: '대출 원금' }));
+    fireEvent.click(screen.getByRole('button', { name: '확정' }));
+    expect((onSave.mock.calls[0]![0] as Entry).money).toMatchObject({ type: 'expense', flow: 'loanPrincipal' });
+  });
+
+  it('확정한 실제 거래를 열면 확정 취소가 있다', () => {
+    const onUnconfirm = vi.fn();
+    const actual = newEntry('money', {
+      id: 'rent~2026-10-25', startDate: '2026-10-25',
+      money: newMoney({ status: 'actual', amountMinor: 500_000, plannedRef: { entryId: 'rent', date: '2026-10-25' } }),
+    });
+    openModal({ initial: actual, mode: 'edit', onUnconfirm });
+    expect(screen.getByText(/확정한 거래입니다/)).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: '확정 취소' }));
+    expect(onUnconfirm).toHaveBeenCalledWith(actual);
+  });
+
+  it('실제 거래를 고쳐 저장해도 회차 연결이 남는다', () => {
+    const actual = newEntry('money', {
+      id: 'rent~2026-10-25', startDate: '2026-10-25',
+      money: newMoney({ status: 'actual', amountMinor: 500_000, plannedRef: { entryId: 'rent', date: '2026-10-25' } }),
+    });
+    const { onSave } = openModal({ initial: actual, mode: 'edit' });
+    fireEvent.change(screen.getByLabelText('금액'), { target: { value: '510000' } });
+    fireEvent.click(screen.getByRole('button', { name: '저장' }));
+    expect((onSave.mock.calls[0]![0] as Entry).money?.plannedRef).toEqual({ entryId: 'rent', date: '2026-10-25' });
+  });
+});
+
+describe('생활비 — 연결되지 않은 실제 지출', () => {
+  it('기간 안의 실제 지출 중 연결 안 된 것을 보여 주고 연결할 수 있다', () => {
+    const onLink = vi.fn();
+    const loose = newEntry('money', {
+      id: 'x', title: '마트', startDate: '2026-10-05', money: newMoney({ status: 'actual', amountMinor: 30_000 }),
+    });
+    const card = newEntry('money', {
+      id: 'y', title: '카드', startDate: '2026-10-05', money: newMoney({ status: 'actual', flow: 'cardSpend', amountMinor: 30_000 }),
+    });
+    render(
+      <BudgetPanel
+        budgets={[budget()]} reserves={[]} entries={[loose, card]} collapsed={false}
+        onToggleCollapsed={() => {}} onSaveBudget={() => {}} onDeleteBudget={() => {}}
+        onSaveReserve={() => {}} onDeleteReserve={() => {}} onLinkEntry={onLink}
+      />,
+    );
+    fireEvent.click(screen.getByRole('button', { name: /연결되지 않은 실제 지출 1건/ }));
+    const row = screen.getByText('마트').closest('li')!;
+    fireEvent.click(within(row).getByRole('button', { name: '연결' }));
+    expect(onLink).toHaveBeenCalledWith(loose, expect.objectContaining({ id: 'b1' }));
+  });
+});

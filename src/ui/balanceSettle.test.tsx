@@ -358,3 +358,92 @@ describe('잔고 반영 목록', () => {
     expect(saved[0]?.asOf).toBe('2026-09-10');
   });
 });
+
+describe('오늘 거래 — 잔고에 이미 빠져 있는 것 고르기', () => {
+  const coffee = newEntry('money', {
+    id: 'c1', title: '커피', startDate: '2026-09-10',
+    money: newMoney({ status: 'actual', amountMinor: 5_000 }),
+  });
+  const lunch = newEntry('money', {
+    id: 'c2', title: '점심', startDate: '2026-09-10',
+    money: newMoney({ status: 'actual', amountMinor: 12_000 }),
+  });
+
+  it('새 거래는 기본으로 고르지 않는다 — 고르지 않으면 한도에서 뺀다', async () => {
+    const saved: Account[] = [];
+    mount({
+      todayISO: '2026-09-10',
+      accounts: [account({ asOf: '2026-09-10', checkedAt: '2026-09-10T09:00:00+09:00' })],
+      entries: [coffee],
+      onSaveAccount: (a) => saved.push(a),
+    });
+    // 한도는 잔고 − 아직 반영 안 된 커피.
+    expect(screen.getByLabelText('잔고 고치기')).toHaveTextContent('995,000');
+    fireEvent.click(screen.getByLabelText('잔고 고치기'));
+    const box = screen.getByRole('checkbox', { name: /커피/ });
+    expect(box).not.toBeChecked();
+    fireEvent.change(screen.getByLabelText('잔고 금액'), { target: { value: '995000' } });
+    // 목록이 있으면 칸을 벗어나도 저장하지 않는다 — 목록을 누르려면 칸을 벗어나야 한다.
+    fireEvent.blur(screen.getByLabelText('잔고 금액'));
+    expect(saved).toHaveLength(0);
+    fireEvent.click(box);
+    fireEvent.click(screen.getByRole('button', { name: '저장' }));
+    // 커피가 이번에 잔고 안으로 들어간다. 정산은 그것을 근거로 적고, 차이는 0 이다.
+    await screen.findByText('잔고 정산');
+    const dlg = document.querySelector('.dlg')!;
+    expect(dlg.textContent).toContain('커피');
+    expect(dlg.textContent).toContain('차이 0');
+    fireEvent.click(screen.getByRole('button', { name: '이 금액으로 정산' }));
+    await waitFor(() => expect(saved).toHaveLength(1));
+    expect(saved[0]?.reflectedEntryIds).toEqual(['c1']);
+  });
+
+  it('전체 선택 · 해제가 된다', () => {
+    mount({
+      todayISO: '2026-09-10',
+      accounts: [account({ asOf: '2026-09-10', checkedAt: '2026-09-10T09:00:00+09:00' })],
+      entries: [coffee, lunch],
+      onSaveAccount: () => {},
+    });
+    fireEvent.click(screen.getByLabelText('잔고 고치기'));
+    fireEvent.click(screen.getByRole('button', { name: '전체 선택' }));
+    expect(screen.getByRole('checkbox', { name: /커피/ })).toBeChecked();
+    expect(screen.getByRole('checkbox', { name: /점심/ })).toBeChecked();
+    fireEvent.click(screen.getByRole('button', { name: '전체 해제' }));
+    expect(screen.getByRole('checkbox', { name: /커피/ })).not.toBeChecked();
+  });
+
+  it('같은 날 이미 고른 것은 골라진 채로 열린다 — 이중 차감이 없다', () => {
+    mount({
+      todayISO: '2026-09-10',
+      accounts: [account({
+        balanceMinor: 995_000, asOf: '2026-09-10', checkedAt: '2026-09-10T09:00:00+09:00', reflectedEntryIds: ['c1'],
+      })],
+      entries: [coffee],
+      onSaveAccount: () => {},
+    });
+    // 이미 잔고에 들어 있는 커피를 또 빼지 않는다.
+    expect(screen.getByLabelText('잔고 고치기')).toHaveTextContent('995,000');
+    fireEvent.click(screen.getByLabelText('잔고 고치기'));
+    expect(screen.getByRole('checkbox', { name: /커피/ })).toBeChecked();
+  });
+
+  it('다른 계좌로 정한 거래는 이 계좌 목록에 없다', () => {
+    const other = newEntry('money', {
+      id: 'c3', title: '택시', startDate: '2026-09-10',
+      money: newMoney({ status: 'actual', amountMinor: 9_000, accountId: 'a2' }),
+    });
+    mount({
+      todayISO: '2026-09-10',
+      accounts: [
+        account({ asOf: '2026-09-10', checkedAt: '2026-09-10T09:00:00+09:00' }),
+        account({ id: 'a2', name: '부계좌', asOf: '2026-09-10', checkedAt: '2026-09-10T08:00:00+09:00' }),
+      ],
+      entries: [coffee, other],
+      onSaveAccount: () => {},
+    });
+    fireEvent.click(screen.getByLabelText('잔고 고치기'));
+    expect(screen.getByRole('checkbox', { name: /커피/ })).toBeInTheDocument();
+    expect(screen.queryByRole('checkbox', { name: /택시/ })).toBeNull();
+  });
+});

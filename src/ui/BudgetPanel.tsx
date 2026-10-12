@@ -12,7 +12,9 @@
  * 접힌 줄로 들어간다 (`TideBar` 의 children).
  */
 import { useState } from 'react';
-import { budgetStates, newBudget, newReserve, spendingIn, type BudgetState } from '../domain/budget';
+import {
+  budgetStates, newBudget, newReserve, spendingIn, unlinkedSpendingFor, type BudgetState,
+} from '../domain/budget';
 import { fmtDayShort } from '../domain/date';
 import { formatAmount, minorToInput, parseAmountToMinor } from '../domain/money';
 import type { Budget, Entry, Reserve } from '../domain/types';
@@ -36,11 +38,13 @@ interface Props {
   onSaveReserve: (r: Reserve) => void;
   onDeleteReserve: (r: Reserve) => void;
   onEntryClick?: (e: Entry) => void;
+  /** 연결되지 않은 실제 지출을 이 주머니에 건다. */
+  onLinkEntry?: (e: Entry, b: Budget) => void;
 }
 
 export function BudgetPanel({
   budgets, reserves, entries, collapsed, onToggleCollapsed,
-  onSaveBudget, onDeleteBudget, onSaveReserve, onDeleteReserve, onEntryClick,
+  onSaveBudget, onDeleteBudget, onSaveReserve, onDeleteReserve, onEntryClick, onLinkEntry,
 }: Props) {
   const [draft, setDraft] = useState<Budget | null>(null);
   const [amountText, setAmountText] = useState('');
@@ -128,6 +132,7 @@ export function BudgetPanel({
                 onEdit={() => startEdit(s.budget)}
                 onDelete={() => onDeleteBudget(s.budget)}
                 onEntryClick={onEntryClick}
+                onLinkEntry={onLinkEntry}
               />
             )
           ))}
@@ -188,7 +193,7 @@ export function BudgetPanel({
 }
 
 function BudgetRow({
-  state, open, entries, onToggle, onEdit, onDelete, onEntryClick,
+  state, open, entries, onToggle, onEdit, onDelete, onEntryClick, onLinkEntry,
 }: {
   state: BudgetState;
   open: boolean;
@@ -197,6 +202,7 @@ function BudgetRow({
   onEdit: () => void;
   onDelete: () => void;
   onEntryClick?: (e: Entry) => void;
+  onLinkEntry?: (e: Entry, b: Budget) => void;
 }) {
   const { budget, spentMinor, remainingMinor, overspentMinor, count } = state;
   // 총 예산이 0이면 비율을 낼 수 없다. 막대를 그리지 않는다.
@@ -204,6 +210,7 @@ function BudgetRow({
     ? Math.min(1, spentMinor / budget.amountMinor)
     : 0;
   const linked = open ? spendingIn(budget, entries) : [];
+  const loose = unlinkedSpendingFor(budget, entries);
 
   return (
     <div className="bp-i">
@@ -248,6 +255,34 @@ function BudgetRow({
         ) : (
           <p className="bp-empty">아직 이 생활비에서 쓴 것이 없습니다.</p>
         )
+      )}
+      {/*
+        기간 안의 실제 지출 가운데 어느 주머니에도 걸리지 않은 것. 자동으로 걸지 않는다 —
+        생활비가 아닌 지출일 수 있다. 보이게 하고 사용자가 고른다.
+      */}
+      {loose.length > 0 && !open && (
+        <button className="bp-loose" onClick={onToggle}>
+          이 기간에 생활비와 연결되지 않은 실제 지출 {loose.length}건 · 확인
+        </button>
+      )}
+      {loose.length > 0 && open && (
+        <div className="bp-loose-l">
+          <p className="bp-note">연결되지 않은 실제 지출 {loose.length}건 — 생활비에서 쓴 것이면 연결하세요. 연결하면 한도에서 두 번 빠지지 않습니다.</p>
+          <ul className="bp-ul">
+            {loose.map((e) => (
+              <li key={e.id} className="bp-loose-i">
+                <button className="bp-li" onClick={() => onEntryClick?.(e)}>
+                  <span className="bp-li-d num">{fmtDayShort(e.startDate)}</span>
+                  <span className="bp-li-t">{e.title.trim() || '(내역 없음)'}</span>
+                  <span className="bp-li-a num">{formatAmount(Math.abs(e.money?.amountMinor ?? 0))}</span>
+                </button>
+                {onLinkEntry && (
+                  <button className="chip" onClick={() => onLinkEntry(e, budget)}>연결</button>
+                )}
+              </li>
+            ))}
+          </ul>
+        </div>
       )}
     </div>
   );

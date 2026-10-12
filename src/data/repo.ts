@@ -15,11 +15,14 @@ import {
 } from 'firebase/firestore';
 import { normalizeDate, ymOf } from '../domain/date';
 import { describeFirestoreError } from './errors';
-import type { Account, Budget, Debt, Entry, Pin, RecoveryRule, Reserve, YearMonth } from '../domain/types';
+import type {
+  Account, Budget, Category, CategoryBudget, Debt, Entry, LedgerSettings, Pin, RecoveryRule, Reserve, YearMonth,
+} from '../domain/types';
 import {
   accountFromDoc, accountToDoc, budgetFromDoc, budgetToDoc,
-  debtFromDoc, debtToDoc, entryFromDoc, entryToDoc, pinFromDoc, pinToDoc,
-  recoveryRuleFromDoc, recoveryRuleToDoc, reserveFromDoc, reserveToDoc,
+  categoryBudgetFromDoc, categoryBudgetToDoc, categoryFromDoc, categoryToDoc,
+  debtFromDoc, debtToDoc, entryFromDoc, entryToDoc, ledgerSettingsFromDoc, ledgerSettingsToDoc,
+  pinFromDoc, pinToDoc, recoveryRuleFromDoc, recoveryRuleToDoc, reserveFromDoc, reserveToDoc,
 } from './converters';
 import { COL, col, docIn, userDoc } from './paths';
 
@@ -290,6 +293,53 @@ export function subscribeRecoveryRule(
   );
 }
 
+/**
+ * 카테고리 · 카테고리 예산. 둘 다 작고 달과 무관해 전량 구독한다 — 예산 · 세이브와 같은 갈래다.
+ */
+export function subscribeCategories(
+  db: Firestore, uid: string, cb: SnapSink<Category>, onError: ErrorSink,
+): Unsubscribe {
+  return onSnapshot(
+    col(db, uid, COL.categories), WITH_META,
+    keepingSorted(categoryFromDoc, (a, b) => a.order - b.order || a.name.localeCompare(b.name, 'ko'), cb),
+    (err) => onError('categories', err),
+  );
+}
+
+export function subscribeCategoryBudgets(
+  db: Firestore, uid: string, cb: SnapSink<CategoryBudget>, onError: ErrorSink,
+): Unsubscribe {
+  return onSnapshot(
+    col(db, uid, COL.categoryBudgets), WITH_META,
+    keepingIdentity(categoryBudgetFromDoc, cb),
+    (err) => onError('categoryBudgets', err),
+  );
+}
+
+/** 가계부 설정(정산 시작일). 회복 규칙과 같은 사용자 문서의 다른 필드다. */
+export function subscribeLedgerSettings(
+  db: Firestore, uid: string, cb: (s: LedgerSettings, meta: SnapMeta) => void, onError: ErrorSink,
+): Unsubscribe {
+  return onSnapshot(
+    userDoc(db, uid), WITH_META,
+    (snap) => cb(ledgerSettingsFromDoc(snap.data()?.ledger), {
+      fromCache: snap.metadata.fromCache, hasPendingWrites: snap.metadata.hasPendingWrites,
+    }),
+    (err) => onError('ledger', err),
+  );
+}
+
+/**
+ * 실제 거래 전량. **전체 검색에서만** 쓴다 — 사용자가 고른 순간 한 번 읽는다.
+ *
+ * `money.status` 는 Firestore 가 저절로 만드는 단일 필드 색인으로 조회된다. 원장 필드가
+ * 없던 시절의 문서는 실제 거래일 수 없으므로 빠져도 된다.
+ */
+export async function fetchActualEntries(db: Firestore, uid: string): Promise<Entry[]> {
+  const snap = await getDocs(query(col(db, uid, COL.entries), where('money.status', '==', 'actual')));
+  return mapSnap(snap, entryFromDoc);
+}
+
 /** migratedAt 같은 이웃 필드를 지우지 않도록 merge 로 쓴다. */
 export function saveRecoveryRule(db: Firestore, uid: string, rule: RecoveryRule): Promise<void> {
   return setDoc(userDoc(db, uid), { recovery: recoveryRuleToDoc(rule) }, { merge: true });
@@ -403,14 +453,17 @@ export async function saveTaskOrder(
 export async function fetchAll(db: Firestore, uid: string): Promise<{
   entries: Entry[]; accounts: Account[]; debts: Debt[]; pins: Pin[];
   budgets: Budget[]; reserves: Reserve[];
+  categories: Category[]; categoryBudgets: CategoryBudget[];
 }> {
-  const [e, a, d, p, b, r] = await Promise.all([
+  const [e, a, d, p, b, r, c, cb] = await Promise.all([
     getDocs(col(db, uid, COL.entries)),
     getDocs(col(db, uid, COL.accounts)),
     getDocs(col(db, uid, COL.debts)),
     getDocs(col(db, uid, COL.pins)),
     getDocs(col(db, uid, COL.budgets)),
     getDocs(col(db, uid, COL.reserves)),
+    getDocs(col(db, uid, COL.categories)),
+    getDocs(col(db, uid, COL.categoryBudgets)),
   ]);
   return {
     entries: mapSnap(e, entryFromDoc),
@@ -419,7 +472,20 @@ export async function fetchAll(db: Firestore, uid: string): Promise<{
     pins: mapSnap(p, pinFromDoc),
     budgets: mapSnap(b, budgetFromDoc),
     reserves: mapSnap(r, reserveFromDoc),
+    categories: mapSnap(c, categoryFromDoc),
+    categoryBudgets: mapSnap(cb, categoryBudgetFromDoc),
   };
+}
+
+/** 가계부 설정을 읽는다. 백업에 싣는다. */
+export async function fetchLedgerSettings(db: Firestore, uid: string): Promise<LedgerSettings> {
+  const snap = await getDoc(userDoc(db, uid));
+  return ledgerSettingsFromDoc(snap.data()?.ledger);
+}
+
+/** 이웃 필드(recovery · migratedAt)를 지우지 않도록 merge 로 쓴다. */
+export function saveLedgerSettings(db: Firestore, uid: string, settings: LedgerSettings): Promise<void> {
+  return setDoc(userDoc(db, uid), { ledger: ledgerSettingsToDoc(settings) }, { merge: true });
 }
 
 export interface WriteManyResult {
@@ -442,6 +508,7 @@ export async function writeMany(
   payload: {
     entries?: Entry[]; accounts?: Account[]; debts?: Debt[]; pins?: Pin[];
     budgets?: Budget[]; reserves?: Reserve[];
+    categories?: Category[]; categoryBudgets?: CategoryBudget[];
   },
   onProgress?: (done: number, total: number) => void,
 ): Promise<WriteManyResult> {
@@ -453,6 +520,10 @@ export async function writeMany(
     ...(payload.pins ?? []).map((x) => ({ name: COL.pins, id: x.id, data: pinToDoc(x) })),
     ...(payload.budgets ?? []).map((x) => ({ name: COL.budgets, id: x.id, data: budgetToDoc(x) })),
     ...(payload.reserves ?? []).map((x) => ({ name: COL.reserves, id: x.id, data: reserveToDoc(x) })),
+    ...(payload.categories ?? []).map((x) => ({ name: COL.categories, id: x.id, data: categoryToDoc(x) })),
+    ...(payload.categoryBudgets ?? []).map((x) => ({
+      name: COL.categoryBudgets, id: x.id, data: categoryBudgetToDoc(x),
+    })),
   ];
 
   const result: WriteManyResult = { written: 0, failed: [], allFailed: false };
@@ -510,6 +581,7 @@ export async function createManyIfAbsent(
   payload: {
     entries?: Entry[]; accounts?: Account[]; debts?: Debt[]; pins?: Pin[];
     budgets?: Budget[]; reserves?: Reserve[];
+    categories?: Category[]; categoryBudgets?: CategoryBudget[];
   },
   onProgress?: (done: number, total: number) => void,
 ): Promise<CreateManyResult> {
@@ -521,6 +593,10 @@ export async function createManyIfAbsent(
     ...(payload.pins ?? []).map((x) => ({ name: COL.pins, id: x.id, data: pinToDoc(x) })),
     ...(payload.budgets ?? []).map((x) => ({ name: COL.budgets, id: x.id, data: budgetToDoc(x) })),
     ...(payload.reserves ?? []).map((x) => ({ name: COL.reserves, id: x.id, data: reserveToDoc(x) })),
+    ...(payload.categories ?? []).map((x) => ({ name: COL.categories, id: x.id, data: categoryToDoc(x) })),
+    ...(payload.categoryBudgets ?? []).map((x) => ({
+      name: COL.categoryBudgets, id: x.id, data: categoryBudgetToDoc(x),
+    })),
   ];
 
   const result: CreateManyResult = { created: 0, conflicts: [], failed: [], allFailed: false };

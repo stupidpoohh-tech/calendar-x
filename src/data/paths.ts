@@ -15,6 +15,10 @@ export const COL = {
   budgets: 'budgets',
   /** 세이브 — 잔고에 있지만 쓰지 않기로 떼어 둔 돈. */
   reserves: 'reserves',
+  /** 거래 카테고리. 지우지 않고 보관한다. */
+  categories: 'categories',
+  /** 카테고리 예산 — 기본(그 기간부터) · 기간 하나. 결산용이고 한도에 들어가지 않는다. */
+  categoryBudgets: 'categoryBudgets',
   /** 이관 전 구조. 읽기 전용으로만 접근한다. */
   legacyItems: 'items',
 } as const;

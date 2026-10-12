@@ -27,12 +27,13 @@ import {
   deleteDoc, doc, getDoc, setDoc, writeBatch, type Firestore,
 } from 'firebase/firestore';
 import type {
-  Account, Budget, Debt, Entry, Pin, RecoveryRule, Reserve,
+  Account, Budget, Category, CategoryBudget, Debt, Entry, LedgerSettings, Pin, RecoveryRule, Reserve,
   SharedBoard, SharedCollection, SharedCollectionItem, SharedDday, SharedInvite,
   SharedNote, SharedPin, SharedSource, SharedTodoItem,
 } from '../domain/types';
 import {
-  accountToDoc, budgetToDoc, debtToDoc, entryToDoc, pinToDoc, recoveryRuleToDoc, reserveToDoc,
+  accountToDoc, budgetToDoc, categoryBudgetToDoc, categoryToDoc, debtToDoc, entryToDoc,
+  ledgerSettingsToDoc, pinToDoc, recoveryRuleToDoc, reserveToDoc,
 } from './converters';
 import {
   sharedBoardToDoc, sharedCollectionItemToDoc, sharedCollectionToDoc, sharedDdayToDoc,
@@ -49,6 +50,8 @@ export type PendingKind =
   | 'reserve' | 'reserveDelete'
   | 'taskOrder'
   | 'recoveryRule' | 'recoveryPatch' | 'recoveryCommit'
+  // 가계부 결산. 카테고리 여럿(기본 카테고리 만들기 · 순서 바꾸기)은 한 배치로 쓴다.
+  | 'category' | 'categories' | 'categoryBudget' | 'ledgerSettings'
   // 같이 보기. 개인 자료와 **같은 길**을 쓴다 — 거절당한 공유 편집도 목록에 남아야 한다.
   | 'sharedBoard' | 'sharedInvite' | 'sharedInviteDelete'
   | 'sharedSource' | 'sharedItem' | 'sharedItemDelete'
@@ -62,6 +65,7 @@ const KINDS: readonly PendingKind[] = [
   'entry', 'entryDelete', 'entryPrivate', 'account', 'debt', 'debtDelete',
   'pin', 'pinDelete', 'budget', 'budgetDelete', 'reserve', 'reserveDelete',
   'taskOrder', 'recoveryRule', 'recoveryPatch', 'recoveryCommit',
+  'category', 'categories', 'categoryBudget', 'ledgerSettings',
   'sharedBoard', 'sharedInvite', 'sharedInviteDelete',
   'sharedSource', 'sharedItem', 'sharedItemDelete',
   'sharedPin', 'sharedPinDelete', 'sharedDday', 'sharedDdayDelete',
@@ -92,6 +96,7 @@ export interface SharedSourcePayload {
 
 export type PendingPayload =
   | Entry | Account | Debt | Pin | Budget | Reserve | RecoveryRule
+  | Category | { items: Category[] } | CategoryBudget | LedgerSettings
   | { id: string }
   | { id: string; keepPrivate: boolean }
   | { ordered: { id: string; order: number }[] }
@@ -192,6 +197,24 @@ export function sendPending(db: Firestore, uid: string, op: CommitInput): Promis
       return setDoc(userDoc(db, uid), { recovery: op.payload as Partial<RecoveryRule> }, { merge: true });
     case 'recoveryCommit':
       return sendRecoveryCommit(db, uid, op.payload as RecoveryCommitPayload);
+
+    case 'category': {
+      const c = op.payload as Category;
+      return setDoc(docIn(db, uid, COL.categories, c.id), categoryToDoc(c));
+    }
+    case 'categories': {
+      const items = (op.payload as { items: Category[] }).items;
+      const batch = writeBatch(db);
+      for (const c of items.slice(0, 400)) batch.set(docIn(db, uid, COL.categories, c.id), categoryToDoc(c));
+      return batch.commit();
+    }
+    case 'categoryBudget': {
+      const b = op.payload as CategoryBudget;
+      return setDoc(docIn(db, uid, COL.categoryBudgets, b.id), categoryBudgetToDoc(b));
+    }
+    /* 이웃 필드(recovery · migratedAt)를 지우지 않도록 merge 로 쓴다. */
+    case 'ledgerSettings':
+      return setDoc(userDoc(db, uid), { ledger: ledgerSettingsToDoc(op.payload as LedgerSettings) }, { merge: true });
 
     /*
       같이 보기. 경로가 `users/{uid}` 밖이라 uid 를 쓰지 않는다 — 보드 id 가 자리를 정하고,
@@ -357,6 +380,14 @@ function targetOf(op: PendingOp, uid: string): { path: string[]; base: string } 
       return mine(COL.reserves, r.id, r.updatedAt);
     }
     case 'budgetDelete': return mine(COL.budgets, asId(op.payload), op.at);
+    case 'category': {
+      const c = op.payload as Category;
+      return mine(COL.categories, c.id, c.updatedAt);
+    }
+    case 'categoryBudget': {
+      const b = op.payload as CategoryBudget;
+      return mine(COL.categoryBudgets, b.id, b.updatedAt);
+    }
     case 'reserveDelete': return mine(COL.reserves, asId(op.payload), op.at);
 
     /*

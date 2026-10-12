@@ -8,10 +8,15 @@ import { convertKind, newEntry, newMoney, withDerived } from '../domain/entry';
 import { normalizeTag } from '../domain/filters';
 import { minorToInput, parseAmountToMinor } from '../domain/money';
 import { describeRecurrence } from '../domain/recurrence';
+import { confirmBlockOf } from '../domain/confirm';
+import { fmtDayShort } from '../domain/date';
+import { budgetCovers } from '../domain/budget';
+import { pocketChoiceFor } from '../domain/confirm';
 import type {
-  Budget, Debt, Entry, EntryKind, NewMoneyType, RepeatFreq, TaskStatus,
+  Account, Budget, Category, Debt, Entry, EntryKind, MoneyFields, NewMoneyType, RepeatFreq, TaskStatus,
 } from '../domain/types';
 import { Icon } from './Icon';
+import { LedgerFields } from './LedgerFields';
 import { PICKER } from './pickerField';
 import { isComposingEnter } from './ime';
 
@@ -27,6 +32,21 @@ interface Props {
   debts: readonly Debt[];
   /** 같이 보기 보드가 있는가. 없으면 비공개 토글을 띄울 이유가 없다. */
   sharedActive?: boolean;
+  /** 거래 카테고리 · 계좌 · 전에 쓴 결제수단. 실제 거래 칸에 쓴다. */
+  categories?: readonly Category[];
+  categoriesReady?: boolean;
+  onSeedCategories?: () => void;
+  accounts?: readonly Account[];
+  methods?: readonly string[];
+  /**
+   * 편집 중인 예정의 **누른 회차** 날짜. 반복 발생분을 눌렀으면 그 날, 아니면 시작일.
+   * '실제로 확정' 이 이 회차를 확정한다.
+   */
+  occurrenceDate?: string | null;
+  /** 예정 회차를 실제 거래로 확정한다. 저장된 예정(편집 전 값)을 넘긴다. */
+  onConfirm?: (plan: Entry, occurrenceDate: string) => void;
+  /** 확정을 취소한다 — 실제 거래를 지우고 예정 회차를 되살린다. */
+  onUnconfirm?: (actual: Entry) => void;
   onSave: (e: Entry) => void;
   onDelete: (e: Entry) => void;
   onClose: () => void;
@@ -47,25 +67,50 @@ function moneyUseOf(money: Entry['money']): MoneyUse {
   return 'plain';
 }
 
+const NO_CATEGORIES: readonly Category[] = [];
+const NO_ACCOUNTS: readonly Account[] = [];
+const NO_METHODS: readonly string[] = [];
+
+/**
+ * 새 실제 지출의 생활비 주머니 기본값.
+ *
+ * 그 날을 품는 주머니가 **하나**면 그것을 고르고, 여럿이면 고르지 않는다 — 넘겨짚으면
+ * 다른 주머니의 남은 금액이 틀린다. 무엇이 골라졌는지는 칩으로 저장 전에 보인다.
+ * 카드 사용 · 입금 · 대출 연결이 있으면 주머니를 걸지 않는다.
+ */
+function withDefaultPocket(e: Entry, budgets: readonly Budget[]): Entry {
+  const m = e.money;
+  if (!m || m.status !== 'actual' || m.type !== 'expense' || m.flow === 'cardSpend' || m.debtId) return e;
+  const pick = pocketChoiceFor(e.startDate, budgets).selected;
+  return { ...e, money: { ...m, budgetId: pick?.id ?? null } };
+}
+
 export function EntryModal({
   open, mode, initial, allTags, linkableTasks, budgets, debts, sharedActive = false,
+  categories = NO_CATEGORIES, categoriesReady = true, onSeedCategories,
+  accounts = NO_ACCOUNTS, methods = NO_METHODS, occurrenceDate = null, onConfirm, onUnconfirm,
   onSave, onDelete, onClose,
 }: Props) {
   const [form, setForm] = useState<Entry>(() => initial ?? newEntry('task'));
   const [amountText, setAmountText] = useState('');
   const [tagInput, setTagInput] = useState('');
   const [error, setError] = useState('');
+  /** 사용자가 생활비 칸을 직접 건드렸는가. 건드렸으면 날짜를 바꿔도 기본값으로 되돌리지 않는다. */
+  const [pocketTouched, setPocketTouched] = useState(false);
   const firstFieldRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     if (!open) return;
     const base = initial ?? newEntry('task');
-    setForm(base);
+    setPocketTouched(mode === 'edit');
+    setForm(mode === 'create' ? withDefaultPocket(base, budgets) : base);
     setAmountText(base.money ? (base.money.amountMinor ? minorToInput(base.money.amountMinor, base.money.currency) : '') : '');
     setTagInput('');
     setError('');
     const t = setTimeout(() => firstFieldRef.current?.focus(), 60);
     return () => clearTimeout(t);
+    // 열 때 한 번만 채운다. 생활비 목록이 바뀔 때마다 다시 채우면 적던 내용이 날아간다.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, initial]);
 
   useEffect(() => {
@@ -84,6 +129,12 @@ export function EntryModal({
 
   const isTask = form.kind === 'task';
   const isMoney = form.kind === 'money';
+  const isActual = isMoney && form.money?.status === 'actual';
+  const confirmedFrom = isActual ? form.money?.plannedRef ?? null : null;
+  const pockets = budgets.filter((b) => budgetCovers(b, form.startDate));
+  /** 저장된 예정이 확정 대상인가. 편집 중인 값이 아니라 저장된 값으로 본다. */
+  const canConfirm = mode === 'edit' && !!initial && !!onConfirm
+    && initial.kind === 'money' && confirmBlockOf(initial) === null;
   const moneyDef = form.money ? MONEY_TYPE_BY_ID[form.money.type] : null;
   const legacyDef = moneyDef?.legacy ? moneyDef : null;
   /** 나가는 돈에만 사용처가 있다. 들어올 돈은 예산에서도 대출에서도 나가지 않는다. */
@@ -125,7 +176,30 @@ export function EntryModal({
    * 남겨 두면 예산이 그 입금을 지출로 세어 남은 금액이 늘어난다.
    */
   const setFlow = (type: NewMoneyType) => {
-    setMoney(type === 'income' ? { type, budgetId: null, debtId: null } : { type });
+    if (isActual) {
+      // 입금으로 바꾸면 카드 · 대출 유형도 뜻이 없다. 일반으로 돌린다.
+      setForm((f) => {
+        if (!f.money) return f;
+        const flow = type === 'income' && f.money.flow && ['cardSpend', 'cardPayment', 'loanPrincipal', 'loanInterest'].includes(f.money.flow)
+          ? 'normal' : f.money.flow;
+        const keepCat = categories.find((c) => c.id === f.money?.categoryId)?.kind === type;
+        const next: Entry = {
+          ...f,
+          color: MONEY_TYPE_BY_ID[type].defaultColor,
+          money: {
+            ...f.money, type, flow,
+            categoryId: keepCat ? f.money.categoryId : null,
+            ...(type === 'income' ? { budgetId: null, debtId: null } : {}),
+          },
+        };
+        return pocketTouched || type === 'income' ? next : withDefaultPocket(next, budgets);
+      });
+      return;
+    }
+    // 카테고리는 흐름마다 따로다. 지출 카테고리를 단 채 입금으로 바꾸면 결산이 엉뚱한 쪽에 선다.
+    const keep = categories.find((c) => c.id === form.money?.categoryId)?.kind === type;
+    const categoryId = keep ? form.money?.categoryId ?? null : null;
+    setMoney(type === 'income' ? { type, budgetId: null, debtId: null, categoryId } : { type, categoryId });
   };
 
   /** 사용처. 한 번에 하나만 걸린다 — 같이 걸면 어느 쪽에서 나간 돈인지가 두 개가 된다. */
@@ -136,6 +210,40 @@ export function EntryModal({
       return;
     }
     setMoney({ debtId: form.money?.debtId ?? debts[0]?.id ?? null, budgetId: null });
+  };
+
+  /** 실제 거래 칸에서 온 변경. 생활비를 건드렸으면 그 뒤로는 기본값을 다시 고르지 않는다. */
+  const setLedger = (p: Partial<MoneyFields>) => {
+    if ('budgetId' in p) setPocketTouched(true);
+    setMoney(p);
+  };
+
+  /**
+   * 실제 거래 / 예정. 새로 적을 때만 바꾼다 — 저장된 실제 거래를 예정으로 돌리는 길은
+   * '확정 취소' 하나다(연결이 끊긴 채 예정으로 남는 거래를 만들지 않는다).
+   *
+   * 실제 거래는 반복도 기간도 갖지 않고, 종류는 입금 · 출금뿐이다.
+   */
+  const setStatus = (status: 'planned' | 'actual') => {
+    setForm((f) => {
+      if (!f.money) return f;
+      const type = status === 'actual' && f.money.type !== 'income' ? 'expense' : f.money.type;
+      const next: Entry = {
+        ...f,
+        recurrence: status === 'actual' ? null : f.recurrence,
+        endDate: status === 'actual' ? null : f.endDate,
+        money: { ...f.money, status, type, plannedRef: null },
+      };
+      return pocketTouched ? next : withDefaultPocket(next, budgets);
+    });
+  };
+
+  /** 날짜를 바꾸면 생활비 기본값도 그 날 기준으로 다시 고른다 — 사용자가 건드리지 않았다면. */
+  const setDate = (startDate: string) => {
+    setForm((f) => {
+      const next = { ...f, startDate };
+      return pocketTouched || mode === 'edit' ? next : withDefaultPocket(next, budgets);
+    });
   };
 
   const setTask = (p: Partial<NonNullable<Entry['task']>>) => {
@@ -212,6 +320,32 @@ export function EntryModal({
         <div className="mod-body">
           {isMoney ? (
             <>
+              {/*
+                실제 거래 / 예정. 새로 적을 때만 고른다. 이미 지난 날짜는 실제 거래로,
+                앞날은 예정으로 시작한다 (`App` 의 openCreate). 고른 쪽은 늘 보인다.
+              */}
+              {mode === 'create' ? (
+                <div className="seg mod-status" role="radiogroup" aria-label="거래 상태">
+                  {(['actual', 'planned'] as const).map((st) => (
+                    <button
+                      key={st} type="button" role="radio"
+                      className={'seg-btn' + (form.money?.status === st || (st === 'planned' && !form.money?.status) ? ' on' : '')}
+                      aria-checked={form.money?.status === st || (st === 'planned' && !form.money?.status)}
+                      onClick={() => setStatus(st)}
+                    >
+                      {st === 'actual' ? '실제 거래' : '예정'}
+                    </button>
+                  ))}
+                </div>
+              ) : (
+                <p className="mod-status-l">
+                  {isActual ? '실제 거래' : '예정'}
+                  {confirmedFrom && (
+                    <> · 예정 회차 <b>{fmtDayShort(confirmedFrom.date)}</b> 을(를) 확정한 거래입니다</>
+                  )}
+                </p>
+              )}
+
               <div className="mod-row">
                 <label className="mod-lbl" htmlFor="amount">금액</label>
                 <div className="mod-amt">
@@ -235,8 +369,9 @@ export function EntryModal({
                       style={{ ['--c' as string]: t.color }}
                       onClick={() => setFlow(t.id as NewMoneyType)}
                       title={t.hint}
+                      aria-pressed={form.money?.type === t.id}
                     >
-                      <span className="chip-dot" />{t.label}
+                      <span className="chip-dot" />{isActual ? (t.id === 'income' ? '수입' : '지출') : t.label}
                     </button>
                   ))}
                   {legacyDef && (
@@ -256,9 +391,36 @@ export function EntryModal({
                 </div>
               </div>
 
-              {moneyDef && <p className="mod-hint">{moneyDef.hint}</p>}
+              {moneyDef && !isActual && <p className="mod-hint">{moneyDef.hint}</p>}
 
-              {isOutflow && (
+              {isActual && form.money && (
+                <>
+                  <div className="mod-row">
+                    <label className="mod-lbl" htmlFor="mtitle">내역</label>
+                    <input
+                      id="mtitle" className="mod-input" placeholder="예: 점심 (없어도 됩니다)"
+                      value={form.title} onChange={(e) => patch({ title: e.target.value })}
+                      onKeyDown={(e) => { if (e.key === 'Enter' && !isComposingEnter(e)) save(); }}
+                    />
+                  </div>
+                  <LedgerFields
+                    entryId={form.id}
+                    type={form.money.type === 'income' ? 'income' : 'expense'}
+                    date={form.startDate}
+                    money={form.money}
+                    onMoney={setLedger}
+                    categories={categories}
+                    categoriesReady={categoriesReady}
+                    onSeedCategories={onSeedCategories}
+                    accounts={accounts}
+                    pockets={pockets}
+                    debts={debts}
+                    methods={methods}
+                  />
+                </>
+              )}
+
+              {!isActual && isOutflow && (
                 <div className="mod-row">
                   <span className="mod-lbl">사용처</span>
                   <div className="mod-chips">
@@ -288,7 +450,7 @@ export function EntryModal({
                 </div>
               )}
 
-              {isOutflow && moneyUse === 'budget' && (
+              {!isActual && isOutflow && moneyUse === 'budget' && (
                 <div className="mod-row">
                   <label className="mod-lbl" htmlFor="budget">생활비</label>
                   <select
@@ -304,18 +466,18 @@ export function EntryModal({
                   </select>
                 </div>
               )}
-              {isOutflow && moneyUse === 'budget' && outsideBudget && (
+              {!isActual && isOutflow && moneyUse === 'budget' && outsideBudget && (
                 <p className="mod-hint">
                   이 날짜는 생활비 기간 밖입니다. 이대로 저장하면 별도 지출로 계산됩니다.
                 </p>
               )}
-              {isOutflow && moneyUse === 'budget' && form.recurrence && (
+              {!isActual && isOutflow && moneyUse === 'budget' && form.recurrence && (
                 <p className="mod-hint">
                   반복 항목은 생활비에 넣지 않습니다. 이대로 저장하면 별도 지출로 계산됩니다.
                 </p>
               )}
 
-              {isOutflow && moneyUse === 'debt' && (
+              {!isActual && isOutflow && moneyUse === 'debt' && (
                 <div className="mod-row">
                   <label className="mod-lbl" htmlFor="debt">대출</label>
                   <select
@@ -330,7 +492,7 @@ export function EntryModal({
                 </div>
               )}
 
-              {isOutflow && (
+              {!isActual && isOutflow && (
                 <div className="mod-row">
                   <span className="mod-lbl">속성</span>
                   <div className="mod-chips">
@@ -346,14 +508,34 @@ export function EntryModal({
               )}
 
 
-              <div className="mod-row">
-                <label className="mod-lbl" htmlFor="mtitle">라벨</label>
-                <input
-                  id="mtitle" className="mod-input" placeholder="예: 전기요금 (없어도 됩니다)"
-                  value={form.title} onChange={(e) => patch({ title: e.target.value })}
-                  onKeyDown={(e) => { if (e.key === 'Enter' && !isComposingEnter(e)) save(); }}
+              {!isActual && (
+                <div className="mod-row">
+                  <label className="mod-lbl" htmlFor="mtitle">라벨</label>
+                  <input
+                    id="mtitle" className="mod-input" placeholder="예: 전기요금 (없어도 됩니다)"
+                    value={form.title} onChange={(e) => patch({ title: e.target.value })}
+                    onKeyDown={(e) => { if (e.key === 'Enter' && !isComposingEnter(e)) save(); }}
+                  />
+                </div>
+              )}
+              {/* 예정에도 카테고리를 붙여 둘 수 있다 — 확정할 때 그대로 따라간다. */}
+              {!isActual && form.money && !legacyDef && (
+                <LedgerFields
+                  only="category"
+                  entryId={form.id}
+                  type={form.money.type === 'income' ? 'income' : 'expense'}
+                  date={form.startDate}
+                  money={form.money}
+                  onMoney={setLedger}
+                  categories={categories}
+                  categoriesReady={categoriesReady}
+                  onSeedCategories={onSeedCategories}
+                  accounts={accounts}
+                  pockets={pockets}
+                  debts={debts}
+                  methods={methods}
                 />
-              </div>
+              )}
 
               {linkableTasks.length > 0 && (
                 <div className="mod-row">
@@ -411,7 +593,7 @@ export function EntryModal({
               <input
                 id="start" type="date" className="mod-input" {...PICKER}
                 value={form.startDate}
-                onChange={(e) => patch({ startDate: e.target.value || computeToday() })}
+                onChange={(e) => setDate(e.target.value || computeToday())}
               />
               {!isMoney && (
                 <input
@@ -444,7 +626,8 @@ export function EntryModal({
           )}
 
           {/* 반복 — 할 일과 가계부 모두 */}
-          {form.kind !== 'idea' && (
+          {/* 실제 거래는 한 날짜의 사실이라 반복하지 않는다. */}
+          {form.kind !== 'idea' && !isActual && (
             <div className="mod-row">
               <label className="mod-lbl" htmlFor="repeat">반복</label>
               <div className="mod-dt">
@@ -582,6 +765,22 @@ export function EntryModal({
 
           {error && <p className="mod-err" role="alert">{error}</p>}
         </div>
+
+        {canConfirm && initial && (
+          <div className="mod-confirm">
+            <button className="btn" onClick={() => onConfirm?.(initial, occurrenceDate ?? initial.startDate)}>
+              <Icon.Check size={14} />
+              {' '}{fmtDayShort(occurrenceDate ?? initial.startDate)} {initial.money?.type === 'income' ? '실제 수입' : '실제 지출'}로 확정
+            </button>
+            <span className="mod-hint">예정은 그대로 두고, 이 회차만 실제 거래로 기록합니다.</span>
+          </div>
+        )}
+        {mode === 'edit' && confirmedFrom && initial && onUnconfirm && (
+          <div className="mod-confirm">
+            <button className="btn" onClick={() => onUnconfirm(initial)}>확정 취소</button>
+            <span className="mod-hint">이 실제 거래를 지우고 예정 회차를 되살립니다.</span>
+          </div>
+        )}
 
         <footer className="mod-foot">
           {mode === 'edit' && (
