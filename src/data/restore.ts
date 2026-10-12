@@ -32,7 +32,7 @@
  */
 import { isValidDate, normalizeDate } from '../domain/date';
 import type {
-  Account, BackupCollection, Budget, Category, CategoryBudget, Debt, Entry, Pin, Reserve,
+  Account, BackupCollection, Budget, Category, CategoryBudget, Debt, Entry, Pin, RecoveryRule, Reserve,
 } from '../domain/types';
 import type { BackupData } from './backup';
 import type { CreateManyResult } from './repo';
@@ -202,6 +202,7 @@ function checkCategoryBudget(b: CategoryBudget): string | null {
   if (b.scope !== 'default' && b.scope !== 'period') return `범위를 알 수 없습니다: ${String(b.scope)}`;
   if (!/^\d{4}-(0[1-9]|1[0-2])$/.test(b.period)) return `기간이 YYYY-MM 이 아닙니다: ${b.period}`;
   if (b.amountMinor !== null && (!isInt(b.amountMinor) || b.amountMinor < 0)) return '예산이 0 이상의 정수가 아닙니다.';
+  if (b.id !== `${b.categoryId}~${b.scope}~${b.period}`) return `id 가 '${b.categoryId}~${b.scope}~${b.period}' 가 아닙니다.`;
   return null;
 }
 
@@ -292,13 +293,35 @@ export const MERGE_SKIPS_RECOVERY =
   + '회복 규칙은 항목이 아니라 계정 설정이라, 지금 쓰고 있는 설정을 덮지 않습니다. '
   + '간격·기본 메모·OFF 항목은 설정 화면에서 직접 맞춰 주세요.';
 
+/** 키 순서와 무관하게 같은 값이면 같은 문자열. */
+function stable(v: unknown): string {
+  if (Array.isArray(v)) return `[${v.map(stable).join(',')}]`;
+  if (v && typeof v === 'object') {
+    const o = v as Record<string, unknown>;
+    return `{${Object.keys(o).sort().map((k) => `${JSON.stringify(k)}:${stable(o[k])}`).join(',')}}`;
+  }
+  return JSON.stringify(v) ?? 'undefined';
+}
+
+/**
+ * 파일의 회복 규칙이 지금 것과 다른가. 같으면 `MERGE_SKIPS_RECOVERY` 를 띄우지 않는다.
+ *
+ * 내보내기는 한 번도 저장하지 않은 기본 규칙까지 싣는다. 그래서 "파일에 회복 설정이
+ * 있다" 만 보고 알리면 회복을 써 본 적 없는 사람도 가져올 때마다 경고를 읽는다 — 실제로
+ * 화면에서 그랬다. 그런 경고는 정작 다를 때 읽히지 않는다. 필드 하나라도 다르면(빚 ·
+ * 예정일 같은 상태 포함) 알린다 — 무엇이 남지 않는지 숨기는 쪽보다 낫다.
+ */
+export function recoveryDiffers(file: RecoveryRule | null, current: RecoveryRule): boolean {
+  return file != null && stable(file) !== stable(current);
+}
+
 /**
  * 병합이 정산 시작일을 적용하지 않는다는 사실. 회복 규칙과 같은 이유다 — 지금 쓰고 있는
  * 설정을 파일 값으로 조용히 덮지 않는다. 다르면 화면이 미리 알린다.
  */
 export function mergeSkipsLedger(fileDay: number, currentDay: number): string {
   return `파일의 정산 시작일은 매월 ${fileDay}일이고 지금은 ${currentDay}일입니다. `
-    + '“더하기”로는 이 설정을 바꾸지 않습니다. 필요하면 설정에서 직접 바꿔 주세요.';
+    + '“더하기”만 고르면 이 설정은 그대로입니다. 바꾸려면 아래에서 정산 시작일까지 바꾸는 쪽을 고르세요.';
 }
 
 export function countDocs(d: Omit<BackupData, 'recovery' | 'ledger'>): number {

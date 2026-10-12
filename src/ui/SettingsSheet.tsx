@@ -174,7 +174,7 @@ export function SettingsSheet({
               <span className="set-ico"><Icon.Upload size={16} /></span>
               <span className="set-row-b">
                 <span className="set-row-t">{busy === 'import' ? '가져오는 중…' : '백업 파일 가져오기'}</span>
-                <span className="set-row-s">기존 데이터에 병합하거나 전체를 교체합니다. 예전 형식도 받습니다.</span>
+                <span className="set-row-s">기존 데이터에 더합니다. 같은 항목은 지금 것을 남깁니다. 예전 형식도 받습니다.</span>
               </span>
             </button>
           </div>

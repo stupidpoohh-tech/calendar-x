@@ -13,7 +13,7 @@ import {
   readMigrationMark, writeMany,
 } from '../data/repo';
 import {
-  MERGE_SKIPS_RECOVERY, mergeSkipsLedger, REPLACE_DISABLED_REASON, safeMerge, type RestoreIO,
+  MERGE_SKIPS_RECOVERY, mergeSkipsLedger, recoveryDiffers, REPLACE_DISABLED_REASON, safeMerge, type RestoreIO,
 } from '../data/restore';
 import { LENSES, LENS_BY_ID, SHARED_TABS } from '../domain/constants';
 import { endOfMonth, fmtMonthTitle, startOfMonth, toISO } from '../domain/date';
@@ -873,14 +873,26 @@ function Workspace({ uid, user, onSignOut }: WorkspaceProps) {
         if (!go) return;
       }
 
+      /*
+        정산 시작일은 설정이라 '더하기' 가 조용히 바꾸지 않는다. 다만 새 계정으로 옮기는
+        경우에는 파일 값을 써야 지난 결산이 원래 기간으로 묶인다 — 그래서 고르는 자리를
+        따로 둔다. 값이 같으면 고를 것이 없다.
+      */
+      const fileDay = incoming.ledger?.settleDay ?? null;
+      const ledgerDiffers = fileDay !== null && fileDay !== store.ledger.settleDay;
       const mode = await dialog.choose('가져온 데이터를 어떻게 할까요?', [
         { id: 'merge', label: '기존 데이터에 더하기', hint: '같은 항목은 지금 것을 남깁니다. 아무것도 지우지 않습니다.' },
+        ...(ledgerDiffers ? [{
+          id: 'merge-ledger' as const,
+          label: `더하고 정산 시작일도 매월 ${fileDay}일로 바꾸기`,
+          hint: `지금은 매월 ${store.ledger.settleDay}일입니다. 지난 결산이 파일과 같은 기간으로 묶입니다.`,
+        }] : []),
         { id: 'replace', label: '전체 교체 (지금은 사용할 수 없습니다)', hint: '안전하게 되돌릴 방법이 없어 막아 두었습니다.' },
       ], (
         <>
           <p>파일에 {countBackup(incoming).toLocaleString('ko-KR')}건이 들어 있습니다.</p>
           {/* 회복 규칙은 컬렉션이 아니라 계정 설정이라 병합 경로가 건드리지 않는다. */}
-          {incoming.recovery && <p className="dlg-warn">{MERGE_SKIPS_RECOVERY}</p>}
+          {recoveryDiffers(incoming.recovery, recovery.rule) && <p className="dlg-warn">{MERGE_SKIPS_RECOVERY}</p>}
           {/* 정산 시작일도 설정이다. 다를 때만 알린다 — 같으면 덮을 것이 없다. */}
           {incoming.ledger && incoming.ledger.settleDay !== store.ledger.settleDay && (
             <p className="dlg-warn">{mergeSkipsLedger(incoming.ledger.settleDay, store.ledger.settleDay)}</p>
@@ -923,6 +935,14 @@ function Workspace({ uid, user, onSignOut }: WorkspaceProps) {
         createIfAbsent: (payload) => createManyIfAbsent(db, uid, payload),
       };
       const outcome = await safeMerge(incoming, io);
+      /*
+        고른 경우에만 정산 시작일을 바꾼다. 파일이 규칙에 맞지 않아 아무것도 쓰지 않았거나
+        한 건도 못 넣었으면 설정도 그대로 둔다 — 반쯤 옮긴 상태에 설정만 바뀌면 지금
+        결산이 엉뚱하게 묶인다.
+      */
+      if (mode === 'merge-ledger' && fileDay !== null && (outcome.kind === 'ok' || outcome.kind === 'partial')) {
+        commit({ kind: 'ledgerSettings', label: '정산 시작일', summary: `매월 ${fileDay}일`, payload: { settleDay: fileDay } });
+      }
 
       if (outcome.kind === 'invalid') {
         dialog.toast('파일을 다시 확인해 주세요.', 'bad');
@@ -1002,7 +1022,7 @@ function Workspace({ uid, user, onSignOut }: WorkspaceProps) {
     } finally {
       importing.current = false;
     }
-  }, [db, uid, isAnon, promptLogin, dialog, store.ledger.settleDay]);
+  }, [db, uid, isAnon, promptLogin, dialog, store.ledger.settleDay, commit, recovery.rule]);
 
   const handleMigrate = useCallback(async () => {
     if (isAnon || !uid) { void promptLogin(); return; }

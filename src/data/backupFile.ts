@@ -449,6 +449,12 @@ function checkCategoryBudgetRaw(c: Collector, where: string, r: Raw): void {
   reqStr(c, `${where}.currency`, r.currency);
   optStr(c, `${where}.createdAt`, r.createdAt, LIMITS.checkedAt);
   optStr(c, `${where}.updatedAt`, r.updatedAt, LIMITS.checkedAt);
+  // 문서 id 는 카테고리 · 범위 · 기간으로 정해진다. 규칙이 그 모양만 받으므로, 다른 id 는
+  // 검증을 지나 저장하는 순간 거절된다 — 여기서 미리 말한다.
+  const expected = `${String(r.categoryId)}~${String(r.scope)}~${String(r.period)}`;
+  if (typeof r.id === 'string' && r.id !== expected) {
+    c.add(`${where}.id`, `카테고리 예산의 id 는 '${expected}' 이어야 합니다: ${r.id}`);
+  }
 }
 
 const CHECKERS: Record<BackupCollection, (c: Collector, where: string, v: Raw) => void> = {

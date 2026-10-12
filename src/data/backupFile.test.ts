@@ -635,3 +635,16 @@ describe('v6 — 카테고리 · 카테고리 예산 · 정산 시작일', () =>
     expect(problemsOf(read(v6({ ledger: { settleDay: 32 } })))[0]).toContain('1~31');
   });
 });
+
+describe('v6 — 규칙이 거절할 모양은 미리 거른다', () => {
+  it('카테고리 예산 id 가 카테고리~범위~기간이 아니면 거른다', () => {
+    const r = read({
+      ...v3(), version: 6, budgets: [], reserves: [], categories: [],
+      categoryBudgets: [{
+        id: 'random', categoryId: 'food', scope: 'default', period: '2026-09',
+        amountMinor: 1, currency: 'KRW', createdAt: '', updatedAt: '',
+      }],
+    });
+    expect(problemsOf(r)[0]).toContain("'food~default~2026-09'");
+  });
+});

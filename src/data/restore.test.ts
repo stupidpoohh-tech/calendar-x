@@ -15,7 +15,7 @@ import type { BackupData } from './backup';
 import { readBackupFile } from './backupFile';
 import type { CreateManyResult } from './repo';
 import {
-  countDocs, describeProblem, MERGE_SKIPS_RECOVERY, planMerge, REPLACE_DISABLED_REASON,
+  countDocs, describeProblem, MERGE_SKIPS_RECOVERY, planMerge, recoveryDiffers, REPLACE_DISABLED_REASON,
   safeMerge, safeReplace,
   validateBackup, type RestoreIO,
 } from './restore';
@@ -465,5 +465,18 @@ describe('안내 문구', () => {
   it('병합이 회복 설정을 적용하지 않는다고 알린다', () => {
     expect(MERGE_SKIPS_RECOVERY).toContain('적용되지 않습니다');
     expect(MERGE_SKIPS_RECOVERY).toContain('설정 화면');
+  });
+
+  it('회복 설정 안내는 파일 값이 지금 것과 다를 때만 띄운다', () => {
+    // 내보내기는 저장한 적 없는 기본 규칙도 싣는다. 그것까지 알리면 늘 뜨는 경고가 된다.
+    const base = defaultRecoveryRule();
+    expect(recoveryDiffers(null, base)).toBe(false);
+    expect(recoveryDiffers(defaultRecoveryRule(), base)).toBe(false);
+    // 키 순서만 다른 것은 같은 값이다 (변환기를 거치면 순서가 바뀐다).
+    const reordered = Object.fromEntries(Object.entries(base).reverse()) as typeof base;
+    expect(recoveryDiffers(reordered, base)).toBe(false);
+    expect(recoveryDiffers({ ...base, intervalDays: base.intervalDays + 1 }, base)).toBe(true);
+    expect(recoveryDiffers({ ...base, debtCount: 2 }, base)).toBe(true);
+    expect(recoveryDiffers({ ...base, options: [...base.options, { id: 'x', label: '사우나', order: 9 }] }, base)).toBe(true);
   });
 });
