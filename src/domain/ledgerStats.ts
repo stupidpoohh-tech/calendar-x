@@ -87,12 +87,21 @@ export function totalsOf(actuals: readonly Entry[]): LedgerTotals {
   return t;
 }
 
-/** 결산의 어느 쪽인가. 지출 쪽은 소비 + 금융비용이다. */
-export type Side = 'expense' | 'income';
+/**
+ * 결산의 어느 쪽인가.
+ *
+ *   expense      지출 = 소비 + 금융비용. 카테고리 예산은 이것과 견준다 ("금융 · 이자" 예산도 있을 수 있다)
+ *   income       수입
+ *   consumption  소비만. 통계가 금융비용과 섞지 않으려고 쓴다
+ *   finance      금융비용(대출 이자)만
+ */
+export type Side = 'expense' | 'income' | 'consumption' | 'finance';
 
 const SIDE_CLASSES: Record<Side, readonly LedgerClass[]> = {
   expense: ['consumption', 'financeCost'],
   income: ['income'],
+  consumption: ['consumption'],
+  finance: ['financeCost'],
 };
 
 export function onSide(e: Entry, side: Side): boolean {
@@ -135,7 +144,7 @@ export interface BudgetRow {
  */
 export function budgetRows(
   categories: readonly Category[], budgets: readonly CategoryBudget[],
-  actuals: readonly Entry[], period: PeriodKey, side: Side,
+  actuals: readonly Entry[], period: PeriodKey, side: 'expense' | 'income',
 ): BudgetRow[] {
   const sums = byCategory(actuals, side);
   const rows: BudgetRow[] = [];

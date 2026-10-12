@@ -88,3 +88,26 @@ describe('buildBackup', () => {
     expect(payload.version).toBe(BACKUP_VERSION);
   });
 });
+
+describe('v6 — 결산 자료도 한 파일에', () => {
+  it('카테고리 · 카테고리 예산 · 정산 시작일을 담아 그대로 되읽는다', () => {
+    const categories = [{ id: 'food', kind: 'expense' as const, name: '식비', order: 0, archived: true, createdAt: '', updatedAt: '' }];
+    const categoryBudgets = [{
+      id: 'food~default~2026-09', categoryId: 'food', scope: 'default' as const, period: '2026-09',
+      amountMinor: 300_000, currency: 'KRW', createdAt: '', updatedAt: '',
+    }];
+    const r = readBackupFile(JSON.stringify(buildBackup({
+      entries: [], accounts: [], debts: [], pins: [], budgets: [], reserves: [],
+      categories, categoryBudgets, ledger: { settleDay: 25 }, recovery: null,
+    })));
+    expect(r.ok).toBe(true);
+    if (r.ok) {
+      expect(r.file.version).toBe(6);
+      expect(r.file.data.categories).toEqual(categories);
+      expect(r.file.data.categoryBudgets).toEqual(categoryBudgets);
+      expect(r.file.data.ledger).toEqual({ settleDay: 25 });
+      // 건수에 결산 자료가 들어간다. 설정은 세지 않는다.
+      expect(countBackup(r.file.data)).toBe(2);
+    }
+  });
+});

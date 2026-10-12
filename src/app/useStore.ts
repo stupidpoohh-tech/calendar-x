@@ -101,15 +101,15 @@ export interface FeedState {
   outOfRange?: boolean;
 }
 
-const FEED_LOADING: FeedState =
+export const FEED_LOADING: FeedState =
   { status: 'loading', ready: false, empty: false, fromCache: false, pending: false };
 /** 메모리에서 만든 자료 (데모). 기다릴 것도 실패할 것도 없다. */
 export const FEED_DEMO: FeedState =
   { status: 'live', ready: true, empty: false, fromCache: false, pending: false };
-const FEED_ERROR: FeedState =
+export const FEED_ERROR: FeedState =
   { status: 'error', ready: false, empty: false, fromCache: false, pending: false };
 
-const feedFrom = (count: number, meta: SnapMeta): FeedState => ({
+export const feedFrom = (count: number, meta: SnapMeta): FeedState => ({
   status: meta.fromCache ? 'cache' : 'live',
   ready: true,
   empty: count === 0,

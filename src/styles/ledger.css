@@ -59,3 +59,170 @@
 .bp-loose-i { display: flex; align-items: center; gap: 6px; }
 .bp-loose-i .bp-li { flex: 1; min-width: 0; }
 .bp-loose-i .chip { flex: none; padding: 2px 8px; font-size: 0.6875rem; }
+
+/* ---------- 설정 — 가계부 ---------- */
+.led-day { width: auto; flex: none; }
+.led-cats { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 2px; }
+.led-cat { display: flex; align-items: center; gap: 4px; min-height: 36px; }
+.led-cat .mod-input { flex: 1; }
+.led-cat-n {
+  flex: 1; min-width: 0; text-align: left; padding: 6px 8px; border-radius: var(--radius-sm);
+  background: none; border: 0; font: inherit; font-size: 0.8125rem; color: var(--ink); cursor: pointer;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+button.led-cat-n:hover { background: var(--accent-soft); }
+.led-cat.archived .led-cat-n { color: var(--ink-3); cursor: default; }
+.led-cat-a {
+  flex: none; padding: 4px 8px; background: none; border: 1px solid var(--line); border-radius: var(--radius-sm);
+  font: inherit; font-size: 0.71875rem; color: var(--ink-3); cursor: pointer;
+}
+.led-cat-a:hover { color: var(--ink); border-color: var(--ink-4); }
+.led-add { display: flex; gap: 6px; margin-top: 4px; }
+.led-add .mod-input { flex: 1; }
+
+/* ---------- 가계부 상세 (내역 · 예산 · 월별 · 통계) ---------- */
+
+/*
+  두 계열의 색. 검증기(dataviz validate_palette)로 라이트 #ffffff · 다크 #182131 표면에서
+  색약 분리 · 대비를 모두 통과한 단계다. 다크는 자동 반전이 아니라 같은 색의 다크용 단계.
+*/
+.led {
+  --led-in: #2a78d6;
+  --led-out: #eb6834;
+  margin-top: 20px; border-top: 1px solid var(--line); padding-top: 12px;
+  display: flex; flex-direction: column; gap: 10px;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) .led { --led-in: #3987e5; --led-out: #d95926; }
+}
+:root[data-theme="dark"] .led { --led-in: #3987e5; --led-out: #d95926; }
+
+.led-tabs { display: flex; gap: 2px; border-bottom: 1px solid var(--line); overflow-x: auto; }
+.led-tab {
+  flex: none; padding: 8px 14px; background: none; border: 0; border-bottom: 2px solid transparent;
+  font: inherit; font-size: 0.875rem; color: var(--ink-3); cursor: pointer; margin-bottom: -1px;
+}
+.led-tab:hover { color: var(--ink); }
+.led-tab.on { color: var(--ink); font-weight: 700; border-bottom-color: var(--lens-money); }
+
+.led-period { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.led-period-t { display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap; min-width: 0; }
+.led-period-t strong { font-size: 0.9375rem; color: var(--ink); }
+.led-period-t .num { font-size: 0.75rem; color: var(--ink-3); }
+.led-badge {
+  display: inline-block; padding: 1px 6px; border-radius: 999px; margin-right: 4px;
+  font-size: 0.65625rem; font-weight: 600; color: var(--on-lens); background: var(--lens-money);
+  vertical-align: middle;
+}
+.led-badge.muted { color: var(--ink-3); background: var(--accent-soft); }
+
+.led-state, .led-empty { margin: 8px 0; font-size: 0.8125rem; color: var(--ink-3); line-height: 1.6; }
+.led-caveat { margin: 0; font-size: 0.71875rem; color: var(--warn); }
+.led-note { margin: 0; font-size: 0.6875rem; color: var(--ink-4); line-height: 1.55; }
+.led-sub { font-size: 0.6875rem; color: var(--ink-4); }
+.led-h { margin: 8px 0 2px; font-size: 0.75rem; color: var(--ink-3); font-weight: 700; }
+.led-body { display: flex; flex-direction: column; gap: 10px; }
+
+.led-totals {
+  display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px;
+  padding: 12px; border: 1px solid var(--line); border-radius: var(--radius); background: var(--bg-soft);
+}
+.led-totals > div { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.led-totals span { font-size: 0.6875rem; color: var(--ink-3); }
+.led-totals b { font-size: 1rem; color: var(--ink); overflow: hidden; text-overflow: ellipsis; }
+.led-totals b.plus { color: var(--good); }
+.led-totals b.minus { color: var(--bad); }
+.led-totals .led-note { grid-column: 1 / -1; }
+
+.led-search { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; }
+.led-search .mod-input { flex: 1 1 200px; min-width: 0; }
+
+.led-days { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 12px; }
+.led-day > ul { list-style: none; margin: 0; padding: 0; }
+.led-day-h {
+  display: flex; justify-content: space-between; gap: 8px; padding: 0 4px 4px;
+  border-bottom: 1px solid var(--line); font-size: 0.75rem; color: var(--ink-2); font-weight: 600;
+}
+.led-day-h .num { display: flex; gap: 8px; font-weight: 500; }
+.led-row {
+  display: flex; align-items: center; gap: 10px; width: 100%; padding: 8px 4px; min-height: 44px;
+  background: none; border: 0; border-bottom: 1px solid var(--line); text-align: left; font: inherit; cursor: pointer;
+}
+.led-row:hover { background: var(--accent-soft); }
+.led-row.planned { opacity: .7; }
+.led-row-m { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 1px; }
+.led-row-t { font-size: 0.8125rem; color: var(--ink); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.led-row-s { font-size: 0.6875rem; color: var(--ink-4); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.led-row-a { flex: none; font-size: 0.875rem; color: var(--ink-2); }
+
+.led-budgets { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; }
+.led-bl { border-bottom: 1px solid var(--line); }
+.led-bl-main {
+  display: grid; grid-template-columns: 1fr auto; gap: 4px 10px; width: 100%; padding: 10px 4px;
+  background: none; border: 0; text-align: left; font: inherit; cursor: pointer;
+}
+.led-bl-main:disabled, .led-bl-main.static { cursor: default; }
+.led-bl-main:not(:disabled):hover { background: var(--accent-soft); }
+.led-bl-n { font-size: 0.8125rem; color: var(--ink); display: flex; gap: 6px; align-items: center; min-width: 0; }
+.led-bl-v { font-size: 0.8125rem; color: var(--ink); text-align: right; }
+.led-bl-b { color: var(--ink-4); }
+.led-bl-main .bp-bar { grid-column: 1 / -1; }
+.led-bl-s { grid-column: 1 / -1; font-size: 0.6875rem; color: var(--ink-4); }
+.led-bl-edit { display: flex; flex-direction: column; gap: 6px; padding: 0 4px 12px; }
+.led-bl-a { display: flex; gap: 6px; flex-wrap: wrap; }
+
+.led-chart { margin: 0; display: flex; flex-direction: column; gap: 6px; }
+.led-legend { display: flex; gap: 14px; align-items: center; font-size: 0.75rem; color: var(--ink-2); }
+.led-legend .led-sub { margin-left: auto; }
+.sw { display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-right: 5px; vertical-align: -1px; }
+.sw.in { background: var(--led-in); }
+.sw.out { background: var(--led-out); }
+.led-chart-box { position: relative; }
+.led-chart svg { display: block; width: 100%; height: 200px; overflow: visible; }
+.led-chart .bar.in { fill: var(--led-in); }
+.led-chart .bar.out { fill: var(--led-out); }
+.led-chart .dim .bar { opacity: .45; }
+.led-axis { stroke: var(--line-strong); stroke-width: 1; vector-effect: non-scaling-stroke; }
+.led-grid { stroke: var(--line); stroke-width: 1; stroke-dasharray: 2 3; vector-effect: non-scaling-stroke; }
+.led-cross { stroke: var(--ink-4); stroke-width: 1; vector-effect: non-scaling-stroke; }
+.led-ticks { display: grid; padding: 0 8px; margin-top: -2px; }
+.led-ticks span { text-align: center; font-size: 0.6875rem; color: var(--ink-3); }
+.led-chart .hit { fill: transparent; cursor: pointer; outline: none; }
+.led-chart .hit:focus-visible { stroke: var(--ink); stroke-width: 1; vector-effect: non-scaling-stroke; }
+.led-tip {
+  position: absolute; top: 0; transform: translateX(-50%); z-index: 2; pointer-events: none;
+  display: flex; flex-direction: column; gap: 2px; padding: 8px 10px; min-width: 150px;
+  background: var(--bg-elev); border: 1px solid var(--line); border-radius: var(--radius-sm);
+  box-shadow: var(--shadow-2); font-size: 0.71875rem; color: var(--ink-2);
+}
+.led-tip b { color: var(--ink); }
+
+.led-table { width: 100%; border-collapse: collapse; font-size: 0.75rem; }
+.led-table caption { caption-side: bottom; text-align: left; padding-top: 6px; }
+.led-table th, .led-table td { padding: 8px 4px; border-bottom: 1px solid var(--line); text-align: right; }
+.led-table th[scope="row"], .led-table thead th:first-child { text-align: left; }
+.led-table thead th { font-weight: 600; color: var(--ink-3); font-size: 0.6875rem; }
+.led-table th[scope="row"] { display: flex; flex-wrap: wrap; gap: 4px 6px; align-items: baseline; font-weight: 500; }
+.led-table tbody tr { cursor: pointer; }
+.led-table tbody tr:hover { background: var(--accent-soft); }
+.led-table tr.future { opacity: .55; }
+.led-table td.plus { color: var(--good); }
+.led-table td.minus { color: var(--bad); }
+.led-link { background: none; border: 0; padding: 0; font: inherit; color: var(--ink); cursor: pointer; }
+
+.led-stats { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; }
+.led-stat {
+  display: grid; grid-template-columns: 1fr 120px; grid-template-rows: auto auto; gap: 2px 12px;
+  padding: 10px 4px; border-bottom: 1px solid var(--line); align-items: center;
+}
+.led-stat-h { display: flex; justify-content: space-between; gap: 8px; font-size: 0.8125rem; color: var(--ink); }
+.led-stat-s { display: flex; gap: 10px; font-size: 0.6875rem; color: var(--ink-4); }
+.led-spark { grid-column: 2; grid-row: 1 / span 2; width: 120px; height: 24px; }
+.led-spark .bar.seq { fill: var(--led-in); }
+.led-stat.finance .led-stat-n { color: var(--ink-2); font-style: italic; }
+
+@media (max-width: 480px) {
+  .led-totals b { font-size: 0.875rem; }
+  .led-stat { grid-template-columns: 1fr 84px; }
+  .led-spark { width: 84px; }
+}

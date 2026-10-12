@@ -9,10 +9,11 @@ import {
 import { getFirebase } from '../data/firebase';
 import { convertLegacyItems, readLegacyItems, summarize } from '../data/migrate';
 import {
-  createManyIfAbsent, fetchAll, fetchLedgerSettings, markMigrated, readMigrationMark, writeMany,
+  createManyIfAbsent, fetchActualEntries, fetchAll, fetchLedgerSettings, markMigrated,
+  readMigrationMark, writeMany,
 } from '../data/repo';
 import {
-  MERGE_SKIPS_RECOVERY, REPLACE_DISABLED_REASON, safeMerge, type RestoreIO,
+  MERGE_SKIPS_RECOVERY, mergeSkipsLedger, REPLACE_DISABLED_REASON, safeMerge, type RestoreIO,
 } from '../data/restore';
 import { LENSES, LENS_BY_ID, SHARED_TABS } from '../domain/constants';
 import { endOfMonth, fmtMonthTitle, startOfMonth, toISO } from '../domain/date';
@@ -28,10 +29,14 @@ import { confirmationOf } from '../domain/confirm';
 import { isActual } from '../domain/ledger';
 import { isRecoveryEntry } from '../domain/recovery';
 import type {
-  Account, Budget, Entry, Filters, LensId, SharedInvite, SharedNote, SharedTodoItem,
+  Account, Budget, Category, CategoryBudget, Entry, Filters, LensId, SharedInvite, SharedNote, SharedTodoItem,
   TaskStatus, ViewId, YearMonth,
 } from '../domain/types';
 import { ConfirmSheet } from '../ui/ConfirmSheet';
+import { LedgerScreen } from '../ui/LedgerScreen';
+import { monthsOfPeriods, periodByKey, periodOf, periodsBetween, periodsOfYear, shiftPeriodKey } from '../domain/period';
+import { combineFeeds, FEED_DEMO } from './useStore';
+import { useLedgerFeed } from './useLedgerFeed';
 import { Auth } from '../ui/Auth';
 import { BrandFooter } from '../ui/BrandFooter';
 import { DaySheet } from '../ui/DaySheet';
@@ -457,6 +462,28 @@ function Workspace({ uid, user, onSignOut }: WorkspaceProps) {
     dialog.toast('기본 카테고리를 만들었습니다. 설정에서 이름을 바꾸거나 보관할 수 있습니다.');
   }, [isAnon, uid, promptLogin, store.categories, commit, dialog]);
 
+  const saveCategory = useCallback((c: Category) => {
+    if (isAnon || !uid) { void promptLogin(); return; }
+    commit({ kind: 'category', label: '카테고리', summary: c.name, payload: c });
+  }, [isAnon, uid, promptLogin, commit]);
+
+  /** 순서 바꾸기처럼 여럿이 한꺼번에 바뀌는 것. 한 배치로 쓴다 — 반쯤 옮겨진 순서가 남지 않게. */
+  const saveCategories = useCallback((list: Category[]) => {
+    if (isAnon || !uid) { void promptLogin(); return; }
+    if (list.length === 0) return;
+    commit({ kind: 'categories', label: '카테고리 순서', summary: `${list.length}개`, payload: { items: list } });
+  }, [isAnon, uid, promptLogin, commit]);
+
+  const saveSettleDay = useCallback((day: number) => {
+    if (isAnon || !uid) { void promptLogin(); return; }
+    commit({ kind: 'ledgerSettings', label: '정산 시작일', summary: `매월 ${day}일`, payload: { settleDay: day } });
+  }, [isAnon, uid, promptLogin, commit]);
+
+  const saveCategoryBudget = useCallback((b: CategoryBudget) => {
+    if (isAnon || !uid) { void promptLogin(); return; }
+    commit({ kind: 'categoryBudget', label: '카테고리 예산', summary: b.period, payload: b });
+  }, [isAnon, uid, promptLogin, commit]);
+
   /** 생활비에 연결되지 않은 실제 지출을 그 주머니에 건다. 사용처는 하나만 — 대출 연결은 푼다. */
   const linkToPocket = useCallback((e: Entry, b: Budget) => {
     const base = findBase(e.id) ?? e;
@@ -476,6 +503,58 @@ function Workspace({ uid, user, onSignOut }: WorkspaceProps) {
     }
     return [...seen.entries()].sort((a, b) => b[1].localeCompare(a[1])).slice(0, 10).map(([m]) => m);
   }, [store.entries, store.tideEntries]);
+
+  /*
+    ── 가계부 상세(내역 · 예산 · 월별 · 통계) ──────────────────────────
+
+    고른 기간과 연도가 걸친 달만 구독한다. 가계부 렌즈가 열려 있을 때만 붙는다 — 다른
+    렌즈를 보는 동안 지난 해의 거래를 읽어 들일 이유가 없다.
+  */
+  const settleDay = store.ledger.settleDay;
+  const currentPeriod = periodOf(today, settleDay).key;
+  const [ledgerPeriodPick, setLedgerPeriod] = useState<string | null>(null);
+  const [ledgerYearPick, setLedgerYear] = useState<number | null>(null);
+  const ledgerPeriod = ledgerPeriodPick ?? currentPeriod;
+  const ledgerYear = ledgerYearPick ?? Number(ledgerPeriod.slice(0, 4));
+  const ledgerMonths = useMemo(() => {
+    const ps = [
+      ...periodsBetween(shiftPeriodKey(ledgerPeriod, -11), ledgerPeriod, settleDay),
+      ...periodsOfYear(ledgerYear, settleDay),
+      ...periodsOfYear(Number(ledgerPeriod.slice(0, 4)), settleDay),
+    ];
+    const p = periodByKey(ledgerPeriod, settleDay);
+    return monthsOfPeriods(p ? [...ps, p] : ps);
+  }, [ledgerPeriod, ledgerYear, settleDay]);
+  const ledgerOn = lens === 'money' && !sharedOpen;
+  const ledgerRange = useLedgerFeed(uid, ledgerMonths, ledgerOn && !isAnon);
+  const ledgerEntries = useMemo(() => {
+    if (isAnon) return store.entries;
+    // 반복 원본은 첫 달 조회에만 걸린다. 계산용 목록이 전량 들고 있으니 거기서 더한다.
+    const byId = new Map<string, Entry>();
+    for (const e of ledgerRange.items) byId.set(e.id, e);
+    for (const e of store.tideEntries) if (e.isRecurring) byId.set(e.id, e);
+    return [...byId.values()];
+  }, [isAnon, store.entries, store.tideEntries, ledgerRange.items]);
+  const ledgerFeed = useMemo(
+    () => (isAnon ? FEED_DEMO : combineFeeds([ledgerRange.feed, store.ledgerMeta])),
+    [isAnon, ledgerRange.feed, store.ledgerMeta],
+  );
+  /**
+   * 내역에서 누른 항목. 화면용 · 계산용 목록에 없는 지난 해 항목이면 결산 목록에서 원본을
+   * 찾는다. 원본을 못 찾으면 열지 않는다 — 펼친 발생분(`원본id@날짜`)을 편집해 저장하면
+   * 그 id 로 새 문서가 생긴다.
+   */
+  const openLedgerEntry = useCallback((e: Entry) => {
+    const base = findBase(e.id) ?? ledgerEntries.find((x) => x.id === baseIdOf(e.id));
+    if (!base) { dialog.toast('이 항목의 원본을 아직 받지 못했습니다. 잠시 뒤 다시 눌러 주세요.', 'bad'); return; }
+    if (isRecoveryEntry(base)) { setRecoveryId(base.id); return; }
+    setModal({ open: true, mode: 'edit', entry: base, occurrence: occurrenceDateOf(e.id) ?? base.startDate });
+  }, [findBase, ledgerEntries, dialog]);
+
+  const searchAllActuals = useCallback(async (): Promise<Entry[]> => {
+    if (isAnon || !uid) return store.entries.filter(isActual);
+    return fetchActualEntries(db, uid);
+  }, [isAnon, uid, db, store.entries]);
 
   /** 카테고리가 "없음" 을 확정할 수 있는가. 캐시가 비어 있으면 아직 모른다. */
   const categoriesReady = store.ledgerMeta.ready
@@ -802,6 +881,10 @@ function Workspace({ uid, user, onSignOut }: WorkspaceProps) {
           <p>파일에 {countBackup(incoming).toLocaleString('ko-KR')}건이 들어 있습니다.</p>
           {/* 회복 규칙은 컬렉션이 아니라 계정 설정이라 병합 경로가 건드리지 않는다. */}
           {incoming.recovery && <p className="dlg-warn">{MERGE_SKIPS_RECOVERY}</p>}
+          {/* 정산 시작일도 설정이다. 다를 때만 알린다 — 같으면 덮을 것이 없다. */}
+          {incoming.ledger && incoming.ledger.settleDay !== store.ledger.settleDay && (
+            <p className="dlg-warn">{mergeSkipsLedger(incoming.ledger.settleDay, store.ledger.settleDay)}</p>
+          )}
           {/*
             평소 편집은 오프라인에서도 되지만 가져오기는 다르다. 이미 있는 문서를 덮지
             않으려면 "읽고 나서 없을 때만 쓰기" 를 한 번에 해야 하고(트랜잭션),
@@ -919,7 +1002,7 @@ function Workspace({ uid, user, onSignOut }: WorkspaceProps) {
     } finally {
       importing.current = false;
     }
-  }, [db, uid, isAnon, promptLogin, dialog]);
+  }, [db, uid, isAnon, promptLogin, dialog, store.ledger.settleDay]);
 
   const handleMigrate = useCallback(async () => {
     if (isAnon || !uid) { void promptLogin(); return; }
@@ -1451,6 +1534,28 @@ function Workspace({ uid, user, onSignOut }: WorkspaceProps) {
             onReorder={handleReorder}
           />
         )}
+        {ledgerOn && (
+          <LedgerScreen
+            todayISO={today}
+            settleDay={settleDay}
+            tab={prefs.ledgerTab}
+            onTab={(t) => set('ledgerTab', t)}
+            periodKey={ledgerPeriod}
+            onPeriodKey={(k) => { setLedgerPeriod(k); setLedgerYear(null); }}
+            year={ledgerYear}
+            onYear={setLedgerYear}
+            entries={ledgerEntries}
+            feed={ledgerFeed}
+            categories={store.categories}
+            categoryBudgets={store.categoryBudgets}
+            categoriesReady={categoriesReady}
+            onSeedCategories={seedCategories}
+            onEntryClick={openLedgerEntry}
+            onAdd={(iso) => openCreate({ startDate: iso })}
+            onSaveCategoryBudget={saveCategoryBudget}
+            onSearchAll={searchAllActuals}
+          />
+        )}
       </main>
 
       <button className="fab" onClick={() => openCreate()} aria-label="추가"><Icon.Plus size={22} /></button>
@@ -1634,6 +1739,16 @@ function Workspace({ uid, user, onSignOut }: WorkspaceProps) {
           migratedAt={legacy?.migratedAt ?? null}
           recoveryRule={recovery.rule}
           onRecoveryRule={recovery.saveRule}
+          ledger={{
+            todayISO: today,
+            settleDay: store.ledger.settleDay,
+            onSettleDay: saveSettleDay,
+            categories: store.categories,
+            categoriesReady,
+            onSaveCategory: saveCategory,
+            onSaveCategories: saveCategories,
+            onSeedCategories: seedCategories,
+          }}
           onTheme={(t) => set('theme', t)}
           onFontScale={(f) => set('fontScale', f)}
           onWeekStart={(w) => set('weekStart', w)}

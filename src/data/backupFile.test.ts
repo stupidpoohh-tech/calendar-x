@@ -585,3 +585,53 @@ describe('v5 — 가계부 원장', () => {
     expect(problemsOf(read(v3({ entries: [ledger({ flow: 'refund' })] })))[0]).toContain('흐름을 알 수 없습니다');
   });
 });
+
+describe('v6 — 카테고리 · 카테고리 예산 · 정산 시작일', () => {
+  const v6 = (over: Record<string, unknown> = {}) => ({
+    ...v3(), version: 6, budgets: [], reserves: [], categories: [], categoryBudgets: [],
+    ledger: { settleDay: 25 }, ...over,
+  });
+  const cat = (over: Record<string, unknown> = {}) => ({
+    id: 'food', kind: 'expense', name: '식비', order: 0, archived: false, createdAt: '', updatedAt: '', ...over,
+  });
+  const cb = (over: Record<string, unknown> = {}) => ({
+    id: 'food~default~2026-09', categoryId: 'food', scope: 'default', period: '2026-09',
+    amountMinor: 300_000, currency: 'KRW', createdAt: '', updatedAt: '', ...over,
+  });
+
+  it('그대로 읽는다', () => {
+    const r = read(v6({ categories: [cat()], categoryBudgets: [cb(), cb({ id: 'food~period~2026-10', scope: 'period', period: '2026-10', amountMinor: null })] }));
+    expect(r.ok).toBe(true);
+    if (r.ok) {
+      expect(r.file.format).toBe('v6');
+      expect(r.file.data.categories[0]).toMatchObject({ id: 'food', kind: 'expense', name: '식비' });
+      expect(r.file.data.categoryBudgets[1]?.amountMinor).toBeNull();
+      expect(r.file.data.ledger?.settleDay).toBe(25);
+    }
+  });
+
+  it.each(['categories', 'categoryBudgets'])('v6 에 %s 가 없으면 잘린 파일로 본다', (name) => {
+    const obj = v6();
+    delete (obj as Record<string, unknown>)[name];
+    expect(problemsOf(read(obj)).some((x) => x.startsWith(name) && x.includes('반드시'))).toBe(true);
+  });
+
+  it('v5 파일에 없는 것은 정상이다 — 빈 목록 · 설정 없음으로 읽는다', () => {
+    const r = read({ ...v3(), version: 5, budgets: [], reserves: [] });
+    expect(r.ok).toBe(true);
+    if (r.ok) {
+      expect(r.file.data.categories).toEqual([]);
+      expect(r.file.data.categoryBudgets).toEqual([]);
+      expect(r.file.data.ledger).toBeNull();
+    }
+  });
+
+  it('뜻이 바뀌는 값은 거절한다 — 흐름 · 범위 · 기간 · 금액 · 정산일', () => {
+    expect(problemsOf(read(v6({ categories: [cat({ kind: 'transfer' })] })))[0]).toContain('흐름을 알 수 없습니다');
+    expect(problemsOf(read(v6({ categories: [cat({ name: ' ' })] })))[0]).toContain('비어 있습니다');
+    expect(problemsOf(read(v6({ categoryBudgets: [cb({ scope: 'weekly' })] })))[0]).toContain('범위를 알 수 없습니다');
+    expect(problemsOf(read(v6({ categoryBudgets: [cb({ period: '2026-13' })] })))[0]).toContain('기간');
+    expect(problemsOf(read(v6({ categoryBudgets: [cb({ amountMinor: -5 })] })))[0]).toContain('음수');
+    expect(problemsOf(read(v6({ ledger: { settleDay: 32 } })))[0]).toContain('1~31');
+  });
+});

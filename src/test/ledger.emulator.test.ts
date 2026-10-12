@@ -12,11 +12,16 @@
 import {
   initializeTestEnvironment, type RulesTestEnvironment,
 } from '@firebase/rules-unit-testing';
-import { doc, setDoc, writeBatch, type Firestore } from 'firebase/firestore';
+import { doc, getDoc, setDoc, writeBatch, type Firestore } from 'firebase/firestore';
 import { readFileSync } from 'node:fs';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { entryToDoc } from '../data/converters';
-import { saveEntry, subscribeEntriesForMonths, tideWindow, type SnapMeta } from '../data/repo';
+import {
+  createManyIfAbsent, fetchActualEntries, fetchAll, fetchLedgerSettings, saveEntry, saveLedgerSettings,
+  saveRecoveryRule, subscribeEntriesForMonths, tideWindow, type SnapMeta,
+} from '../data/repo';
+import { defaultCategories, setDefaultBudget, setPeriodBudget } from '../domain/category';
+import { defaultRecoveryRule } from '../domain/recovery';
 import { confirmOccurrence } from '../domain/confirm';
 import { newEntry, newMoney } from '../domain/entry';
 import { confirmedSetOf } from '../domain/ledger';
@@ -138,4 +143,39 @@ describe('조회량 — 기준일이 수년 전', () => {
     console.warn(`[조회량] 창 ${months.length}달 · 조각 ${Math.ceil(months.length / 30)}개 · 문서 ${items.length}건 · 첫 서버 응답 ${Math.round(ms)}ms`);
     expect(items).toHaveLength(docs.length);
   }, 120_000);
+});
+
+describe('결산 자료 저장 경로', () => {
+  it('전체 검색은 실제 거래만 읽는다 — 예정 · 할 일은 빠진다', async () => {
+    await seed([
+      moneyAt('plan', '2025-01-10'),
+      newEntry('money', { id: 'act', startDate: '2024-05-01', money: newMoney({ status: 'actual', amountMinor: 1 }) }),
+      newEntry('task', { id: 'task', startDate: '2024-05-01' }),
+    ]);
+    const got = await fetchActualEntries(dbOf(ME), ME);
+    expect(got.map((e) => e.id)).toEqual(['act']);
+  });
+
+  it('카테고리 · 카테고리 예산을 가져오기 경로로 쓰고 백업 읽기로 되읽는다', async () => {
+    const db = dbOf(ME);
+    const categories = defaultCategories('2026-10-01T00:00:00.000Z');
+    const categoryBudgets = [setDefaultBudget('default-food', '2026-01', 300_000), setPeriodBudget('default-food', '2026-09', null)];
+    const r = await createManyIfAbsent(db, ME, { categories, categoryBudgets });
+    expect(r.failed).toEqual([]);
+    expect(r.created).toBe(categories.length + 2);
+    const all = await fetchAll(db, ME);
+    expect(all.categories).toHaveLength(categories.length);
+    expect(all.categoryBudgets.find((b) => b.scope === 'period')?.amountMinor).toBeNull();
+  });
+
+  it('정산 시작일은 회복 규칙과 같은 문서에 merge 로 쓴다 — 서로 지우지 않는다', async () => {
+    const db = dbOf(ME);
+    const rule = { ...defaultRecoveryRule(), enabled: true, intervalDays: 4 };
+    await saveRecoveryRule(db, ME, rule);
+    await saveLedgerSettings(db, ME, { settleDay: 25 });
+    expect((await fetchLedgerSettings(db, ME)).settleDay).toBe(25);
+    const snap = (await getDoc(doc(db, `users/${ME}`))).data();
+    expect(snap?.recovery?.intervalDays).toBe(4);
+    expect(snap?.ledger).toEqual({ settleDay: 25 });
+  });
 });

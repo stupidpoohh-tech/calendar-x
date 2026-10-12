@@ -4,14 +4,20 @@
  * 사용자가 고른 정산 시작일(1~31)부터 다음 달 같은 날 전날까지가 한 기간이다.
  * 25일이면 9/25 ~ 10/24 가 한 기간이고, 1일이면 달력의 한 달과 같다.
  *
- * ── 열쇠는 시작하는 달이다 ────────────────────────────────────
+ * ── 이름은 날이 더 많이 든 달이다 ──────────────────────────────
  *
- * 기간의 이름(`PeriodKey`)은 그 기간이 **시작하는 달**의 `YYYY-MM` 이다. 25일 기준
- * `2026-09` 는 9/25 ~ 10/24 다. 화면은 이름만 적지 않고 늘 날짜 범위를 함께 적는다 —
- * "10월" 이 9/25 부터인지 10/25 부터인지를 사용자가 짐작하게 두지 않는다.
+ * 기간의 이름(`PeriodKey`, `YYYY-MM`)은 그 기간의 날이 **더 많이 든 달**이다. 시작일이
+ * 1~15일이면 시작하는 달, 16~31일이면 그 다음 달이다. 25일 기준 9/25 ~ 10/24 는
+ * `2026-10`(10월) 이다 — 급여일 기준으로 쓰는 사람이 부르는 이름과 같다.
+ *
+ * 처음에는 시작하는 달로 이름을 붙였다. 그랬더니 시작일을 1일에서 25일로 바꾸는 순간
+ * 오늘이 든 기간의 이름이 10월에서 9월로 밀려, "10월부터" 로 정해 둔 기본 예산이 지금
+ * 기간에 걸리지 않았다(실제 화면에서 확인). 날이 더 많은 달로 이름을 붙이면 1일 ↔ 25일
+ * 처럼 흔한 전환에서 오늘의 기간 이름이 바뀌지 않는다. 화면은 이름만 적지 않고 늘 날짜
+ * 범위를 함께 적는다.
  *
  * 시작일을 바꾸면 모든 기간의 경계가 새 시작일로 다시 계산된다(과거 통계도 함께).
- * 열쇠는 그대로이므로 기간별 예산은 같은 이름의 기간을 따라가고 지워지지 않는다.
+ * 기간별 예산은 이름(열쇠)을 따라가므로 지워지지 않는다.
  *
  * ── 그 달에 없는 날 ────────────────────────────────────────────
  *
@@ -67,14 +73,21 @@ function startIn(year: number, month1: number, settleDay: number): DateISO {
   return `${year}-${pad(month1)}-${pad(day)}`;
 }
 
+/**
+ * 이름이 시작하는 달보다 몇 달 뒤인가. 16일부터는 날이 다음 달에 더 많이 든다.
+ * (16일 시작이면 30일짜리 달에서 15 : 15 이고, 31일짜리 달에서는 다음 달이 더 많다.)
+ */
+const nameShift = (settleDay: number) => (clampSettleDay(settleDay) >= 16 ? 1 : 0);
+
 /** 열쇠로 기간을 만든다. 열쇠 모양이 틀리면 null. */
 export function periodByKey(key: PeriodKey, settleDay: number): Period | null {
   const k = parseKey(key);
   if (!k) return null;
-  const next = shiftYm(k.year, k.month1, 1);
+  const from = shiftYm(k.year, k.month1, -nameShift(settleDay));
+  const next = shiftYm(from.year, from.month1, 1);
   return {
     key,
-    start: startIn(k.year, k.month1, settleDay),
+    start: startIn(from.year, from.month1, settleDay),
     end: addDaysISO(startIn(next.year, next.month1, settleDay), -1),
   };
 }
@@ -85,9 +98,9 @@ export function periodOf(date: DateISO, settleDay: number): Period {
   const year = Number(d.slice(0, 4));
   const month1 = Number(d.slice(5, 7));
   const here = startIn(year, month1, settleDay);
-  if (d >= here) return periodByKey(keyOf(year, month1), settleDay)!;
-  const prev = shiftYm(year, month1, -1);
-  return periodByKey(keyOf(prev.year, prev.month1), settleDay)!;
+  const from = d >= here ? { year, month1 } : shiftYm(year, month1, -1);
+  const named = shiftYm(from.year, from.month1, nameShift(settleDay));
+  return periodByKey(keyOf(named.year, named.month1), settleDay)!;
 }
 
 /** n 기간 앞(음수면 뒤)의 열쇠. */
@@ -111,7 +124,7 @@ export function periodsBetween(from: PeriodKey, to: PeriodKey, settleDay: number
   return out;
 }
 
-/** 그 해에 시작하는 열두 기간. */
+/** 그 해 이름을 가진 열두 기간. 25일 기준 2026년은 2025-12-25 ~ 2026-12-24 다. */
 export function periodsOfYear(year: number, settleDay: number): Period[] {
   return periodsBetween(keyOf(year, 1), keyOf(year, 12), settleDay);
 }
@@ -132,14 +145,15 @@ export function periodName(key: PeriodKey): string {
   return `${k.year}년 ${k.month1}월`;
 }
 
-/** "9.25 – 10.24" — 범위. 해가 바뀌면 연도를 붙인다. */
+/** "9.25 – 10.24" — 범위. 해가 바뀌면 양쪽에 연도를 붙인다. */
 export function periodRange(p: Period): string {
   const f = (iso: DateISO, withYear: boolean) => {
     const [y, m, d] = iso.split('-').map(Number) as [number, number, number];
     return withYear ? `${y}.${m}.${d}` : `${m}.${d}`;
   };
   const crossYear = p.start.slice(0, 4) !== p.end.slice(0, 4);
-  return `${f(p.start, false)} – ${f(p.end, crossYear)}`;
+  // 해가 바뀌면 양쪽 모두에 연도를 붙인다 — 한쪽만 붙이면 시작한 해를 짐작하게 된다.
+  return `${f(p.start, crossYear)} – ${f(p.end, crossYear)}`;
 }
 
 /** 이 기간들이 걸친 달. 거래 조회 범위를 정한다. */

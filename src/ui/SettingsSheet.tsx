@@ -1,7 +1,8 @@
 import { useState } from 'react';
 import type { User } from 'firebase/auth';
-import type { FontScale, RecoveryRule, ThemePref, WeekStart } from '../domain/types';
+import type { Category, FontScale, RecoveryRule, ThemePref, WeekStart } from '../domain/types';
 import { Icon } from './Icon';
+import { LedgerSettings } from './LedgerSettings';
 import { RecoverySettings } from './RecoverySettings';
 
 interface Props {
@@ -15,6 +16,17 @@ interface Props {
   migratedAt: string | null;
   recoveryRule: RecoveryRule;
   onRecoveryRule: (next: RecoveryRule) => void;
+  /** 가계부 — 정산 시작일 · 카테고리. */
+  ledger: {
+    todayISO: string;
+    settleDay: number;
+    onSettleDay: (day: number) => void;
+    categories: readonly Category[];
+    categoriesReady: boolean;
+    onSaveCategory: (c: Category) => void;
+    onSaveCategories: (list: Category[]) => void;
+    onSeedCategories: () => void;
+  };
   onTheme: (t: ThemePref) => void;
   onFontScale: (f: FontScale) => void;
   onWeekStart: (w: WeekStart) => void;
@@ -34,7 +46,7 @@ const FONT_SCALES: Array<[FontScale, string]> = [
 
 export function SettingsSheet({
   user, theme, fontScale, weekStart, entryCount, legacyCount, migratedAt,
-  recoveryRule, onRecoveryRule,
+  recoveryRule, onRecoveryRule, ledger,
   onTheme, onFontScale, onWeekStart, onExport, onImport, onMigrate, onSignOut, onClose,
 }: Props) {
   const [showRedo, setShowRedo] = useState(false);
@@ -144,6 +156,8 @@ export function SettingsSheet({
               </div>
             </div>
           </div>
+
+          <LedgerSettings {...ledger} />
 
           <RecoverySettings rule={recoveryRule} onChange={onRecoveryRule} />
 
