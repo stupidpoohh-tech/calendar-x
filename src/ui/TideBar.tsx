@@ -18,14 +18,14 @@ import { MONEY_TYPE_BY_ID } from '../domain/constants';
 import { daysBetween, fmtDayShort } from '../domain/date';
 import { formatAmount, formatSigned } from '../domain/money';
 import {
-  currencyScopeOf, headlineLimit, horizonOf, summarize, upcomingInHorizon,
+  calcScopeOf, headlineLimit, horizonOf, summarize, upcomingInHorizon,
   type Summary,
 } from '../domain/tide';
 import type { Account, Budget, Entry, Reserve } from '../domain/types';
 import { Icon } from './Icon';
 import { BalanceInput, BalanceNote, useBalanceEditor } from './balanceEditor';
 import {
-  CALC_READY, calcCaveat, calcHeadline, calcNotice, mixedCurrencyNotice, type CalcState,
+  CALC_READY, calcCaveat, calcHeadline, calcNotice, calcScopeNotice, type CalcState,
 } from './calcState';
 
 interface Props {
@@ -70,7 +70,7 @@ export function TideBar({
   const editor = useBalanceEditor(accounts, entries, onSaveAccount, tideFrom, todayISO);
 
   // 통화가 섞이면 최소 단위가 달라 애초에 더할 수 없다. 숫자를 내지 않는다.
-  const scope = useMemo(() => currencyScopeOf(accounts, entries), [accounts, entries]);
+  const scope = useMemo(() => calcScopeOf(accounts, entries), [accounts, entries]);
 
   const res = useMemo(() => ({ budgets, reserves }), [budgets, reserves]);
 
@@ -107,6 +107,9 @@ export function TideBar({
         {!collapsed && (
           <>
             <p className="tide-empty">{calcNotice(calcState)}</p>
+            {/* 기다려도 풀리지 않는 갈래. 잔고를 다시 적는 자리를 여기 둔다. */}
+            {calcState.kind === 'outOfRange'
+              && (editor.editing ? <BalanceInput editor={editor} /> : <BalanceNote editor={editor} />)}
             {children && <div className="tide-more">{children}</div>}
           </>
         )}
@@ -120,10 +123,10 @@ export function TideBar({
   if (!scope.ok) {
     return (
       <section className={'tide' + (collapsed ? ' collapsed' : '')} aria-label="며칠 버티나">
-        {head('통화 섞임')}
+        {head(scope.reason === 'currency' ? '통화 섞임' : '계좌 미정')}
         {!collapsed && (
           <>
-            <p className="tide-empty">{mixedCurrencyNotice(scope.currencies)}</p>
+            <p className="tide-empty">{calcScopeNotice(scope)}</p>
             {editor.editing ? <BalanceInput editor={editor} /> : <BalanceNote editor={editor} />}
             {children && <div className="tide-more">{children}</div>}
           </>

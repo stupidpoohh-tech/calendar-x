@@ -3,7 +3,8 @@ import { describeFirestoreError, isPermissionDenied } from '../data/errors';
 import { getFirebase } from '../data/firebase';
 import {
   monthWindow, subscribeAccounts, subscribeBudgets, subscribeDebts, subscribeEntriesForMonths,
-  subscribePins, subscribeRecurringEntries, subscribeReserves, tideWindow,
+  subscribePins, subscribeRecurringEntries, subscribeReserves, tideWindow, tideWindowReaches,
+  earliestAsOfOf,
   type SnapMeta,
 } from '../data/repo';
 import type { Account, Budget, Debt, Entry, Pin, Reserve, YearMonth } from '../domain/types';
@@ -79,6 +80,11 @@ export interface FeedState {
   fromCache: boolean;
   /** 아직 서버가 확인하지 않은 로컬 쓰기가 섞여 있는가. */
   pending: boolean;
+  /**
+   * 잔고 기준일이 계산 창이 거슬러 갈 수 있는 상한보다 오래됐다 (`repo.tideWindowReaches`).
+   * 기다려도 자료가 채워지지 않으므로 loading 과 갈래가 다르다. 계산용에만 붙는다.
+   */
+  outOfRange?: boolean;
 }
 
 const FEED_LOADING: FeedState =
@@ -159,8 +165,19 @@ export function useStore(uid: string | null, cursorISO: string, todayISO: string
   const months = useMemo(() => monthWindow(cursorISO), [cursorISO]);
   const monthKey = months.join(',');
 
-  const tideMonths = useMemo(() => tideWindow(todayISO), [todayISO]);
+  /*
+    계산 창은 오늘과 **가장 이른 잔고 기준일**로 정해진다. 기준일이 석 달 전이면 그 사이의
+    한 번짜리 입출금도 한도에 들어가야 하므로 창이 거기까지 거슬러 간다.
+
+    잔고는 아래 effect 3 이 받으므로 아직 없을 수 있다. 그동안은 오늘 기준 창으로 붙고,
+    잔고가 오면 창이 바뀌어 다시 붙는다. 그 사이 계산은 "준비됨" 이 되지 않는다 — 잔고
+    갈래가 loading 이고, 창이 바뀐 뒤에는 키가 어긋나 앞 창의 목록을 버린다.
+  */
+  const [accounts, setAccounts] = useState<Account[]>([]);
+  const earliestAsOf = useMemo(() => earliestAsOfOf(accounts), [accounts]);
+  const tideMonths = useMemo(() => tideWindow(todayISO, earliestAsOf), [todayISO, earliestAsOf]);
   const tideKey = tideMonths.join(',');
+  const tideOutOfRange = !tideWindowReaches(tideMonths, earliestAsOf);
 
   // 범위가 딸린 둘은 키와 함께 든다. 키가 어긋나면 렌더에서 버린다.
   const [monthFeed, setMonthFeed] = useState<Keyed<{ items: Entry[]; feed: FeedState }>>(
@@ -170,7 +187,6 @@ export function useStore(uid: string | null, cursorISO: string, todayISO: string
 
   const [recurring, setRecurring] = useState<Entry[]>(NO_ENTRIES);
   const [recurringFeed, setRecurringFeed] = useState<FeedState>(FEED_LOADING);
-  const [accounts, setAccounts] = useState<Account[]>([]);
   const [accountsFeed, setAccountsFeed] = useState<FeedState>(FEED_LOADING);
   const [debts, setDebts] = useState<Debt[]>([]);
   const [pins, setPins] = useState<Pin[]>([]);
@@ -337,10 +353,12 @@ export function useStore(uid: string | null, cursorISO: string, todayISO: string
     확정으로 내보내면 실제보다 큰 한도가 확정값처럼 떴다가 잠시 뒤 줄어든다.
   */
   const calc = useMemo(
-    () => combineFeeds([
-      tideNow?.feed ?? FEED_LOADING, recurringFeed, accountsFeed, budgetsFeed, reservesFeed,
-    ]),
-    [tideNow?.feed, recurringFeed, accountsFeed, budgetsFeed, reservesFeed],
+    () => (tideOutOfRange
+      ? { ...FEED_LOADING, outOfRange: true }
+      : combineFeeds([
+        tideNow?.feed ?? FEED_LOADING, recurringFeed, accountsFeed, budgetsFeed, reservesFeed,
+      ])),
+    [tideOutOfRange, tideNow?.feed, recurringFeed, accountsFeed, budgetsFeed, reservesFeed],
   );
 
   // 계정이 막 바뀐 렌더에서는 아직 앞 계정의 값이 상태에 남아 있다. 내보내지 않는다.

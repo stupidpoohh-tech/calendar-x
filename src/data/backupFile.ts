@@ -22,6 +22,7 @@
  * | v2 | `version: 2` | entries · accounts · debts · pins **네 배열 모두 필수** |
  * | v3 | `version: 3` | v2 + `recovery` (null 허용) |
  * | v4 | `version: 4` | v3 + `budgets` · `reserves` **두 배열 모두 필수** |
+ * | v5 | `version: 5` | v4 와 같은 구조. 가계부 원장 필드(실제 거래 · 흐름 · 확정한 회차)가 실릴 수 있다 |
  *
  * 없는 컬렉션을 빈 배열로 넘겨 짚지 않는다. v2·v3 파일에 `debts` 가 없다면 그건
  * 빈 백업이 아니라 깨진 파일이다.
@@ -32,6 +33,7 @@
  */
 import { COLORS, MONEY_TYPES, STATUSES } from '../domain/constants';
 import { isValidDate } from '../domain/date';
+import { MONEY_FLOWS, MONEY_STATUSES, OUTFLOW_ONLY_FLOWS } from '../domain/ledger';
 import type { BackupCollection } from '../domain/types';
 import type { BackupData } from './backup';
 import {
@@ -40,10 +42,10 @@ import {
 } from './converters';
 import { convertLegacyItems } from './migrate';
 
-export const SUPPORTED_VERSIONS = [1, 2, 3, 4] as const;
-export const LATEST_VERSION = 4;
+export const SUPPORTED_VERSIONS = [1, 2, 3, 4, 5] as const;
+export const LATEST_VERSION = 5;
 
-export type BackupFormat = 'legacy' | 'v2' | 'v3' | 'v4';
+export type BackupFormat = 'legacy' | 'v2' | 'v3' | 'v4' | 'v5';
 
 /** 파일 한 곳이 왜 들어갈 수 없는지. */
 export interface FileProblem {
@@ -84,6 +86,11 @@ export const LIMITS = {
   name: 100,
   pinText: 2_000,
   checkedAt: 40,
+  categoryId: 200,
+  method: 100,
+  accountId: 200,
+  refId: 200,
+  reflected: 500,
   idBytes: 1_500,
 } as const;
 
@@ -270,6 +277,7 @@ function checkEntryRaw(c: Collector, where: string, e: Raw): void {
     if (m.priority !== undefined && m.priority !== null && typeof m.priority !== 'boolean') {
       c.add(`${where}.money.priority`, `참·거짓이 아닙니다: ${describe(m.priority)}`);
     }
+    checkLedgerRaw(c, where, e, m);
   }
 
   if (kind === 'task' && e.task !== undefined && e.task !== null) {
@@ -297,6 +305,58 @@ function checkEntryRaw(c: Collector, where: string, e: Raw): void {
   }
 }
 
+/*
+  가계부 원장 필드. 없으면 예정 · 일반으로 읽히는 것이 정상이고(v4 이전 파일), 있으면
+  규칙(`firestore.rules` 의 validLedger)과 같은 것을 본다. 버전과 무관하게 본다 —
+  손으로 고친 파일에서 실제 거래가 조용히 예정으로 바뀌면 같은 돈이 두 번 세어진다.
+*/
+const STATUS_VALUES: readonly string[] = MONEY_STATUSES;
+const FLOW_VALUES: readonly string[] = MONEY_FLOWS;
+const OUTFLOW_ONLY: readonly string[] = OUTFLOW_ONLY_FLOWS;
+
+function checkLedgerRaw(c: Collector, where: string, e: Raw, m: Raw): void {
+  const at = `${where}.money`;
+  if (m.status !== undefined && m.status !== null
+      && (typeof m.status !== 'string' || !STATUS_VALUES.includes(m.status))) {
+    c.add(`${at}.status`, `상태를 알 수 없습니다: ${describe(m.status)} — 쓸 수 있는 값: ${STATUS_VALUES.join(' · ')}`);
+  }
+  if (m.flow !== undefined && m.flow !== null
+      && (typeof m.flow !== 'string' || !FLOW_VALUES.includes(m.flow))) {
+    c.add(`${at}.flow`, `흐름을 알 수 없습니다: ${describe(m.flow)} — 쓸 수 있는 값: ${FLOW_VALUES.join(' · ')}`);
+  }
+  optStr(c, `${at}.categoryId`, m.categoryId, LIMITS.categoryId);
+  optStr(c, `${at}.method`, m.method, LIMITS.method);
+  optStr(c, `${at}.accountId`, m.accountId, LIMITS.accountId);
+
+  const actual = m.status === 'actual';
+  const ref = m.plannedRef;
+  if (ref !== undefined && ref !== null) {
+    if (!isObj(ref)) {
+      c.add(`${at}.plannedRef`, `객체가 아닙니다: ${describe(ref)}`);
+    } else {
+      if (typeof ref.entryId !== 'string' || !ref.entryId || ref.entryId.length > LIMITS.refId) {
+        c.add(`${at}.plannedRef.entryId`, `예정 항목 id 가 아닙니다: ${describe(ref.entryId)}`);
+      }
+      reqDate(c, `${at}.plannedRef.date`, ref.date);
+      if (!actual) c.add(`${at}.plannedRef`, '확정한 회차는 실제 거래에만 붙습니다.');
+    }
+  }
+  if (actual) {
+    if (e.recurrence !== undefined && e.recurrence !== null) {
+      c.add(`${where}.recurrence`, '실제 거래는 반복할 수 없습니다.');
+    }
+    if (e.endDate !== undefined && e.endDate !== null) {
+      c.add(`${where}.endDate`, '실제 거래는 기간을 가질 수 없습니다.');
+    }
+    if (m.type !== 'income' && m.type !== 'expense') {
+      c.add(`${at}.type`, `실제 거래는 입금 · 출금으로만 적습니다: ${describe(m.type)}`);
+    }
+  }
+  if (typeof m.flow === 'string' && OUTFLOW_ONLY.includes(m.flow) && m.type !== 'expense') {
+    c.add(`${at}.flow`, `'${m.flow}' 는 나가는 돈에만 붙습니다: ${describe(m.type)}`);
+  }
+}
+
 function checkAccountRaw(c: Collector, where: string, a: Raw): void {
   reqStr(c, `${where}.name`, a.name, LIMITS.name);
   reqInt(c, `${where}.balanceMinor`, a.balanceMinor);
@@ -304,6 +364,7 @@ function checkAccountRaw(c: Collector, where: string, a: Raw): void {
   reqDate(c, `${where}.asOf`, a.asOf);
   optStr(c, `${where}.checkedAt`, a.checkedAt, LIMITS.checkedAt);
   optInt(c, `${where}.order`, a.order);
+  optStrArray(c, `${where}.reflectedEntryIds`, a.reflectedEntryIds, LIMITS.reflected);
 }
 
 function checkDebtRaw(c: Collector, where: string, d: Raw): void {
@@ -470,17 +531,18 @@ export function readBackupFile(text: string): ReadResult {
     return { ok: false, problems: [{ where: 'version', reason: '버전이 없습니다. 백업 파일이 맞는지 확인해 주세요.' }] };
   }
 
-  const format: BackupFormat = version >= 4 ? 'v4' : version === 3 ? 'v3' : 'v2';
+  const format: BackupFormat = version >= 5 ? 'v5' : version === 4 ? 'v4' : version === 3 ? 'v3' : 'v2';
+  const hasPockets = format === 'v4' || format === 'v5';
 
   // ---- 컬렉션 ----
   const entries = checkCollection(c, 'entries', obj.entries);
   const accounts = checkCollection(c, 'accounts', obj.accounts);
   const debts = checkCollection(c, 'debts', obj.debts);
   const pins = checkCollection(c, 'pins', obj.pins);
-  const budgets = format === 'v4'
+  const budgets = hasPockets
     ? checkCollection(c, 'budgets', obj.budgets)
     : checkOptionalCollection(c, 'budgets', obj.budgets);
-  const reserves = format === 'v4'
+  const reserves = hasPockets
     ? checkCollection(c, 'reserves', obj.reserves)
     : checkOptionalCollection(c, 'reserves', obj.reserves);
 

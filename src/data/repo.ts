@@ -13,7 +13,7 @@ import {
   deleteDoc, getDoc, getDocs, onSnapshot, query, runTransaction, setDoc, where, writeBatch,
   type Firestore, type QuerySnapshot,
 } from 'firebase/firestore';
-import { ymOf } from '../domain/date';
+import { normalizeDate, ymOf } from '../domain/date';
 import { describeFirestoreError } from './errors';
 import type { Account, Budget, Debt, Entry, Pin, RecoveryRule, Reserve, YearMonth } from '../domain/types';
 import {
@@ -93,10 +93,89 @@ function keepingSorted<T>(
 /** 메타데이터 변경까지 받는다. 이 옵션이 없으면 캐시 → 서버 전환을 알 수 없다. */
 const WITH_META = { includeMetadataChanges: true } as const;
 
+/** `array-contains-any` 한 번에 넣을 수 있는 값의 상한. */
+export const MAX_MONTHS_PER_QUERY = 30;
+
+/** 달 목록을 조회 한 번에 들어갈 크기로 나눈다. 같은 달은 한 번만 넣는다. */
+export function chunkMonths(
+  months: readonly YearMonth[], size = MAX_MONTHS_PER_QUERY,
+): YearMonth[][] {
+  const uniq = [...new Set(months)];
+  const out: YearMonth[][] = [];
+  for (let i = 0; i < uniq.length; i += size) out.push(uniq.slice(i, i + size));
+  return out;
+}
+
 /**
- * 보고 있는 달과 앞뒤 한 달을 함께 구독한다.
- * 월을 넘길 때마다 새로 받아오면 화면이 비었다가 채워지므로, 이웃 달을 미리 들고 있는다.
- * array-contains-any 는 값 30개까지 허용하므로 3개는 여유가 있다.
+ * 여러 조각 구독을 하나의 목록으로 합친다.
+ *
+ *   - **모든 조각이 한 번씩 도착하기 전에는 내보내지 않는다.** 앞 조각만 받은 목록을
+ *     내보내면 뒤 조각의 거래가 빠진 한도가 확정값처럼 뜬다.
+ *   - 두 조각에 함께 걸린 문서(경계 달에 걸친 항목)는 한 번만 담는다. 잠깐 두 조각이
+ *     다른 판을 들고 있을 수 있으므로 `updatedAt` 이 늦은 쪽을 쓴다.
+ *   - 하나라도 캐시에서 왔으면 캐시 기준, 하나라도 미확정 쓰기가 있으면 미확정이다.
+ *   - 한 조각이라도 실패하면 그 뒤로는 내보내지 않는다. 남은 조각의 발화가 실패 상태를
+ *     덮어 "다 받았다" 로 돌아가면 안 된다.
+ *   - 문서가 바뀐 조각이 없으면 앞서 만든 배열을 그대로 돌려준다 (`keepingIdentity`).
+ *
+ * 순서는 문서 id 순이다 — 조각 하나짜리 조회가 돌려주던 순서와 같다.
+ */
+export interface ChunkCombiner<T> {
+  sinks: SnapSink<T>[];
+  /** 조각 하나가 실패했다. 이후 발화를 막는다. 처음 한 번만 true 를 돌려준다. */
+  fail: () => boolean;
+}
+
+export function combineChunks<T extends { id: string; updatedAt?: string }>(
+  n: number, cb: SnapSink<T>,
+): ChunkCombiner<T> {
+  const latest: (T[] | null)[] = Array.from({ length: n }, () => null);
+  const metas: (SnapMeta | null)[] = Array.from({ length: n }, () => null);
+  let merged: T[] | null = null;
+  let mergedFrom: (T[] | null)[] = [];
+  let failed = false;
+
+  const sinks = latest.map((_, i): SnapSink<T> => (items, meta) => {
+    if (failed) return;
+    latest[i] = items;
+    metas[i] = meta;
+    if (latest.some((x) => x === null)) return;
+    if (merged === null || latest.some((x, j) => x !== mergedFrom[j])) {
+      const byId = new Map<string, T>();
+      for (const list of latest) {
+        for (const e of list!) {
+          const prev = byId.get(e.id);
+          if (!prev || (e.updatedAt ?? '') > (prev.updatedAt ?? '')) byId.set(e.id, e);
+        }
+      }
+      merged = [...byId.values()].sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
+      mergedFrom = [...latest];
+    }
+    cb(merged, {
+      fromCache: metas.some((m) => m!.fromCache),
+      hasPendingWrites: metas.some((m) => m!.hasPendingWrites),
+    });
+  });
+
+  return {
+    sinks,
+    fail: () => {
+      if (failed) return false;
+      failed = true;
+      return true;
+    },
+  };
+}
+
+/**
+ * 달 목록에 걸친 항목을 구독한다.
+ *
+ * 화면용은 보고 있는 달과 앞뒤 한 달이다 — 월을 넘길 때마다 새로 받아오면 화면이
+ * 비었다가 채워지므로, 이웃 달을 미리 들고 있는다.
+ *
+ * 계산용은 잔고 기준일까지 거슬러 갈 수 있어 30달을 넘을 수 있다. `array-contains-any`
+ * 는 값 30개까지라, 예전에는 31번째 달부터 **조용히 잘렸다**. 이제 30달씩 나눠 조회하고
+ * 합친다 (`combineChunks`). 30달 이하면 지금과 똑같이 조회 한 번이다.
  */
 export function subscribeEntriesForMonths(
   db: Firestore, uid: string, months: YearMonth[],
@@ -105,12 +184,20 @@ export function subscribeEntriesForMonths(
   // 달이 하나도 없으면 조회 자체가 성립하지 않는다. 캐시에서 온 빈 목록과 구분되도록
   // fromCache 를 세워 둔다 — 이 상태를 "자료 없음" 으로 읽으면 안 된다.
   if (months.length === 0) { cb([], { fromCache: true, hasPendingWrites: false }); return () => {}; }
-  const q = query(col(db, uid, COL.entries), where('ymSpan', 'array-contains-any', months.slice(0, 30)));
-  return onSnapshot(
-    q, WITH_META,
-    keepingIdentity(entryFromDoc, cb),
-    (err) => onError('entries', err),
+  const chunks = chunkMonths(months);
+  const listen = (part: YearMonth[], sink: SnapSink<Entry>, fail: (err: unknown) => void) => onSnapshot(
+    query(col(db, uid, COL.entries), where('ymSpan', 'array-contains-any', part)),
+    WITH_META,
+    keepingIdentity(entryFromDoc, sink),
+    fail,
   );
+  if (chunks.length === 1) return listen(chunks[0]!, cb, (err) => onError('entries', err));
+
+  const combined = combineChunks<Entry>(chunks.length, cb);
+  const unsubs = chunks.map((part, i) => listen(part, combined.sinks[i]!, (err) => {
+    if (combined.fail()) onError('entries', err);
+  }));
+  return () => unsubs.forEach((u) => u());
 }
 
 /**
@@ -501,7 +588,7 @@ export function monthWindow(cursorISO: string): YearMonth[] {
 }
 
 /**
- * 금액 계산이 덮어야 하는 달 — 뒤로 1달, 앞으로 14달.
+ * 금액 계산이 덮어야 하는 달 — 뒤로 1달(또는 잔고 기준일의 달까지), 앞으로 14달.
  *
  * **커서가 아니라 오늘을 기준으로 잡는다.** 한도·다음 입금일·정산은 오늘의 함수이지
  * 보고 있는 달의 함수가 아니다. 커서 창으로 계산하면 달력을 넘길 때마다 머리 숫자가
@@ -511,13 +598,57 @@ export function monthWindow(cursorISO: string): YearMonth[] {
  * 좁으면 실제로 있는 입금을 못 보고 "입금 없음 → 30일 뒤" 로 조용히 물러난다.
  * 어느 날에서 재도 이 창의 끝이 400일보다 뒤에 오도록 잡았다 (달 말일 기준 426일).
  *
- * `array-contains-any` 상한이 30이므로 16달은 여유가 있다.
+ * ── 잔고 기준일이 더 오래됐을 때 ──────────────────────────────
+ *
+ * 한도는 잔고 기준일 **다음 날부터** 센다 (`tide.unsettledAfter`). 기준일이 석 달 전이면
+ * 그 석 달 사이의 한 번짜리 예정과 실제 거래가 모두 필요하다. 예전 창(뒤로 1달)은 그것을
+ * 못 받아, 정산은 확정 차액을 감췄지만(`coverage`) 머리 숫자는 빠진 지출만큼 크게 떴다.
+ * 이제 창의 시작을 **가장 이른 계좌 기준일의 달**까지 당긴다. 그보다 앞은 받지 않는다 —
+ * 기준일 앞의 예정은 이미 잔고에 들어 있고, 실제 거래도 그 날짜로 잔고 안이다
+ * (`ledger.balanceInclusion`). 모든 과거를 상시 구독하지 않는 이유가 이것이다.
+ *
+ * 창이 30달을 넘으면 조회를 나눈다 (`subscribeEntriesForMonths`).
  */
 export const TIDE_WINDOW_BACK_MONTHS = 1;
 export const TIDE_WINDOW_FORWARD_MONTHS = 14;
+/**
+ * 기준일을 따라 거슬러 가는 상한 — 10년. 조회는 30달씩 나뉘므로 많아야 다섯 번이다.
+ *
+ * 이보다 오래된 기준일은 창을 늘리지 않고 **계산을 멈춘다** (`tideWindowReaches`).
+ * 끝없이 늘리면 잘못 적힌 연도 하나가 수백 번의 조회가 되고, 잘라서 계산하면 빠진
+ * 입출금만큼 틀린 한도가 확정값처럼 뜬다.
+ */
+export const TIDE_WINDOW_MAX_BACK_MONTHS = 120;
 
-export function tideWindow(todayISO: string): YearMonth[] {
-  return monthsAround(todayISO, TIDE_WINDOW_BACK_MONTHS, TIDE_WINDOW_FORWARD_MONTHS);
+function monthsBetween(fromISO: string, toISO: string): number {
+  const [fy, fm] = ymOf(fromISO).split('-').map(Number) as [number, number];
+  const [ty, tm] = ymOf(toISO).split('-').map(Number) as [number, number];
+  return (ty - fy) * 12 + (tm - fm);
+}
+
+export function tideWindow(todayISO: string, earliestAsOf?: string | null): YearMonth[] {
+  const asOf = earliestAsOf ? normalizeDate(earliestAsOf) : '';
+  const back = asOf
+    ? Math.min(TIDE_WINDOW_MAX_BACK_MONTHS, Math.max(TIDE_WINDOW_BACK_MONTHS, monthsBetween(asOf, todayISO)))
+    : TIDE_WINDOW_BACK_MONTHS;
+  return monthsAround(todayISO, back, TIDE_WINDOW_FORWARD_MONTHS);
+}
+
+/** 계산 창이 잔고 기준일의 달까지 닿는가. 닿지 않으면 한도를 낼 자료가 모자라다. */
+export function tideWindowReaches(months: readonly YearMonth[], earliestAsOf: string | null): boolean {
+  const asOf = earliestAsOf ? normalizeDate(earliestAsOf) : '';
+  const first = months[0];
+  return !asOf || !first || ymOf(asOf) >= first;
+}
+
+/** 계좌들 가운데 가장 이른 잔고 기준일. 계산 창의 시작을 정한다. */
+export function earliestAsOfOf(accounts: readonly Pick<Account, 'asOf'>[]): string | null {
+  let out: string | null = null;
+  for (const a of accounts) {
+    const d = normalizeDate(a.asOf);
+    if (d && (out === null || d < out)) out = d;
+  }
+  return out;
 }
 
 /**

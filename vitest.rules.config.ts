@@ -7,6 +7,7 @@ import { defineConfig } from 'vitest/config';
  *   pendingWrites.emulator.test.ts 규칙 거절 뒤에 무엇이 남는가
  *   shared.emulator.test.ts        같이 보기 — merge 갱신이 상대의 수정을 남기는가,
  *                                  공유 화면의 편집이 원본에 닿지 않는가
+ *   ledger.emulator.test.ts        가계부 원장 — 30달 넘는 창의 분할 조회 · 확정 거래 조회
  */
 export default defineConfig({
   test: {
@@ -17,6 +18,7 @@ export default defineConfig({
       'src/test/restore.emulator.test.ts',
       'src/test/pendingWrites.emulator.test.ts',
       'src/test/shared.emulator.test.ts',
+      'src/test/ledger.emulator.test.ts',
     ],
     testTimeout: 20_000,
     hookTimeout: 30_000,

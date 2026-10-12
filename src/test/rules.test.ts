@@ -247,6 +247,175 @@ describe('budgets / reserves', () => {
 });
 
 /*
+  가계부 원장 (L1).
+
+  실제 거래 · 흐름 · 분류 · 결제수단 · 계좌 · 확정한 회차는 모두 선택 필드다. 옛 문서는
+  그 필드 없이 그대로 통과해야 하고(위의 '정상 가계부 항목'), 있으면 뜻을 본다.
+
+  더 중요한 것은 구버전 앱이다. 구버전은 모르는 필드를 읽지 않고 문서 전체를 덮어쓴다.
+  그 쓰기가 통과하면 실제 거래가 예정으로 돌아가 같은 돈이 두 번 세어진다. 종류를 바꾸며
+  `money: null` 로 덮는 길도 같은 손실이므로 함께 막는다.
+*/
+describe('가계부 원장', () => {
+  const ledgerMoney = (over: Record<string, unknown> = {}) => ({
+    type: 'expense', amountMinor: 12000, currency: 'KRW',
+    linkedEntryId: null, budgetId: null, debtId: null, priority: false,
+    status: 'planned', flow: 'normal', categoryId: null, method: null,
+    accountId: null, plannedRef: null,
+    ...over,
+  });
+  const ledgerEntry = (money: Record<string, unknown>, over: Record<string, unknown> = {}) =>
+    validEntry({ kind: 'money', task: null, money, schema: 2, ...over });
+  const actual = (over: Record<string, unknown> = {}) => ledgerEntry(ledgerMoney({
+    status: 'actual', plannedRef: { entryId: 'rent', date: '2026-08-25' }, ...over,
+  }));
+  // 구버전이 같은 문서를 고쳐 쓴 모양: 원장 필드도 schema 도 없다.
+  const oldShape = (over: Record<string, unknown> = {}) => validEntry({
+    kind: 'money', task: null,
+    money: { type: 'expense', amountMinor: 12000, currency: 'KRW', linkedEntryId: null, budgetId: null, debtId: null, priority: false },
+    ...over,
+  });
+  const path = (id: string) => `users/${ME}/entries/${id}`;
+
+  it('실제 거래 · 흐름 · 분류 · 계좌 · 확정한 회차를 받는다', async () => {
+    await assertSucceeds(setDoc(doc(db(ME), path('rent~2026-08-25')), actual({
+      categoryId: 'housing', method: '신한카드', accountId: 'a1',
+    })));
+    await assertSucceeds(setDoc(doc(db(ME), path('c1')), ledgerEntry(ledgerMoney({ status: 'actual', flow: 'cardSpend' }))));
+    await assertSucceeds(setDoc(doc(db(ME), path('c2')), ledgerEntry(ledgerMoney({ status: 'actual', flow: 'cardPayment' }))));
+    await assertSucceeds(setDoc(doc(db(ME), path('l1')), ledgerEntry(ledgerMoney({ flow: 'loanPrincipal' }))));
+    await assertSucceeds(setDoc(doc(db(ME), path('l2')), ledgerEntry(ledgerMoney({ flow: 'loanInterest' }))));
+    await assertSucceeds(setDoc(doc(db(ME), path('t1')), ledgerEntry(ledgerMoney({ type: 'income', flow: 'transfer' }))));
+  });
+
+  it('모르는 상태 · 흐름은 거부한다 — 읽기 계층이 조용히 바꿔 읽는 값이다', async () => {
+    await assertFails(setDoc(doc(db(ME), path('x1')), ledgerEntry(ledgerMoney({ status: 'done' }))));
+    await assertFails(setDoc(doc(db(ME), path('x2')), ledgerEntry(ledgerMoney({ flow: 'refund' }))));
+  });
+
+  it('분류 · 결제수단 · 계좌는 문자열이거나 비어 있다', async () => {
+    await assertFails(setDoc(doc(db(ME), path('x1')), ledgerEntry(ledgerMoney({ categoryId: 3 }))));
+    await assertFails(setDoc(doc(db(ME), path('x2')), ledgerEntry(ledgerMoney({ method: 'x'.repeat(101) }))));
+    await assertFails(setDoc(doc(db(ME), path('x3')), ledgerEntry(ledgerMoney({ accountId: true }))));
+  });
+
+  it('확정한 회차는 실제 거래에만, 정해진 모양으로만 붙는다', async () => {
+    await assertFails(setDoc(doc(db(ME), path('x1')), ledgerEntry(ledgerMoney({
+      plannedRef: { entryId: 'rent', date: '2026-08-25' },
+    }))));
+    await assertFails(setDoc(doc(db(ME), path('x2')), actual({ plannedRef: { entryId: 'rent', date: '2026-8-25' } })));
+    await assertFails(setDoc(doc(db(ME), path('x3')), actual({ plannedRef: { entryId: '', date: '2026-08-25' } })));
+    await assertFails(setDoc(doc(db(ME), path('x4')), actual({ plannedRef: { entryId: 'rent', date: '2026-08-25', extra: 1 } })));
+    await assertFails(setDoc(doc(db(ME), path('x5')), actual({ plannedRef: 'rent' })));
+  });
+
+  it('실제 거래는 반복도 기간도 갖지 않는다', async () => {
+    await assertFails(setDoc(doc(db(ME), path('x1')), {
+      ...actual(), isRecurring: true, recurrence: { freq: 'monthly', interval: 1, until: null, count: null },
+    }));
+    await assertFails(setDoc(doc(db(ME), path('x2')), {
+      ...actual(), recurrence: { freq: 'monthly', interval: 1, until: null, count: null },
+    }));
+    await assertFails(setDoc(doc(db(ME), path('x3')), { ...actual(), endDate: '2026-08-31' }));
+  });
+
+  it('실제 거래는 입금 · 출금으로만 적는다 — legacy 종류로 확정하지 않는다', async () => {
+    for (const type of ['repay', 'priority', 'living', 'save', 'free']) {
+      await assertFails(setDoc(doc(db(ME), path(`x-${type}`)), actual({ type })));
+    }
+    await assertSucceeds(setDoc(doc(db(ME), path('in')), actual({ type: 'income', plannedRef: null })));
+    // 예정에서는 legacy 종류가 지금처럼 남는다.
+    await assertSucceeds(setDoc(doc(db(ME), path('legacy')), ledgerEntry(ledgerMoney({ type: 'repay' }))));
+  });
+
+  it('카드 · 대출 흐름은 나가는 돈에만 붙는다', async () => {
+    for (const flow of ['cardSpend', 'cardPayment', 'loanPrincipal', 'loanInterest']) {
+      await assertFails(setDoc(doc(db(ME), path(`x-${flow}`)), ledgerEntry(ledgerMoney({ type: 'income', flow }))));
+    }
+  });
+
+  it('schema 는 정수다', async () => {
+    await assertFails(setDoc(doc(db(ME), path('x1')), { ...actual(), schema: '2' }));
+  });
+
+  describe('구버전 덮어쓰기', () => {
+    it('실제 거래를 원장 필드 없이 덮어쓸 수 없다', async () => {
+      await assertSucceeds(setDoc(doc(db(ME), path('a1')), actual()));
+      await assertFails(setDoc(doc(db(ME), path('a1')), oldShape({ title: '고친 제목' })));
+      const snap = await getDoc(doc(db(ME), path('a1')));
+      expect(snap.data()?.money?.status).toBe('actual');
+    });
+
+    it('종류를 바꾸며 money 를 비워도 막는다 — money: null 우회', async () => {
+      await assertSucceeds(setDoc(doc(db(ME), path('a1')), actual()));
+      // 구버전이 할 일로 바꾼 모양. money 째로 사라지고 schema 도 없다.
+      await assertFails(setDoc(doc(db(ME), path('a1')), validEntry({ title: '할 일로' })));
+      await assertFails(setDoc(doc(db(ME), path('a1')), validEntry({ kind: 'idea', task: null })));
+    });
+
+    it('분류만 붙은 예정 항목도 지켜진다', async () => {
+      await assertSucceeds(setDoc(doc(db(ME), path('p1')), ledgerEntry(ledgerMoney({ categoryId: 'food' }))));
+      await assertFails(setDoc(doc(db(ME), path('p1')), oldShape()));
+    });
+
+    it('새 앱은 종류를 바꿀 수 있다 — schema 를 함께 적는다', async () => {
+      await assertSucceeds(setDoc(doc(db(ME), path('a1')), actual()));
+      await assertSucceeds(setDoc(doc(db(ME), path('a1')), validEntry({ title: '할 일로', schema: 2 })));
+    });
+
+    it('schema 를 낮춰 쓰는 것도 막는다', async () => {
+      await assertSucceeds(setDoc(doc(db(ME), path('a1')), actual()));
+      await assertFails(setDoc(doc(db(ME), path('a1')), { ...actual(), schema: 1 }));
+    });
+
+    it('원장 필드가 없는 문서는 구버전도 지금처럼 고친다', async () => {
+      await assertSucceeds(setDoc(doc(db(ME), path('p1')), ledgerEntry(ledgerMoney())));
+      await assertSucceeds(setDoc(doc(db(ME), path('p1')), oldShape({ title: '구버전 수정' })));
+      await assertSucceeds(setDoc(doc(db(ME), path('t1')), validEntry({ schema: 2 })));
+      await assertSucceeds(setDoc(doc(db(ME), path('t1')), validEntry({ title: '구버전 수정' })));
+    });
+
+    it('부분 갱신은 합쳐진 문서에 표식이 남아 통과한다', async () => {
+      await assertSucceeds(setDoc(doc(db(ME), path('a1')), actual()));
+      await assertSucceeds(setDoc(doc(db(ME), path('a1')), { keepPrivate: true }, { merge: true }));
+      await assertSucceeds(updateDoc(doc(db(ME), path('a1')), { title: '부분' }));
+    });
+
+    it('지우기는 막지 않는다 — 확정 취소는 실제 거래를 지우는 것이다', async () => {
+      await assertSucceeds(setDoc(doc(db(ME), path('a1')), actual()));
+      await assertSucceeds(deleteDoc(doc(db(ME), path('a1'))));
+    });
+  });
+
+  describe('계좌의 잔고 반영 목록', () => {
+    const account = {
+      name: '주계좌', balanceMinor: 1350000, currency: 'KRW', asOf: '2026-08-19',
+      checkedAt: '2026-08-19T09:00:00.000Z', order: 0, createdAt: '', updatedAt: '',
+    };
+    const apath = `users/${ME}/accounts/a1`;
+
+    it('목록을 받는다. 배열이어야 하고 너무 길면 거부한다', async () => {
+      await assertSucceeds(setDoc(doc(db(ME), apath), { ...account, reflectedEntryIds: ['e1'], schema: 2 }));
+      await assertFails(setDoc(doc(db(ME), apath), { ...account, reflectedEntryIds: 'e1', schema: 2 }));
+      await assertFails(setDoc(doc(db(ME), apath), {
+        ...account, reflectedEntryIds: Array.from({ length: 501 }, (_, i) => `e${i}`), schema: 2,
+      }));
+    });
+
+    it('구버전이 목록을 지우지 못한다', async () => {
+      await assertSucceeds(setDoc(doc(db(ME), apath), { ...account, reflectedEntryIds: ['e1'], schema: 2 }));
+      await assertFails(setDoc(doc(db(ME), apath), { ...account, balanceMinor: 1 }));
+      await assertSucceeds(setDoc(doc(db(ME), apath), { ...account, balanceMinor: 1, reflectedEntryIds: [], schema: 2 }));
+    });
+
+    it('목록이 비어 있으면 구버전도 지금처럼 고친다', async () => {
+      await assertSucceeds(setDoc(doc(db(ME), apath), { ...account, reflectedEntryIds: [], schema: 2 }));
+      await assertSucceeds(setDoc(doc(db(ME), apath), { ...account, balanceMinor: 1 }));
+    });
+  });
+});
+
+/*
   회복은 규칙을 고치지 않고 들어왔다. 항목 규칙은 필수 필드의 타입만 보고 나머지를
   통과시키도록 쓰여 있고(그래서 새 필드가 조용히 막히지 않는다), 회복 규칙은
   users/{uid} 문서의 필드라 소유자 검사만 거친다. 그 전제가 무너지면 회복은

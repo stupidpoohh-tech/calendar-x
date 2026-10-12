@@ -5,9 +5,11 @@
  * 채운다. 화면이 흰색으로 죽는 것보다 기본값으로 뜨는 편이 낫다.
  */
 import { DEFAULT_COLOR, DEFAULT_CURRENCY, MONEY_TYPE_BY_ID, STATUS_BY_ID } from '../domain/constants';
-import { normalizeDate, todayISO, ymRange } from '../domain/date';
+import { normalizeDate, todayISO, ymOf, ymRange } from '../domain/date';
+import { MONEY_FLOWS, moneyFlowOf, moneyStatusOf } from '../domain/ledger';
 import type {
-  Account, Budget, ColorId, Debt, Entry, EntryKind, MoneyType, Pin, Reserve,
+  Account, Budget, ColorId, Debt, Entry, EntryKind, MoneyFields, MoneyFlow, MoneyType,
+  Pin, PlannedRef, Reserve,
   RecoveryFields, RecoveryOption, RecoveryRule, RecoveryWindowId,
   Recurrence, RepeatFreq, TaskStatus,
 } from '../domain/types';
@@ -33,6 +35,35 @@ const asStatus = (v: unknown): TaskStatus =>
 
 const asMoneyType = (v: unknown): MoneyType =>
   typeof v === 'string' && v in MONEY_TYPE_BY_ID ? (v as MoneyType) : 'expense';
+
+/** 짧은 선택 문자열. 비었으면 null — 빈 문자열과 "없음" 을 두 가지로 두지 않는다. */
+const optStr = (v: unknown): string | null => (typeof v === 'string' && v.length > 0 ? v : null);
+
+const asFlow = (v: unknown): MoneyFlow =>
+  typeof v === 'string' && (MONEY_FLOWS as readonly string[]).includes(v) ? (v as MoneyFlow) : 'normal';
+
+/** 예정 회차 연결. 모양이 맞지 않으면 없는 것으로 본다 — 엉뚱한 회차를 숨기지 않는다. */
+function asPlannedRef(v: unknown): PlannedRef | null {
+  const r = obj(v);
+  if (!r) return null;
+  const entryId = optStr(r.entryId);
+  const date = normalizeDate(str(r.date));
+  return entryId && date ? { entryId, date } : null;
+}
+
+/**
+ * 저장 형태의 판 번호. **원장 필드를 아는 앱만 이 값을 쓴다.**
+ *
+ * 원장 필드를 모르는 예전 앱이 열어 둔 탭에서 항목을 저장하면, 그 앱은 모르는 필드를
+ * 읽지 않았으니 쓰지도 않는다 — 문서 전체를 덮어쓰므로(`setDoc`) 실제 거래 표시 ·
+ * 분류 · 회차 연결이 조용히 사라진다. 규칙이 "원장 필드가 실린 문서에 이 값 없는
+ * 쓰기" 를 거절해 그 길을 막는다 (`firestore.rules` 의 `keepsLedger`).
+ *
+ * `money` 안이 아니라 **문서 맨 위**에 둔다. 예전 앱이 가계부 항목을 할 일로 바꾸면
+ * `money: null` 을 쓰는데, 표식이 `money` 안에 있으면 그 쓰기에서는 비교할 표식 자체가
+ * 없어 막을 수 없다.
+ */
+export const LEDGER_SCHEMA = 2;
 
 const asTime = (v: unknown): string | null =>
   typeof v === 'string' && /^\d{2}:\d{2}$/.test(v) ? v : null;
@@ -133,13 +164,20 @@ export function recoveryRuleToDoc(r: RecoveryRule): Raw {
 
 export function entryFromDoc(id: string, raw: Raw): Entry {
   const kind = asKind(raw.kind);
-  const startDate = normalizeDate(str(raw.startDate)) || todayISO();
-  const endRaw = normalizeDate(str(raw.endDate));
-  const endDate = endRaw && endRaw >= startDate ? endRaw : null;
-  const recurrence = asRecurrence(raw.recurrence);
-
   const taskRaw = obj(raw.task);
   const moneyRaw = obj(raw.money);
+  /*
+    실제 거래는 한 날짜의 사실이다 — 반복도 기간도 없다. 규칙이 그런 쓰기를 거절하므로
+    정상 경로로는 들어올 수 없지만, 들어오면 반복을 펼쳐 같은 거래를 여러 번 세게 된다.
+  */
+  const actual = kind === 'money' && moneyRaw?.status === 'actual';
+
+  const startDate = normalizeDate(str(raw.startDate)) || todayISO();
+  const endRaw = actual ? '' : normalizeDate(str(raw.endDate));
+  const endDate = endRaw && endRaw >= startDate ? endRaw : null;
+  const recurrence = actual ? null : asRecurrence(raw.recurrence);
+  // 회차 연결은 실제 거래에만 뜻이 있다. 예정에 붙어 있으면 버린다 — 규칙도 그렇게 본다.
+  const plannedRef = actual ? asPlannedRef(moneyRaw?.plannedRef) : null;
 
   const storedSpan = strArr(raw.ymSpan);
 
@@ -156,7 +194,7 @@ export function entryFromDoc(id: string, raw: Raw): Entry {
     endDate,
     endTime: asTime(raw.endTime),
     // 저장된 인덱스가 비어 있거나 어긋나 있으면 실제 날짜에서 다시 만든다.
-    ymSpan: storedSpan.length > 0 ? storedSpan : ymRange(startDate, endDate ?? startDate),
+    ymSpan: storedSpan.length > 0 ? storedSpan : spanFallback(startDate, endDate, plannedRef),
     isRecurring: recurrence != null,
     recurrence,
     task: kind === 'task'
@@ -178,6 +216,13 @@ export function entryFromDoc(id: string, raw: Raw): Entry {
           debtId: typeof moneyRaw?.debtId === 'string' ? moneyRaw.debtId : null,
           // legacy `priority` 유형은 그 자체가 우선 표시였다. 뜻을 잃지 않게 옮겨 읽는다.
           priority: moneyRaw?.priority === true || moneyRaw?.type === 'priority',
+          // 원장 필드. 없던 시절의 문서는 전부 예정 · 일반이다.
+          status: actual ? 'actual' : 'planned',
+          flow: asFlow(moneyRaw?.flow),
+          categoryId: optStr(moneyRaw?.categoryId),
+          method: optStr(moneyRaw?.method),
+          accountId: optStr(moneyRaw?.accountId),
+          plannedRef,
         }
       : null,
     // 회복 표식은 할 일 위에만 얹힌다.
@@ -209,12 +254,41 @@ export function entryToDoc(e: Entry): Raw {
     isRecurring: e.isRecurring,
     recurrence: e.recurrence,
     task: e.task,
-    money: e.money,
+    money: e.money ? moneyToDoc(e.money) : null,
     recovery: e.recovery,
+    schema: LEDGER_SCHEMA,
     // undefined 는 Firestore 가 받지 않는다. 늘 참/거짓으로 굳혀 쓴다.
     keepPrivate: e.keepPrivate === true,
     createdAt: e.createdAt,
     updatedAt: e.updatedAt,
+  };
+}
+
+/** 저장된 `ymSpan` 이 없을 때 다시 만든다. `withDerived` 와 같은 규칙이다. */
+function spanFallback(start: string, end: string | null, ref: PlannedRef | null): string[] {
+  const own = ymRange(start, end ?? start);
+  if (!ref) return own;
+  const m = ymOf(ref.date);
+  return own.includes(m) ? own : [...own, m].sort();
+}
+
+/**
+ * 가계부 필드 저장 형태. 원장 필드를 **늘 채워서** 쓴다.
+ *
+ * 메모리의 객체는 그 필드가 없을 수 있다(예전 자료 · 테스트 자료). Firestore 는
+ * `undefined` 를 받지 않으므로 빈 자리를 기본값으로 굳힌다.
+ */
+function moneyToDoc(m: MoneyFields): Raw {
+  return {
+    ...m,
+    status: moneyStatusOf(m),
+    flow: moneyFlowOf(m),
+    categoryId: m.categoryId ?? null,
+    method: m.method ?? null,
+    accountId: m.accountId ?? null,
+    plannedRef: m.plannedRef && moneyStatusOf(m) === 'actual'
+      ? { entryId: m.plannedRef.entryId, date: m.plannedRef.date }
+      : null,
   };
 }
 
@@ -233,6 +307,7 @@ export function accountFromDoc(id: string, raw: Raw): Account {
     currency: str(raw.currency, DEFAULT_CURRENCY),
     asOf,
     checkedAt,
+    reflectedEntryIds: strArr(raw.reflectedEntryIds),
     order: num(raw.order, 0),
     createdAt: str(raw.createdAt),
     updatedAt: str(raw.updatedAt),
@@ -243,6 +318,10 @@ export function accountToDoc(a: Account): Raw {
   return {
     name: a.name, balanceMinor: a.balanceMinor, currency: a.currency,
     asOf: a.asOf, checkedAt: a.checkedAt, order: a.order,
+    // 같은 날 실제 거래 중 이 잔고에 들어 있는 것. 예전 앱은 이 값을 모르므로 같은
+    // 이유로 판 번호를 붙인다 — 예전 앱이 잔고를 다시 적으면서 이 목록을 지우지 못하게.
+    reflectedEntryIds: a.reflectedEntryIds ?? [],
+    schema: LEDGER_SCHEMA,
     createdAt: a.createdAt, updatedAt: a.updatedAt,
   };
 }

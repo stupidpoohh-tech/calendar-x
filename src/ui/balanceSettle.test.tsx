@@ -329,3 +329,32 @@ describe('통화가 섞였을 때', () => {
     expect(screen.getByText(/원화 2026-09-01 기준/)).toBeTruthy();
   });
 });
+
+describe('잔고 반영 목록', () => {
+  it('같은 날 다시 적으면 고른 것을 그대로 둔다', async () => {
+    const saved: Account[] = [];
+    mount({
+      todayISO: '2026-09-10',
+      accounts: [account({ asOf: '2026-09-10', checkedAt: '2026-09-10T09:00:00+09:00', reflectedEntryIds: ['t1'] })],
+      entries: [],
+      onSaveAccount: (a) => saved.push(a),
+    });
+    editBalance('1000000');
+    await waitFor(() => expect(saved).toHaveLength(1));
+    expect(saved[0]?.reflectedEntryIds).toEqual(['t1']);
+  });
+
+  it('날이 바뀌면 비운다 — 그 목록은 앞 기준일의 것이다', async () => {
+    const saved: Account[] = [];
+    mount({
+      todayISO: '2026-09-10',
+      accounts: [account({ asOf: '2026-09-09', checkedAt: '2026-09-09T09:00:00+09:00', reflectedEntryIds: ['t1'] })],
+      entries: [],
+      onSaveAccount: (a) => saved.push(a),
+    });
+    editBalance('1000000');
+    await waitFor(() => expect(saved).toHaveLength(1));
+    expect(saved[0]?.reflectedEntryIds).toEqual([]);
+    expect(saved[0]?.asOf).toBe('2026-09-10');
+  });
+});

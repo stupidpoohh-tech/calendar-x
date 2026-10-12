@@ -35,6 +35,94 @@ service cloud.firestore {
       return v == null || (v is string && v.matches('^\\d{2}:\\d{2}$'));
     }
 
+    function isStrOrNull(v, max) {
+      return v == null || (v is string && v.size() <= max);
+    }
+
+    /*
+      가계부 원장 필드 (`domain/ledger.ts`).
+
+      전부 선택이다. 그 필드가 없던 시절의 문서가 그대로 남아 있고 그것이 정상이다 —
+      읽기 계층이 없으면 "예정 · 일반" 으로 읽는다. 있을 때만 형태와 뜻을 본다.
+
+      실제 거래는 한 날짜에 일어난 사실이라 반복도 기간도 갖지 않는다. 반복이 붙으면
+      계산이 같은 거래를 여러 번 세고, 기간이 붙으면 하루 몫으로 쪼개 센다. 종류도
+      흐름(입금 · 출금) 둘뿐이다 — legacy 종류로 확정하면 그 거래가 소비인지 상환인지를
+      아무도 모른다.
+    */
+    function validLedger(d) {
+      let m = d.money;
+      let status = m.get('status', 'planned');
+      let flow = m.get('flow', 'normal');
+      let ref = m.get('plannedRef', null);
+      return status in ['planned', 'actual']
+        && flow in ['normal', 'loanPrincipal', 'loanInterest', 'transfer', 'cardSpend', 'cardPayment']
+        && isStrOrNull(m.get('categoryId', null), 200)
+        && isStrOrNull(m.get('method', null), 100)
+        && isStrOrNull(m.get('accountId', null), 200)
+        && (ref == null || (
+             ref is map
+             && ref.keys().hasOnly(['entryId', 'date'])
+             && ref.entryId is string && ref.entryId.size() > 0 && ref.entryId.size() <= 200
+             && isDateISO(ref.date)
+             && status == 'actual'
+           ))
+        && (status != 'actual' || (
+             d.isRecurring == false
+             && d.get('recurrence', null) == null
+             && d.endDate == null
+             && m.type in ['income', 'expense']
+           ))
+        // 카드 사용 · 대금 · 대출 원금 · 이자는 나가는 돈에만 뜻이 있다.
+        && (!(flow in ['loanPrincipal', 'loanInterest', 'cardSpend', 'cardPayment'])
+            || m.type == 'expense');
+    }
+
+    /*
+      원장 필드가 실린 가계부 문서인가. 기본값만 있는 문서는 잃을 것이 없다.
+    */
+    function hasLedgerData(m) {
+      return m is map && (
+        m.get('status', 'planned') != 'planned'
+        || m.get('flow', 'normal') != 'normal'
+        || m.get('categoryId', null) != null
+        || m.get('method', null) != null
+        || m.get('accountId', null) != null
+        || m.get('plannedRef', null) != null
+      );
+    }
+
+    /*
+      구버전 앱이 원장 필드를 지우지 못하게 한다.
+
+      구버전은 모르는 필드를 읽지 않고, 저장은 문서 전체를 덮어쓴다(`setDoc`). 그래서
+      새 앱이 적은 실제 거래를 구버전에서 한 번 고치면 그 거래가 예정으로 돌아가고,
+      확정해 둔 회차가 다시 살아나 같은 돈이 두 번 세어진다.
+
+      새 앱은 문서 **최상위**에 `schema: 2` 를 늘 함께 적는다 (`converters.ts` 의
+      `LEDGER_SCHEMA`). money 안이 아니라 최상위인 이유는 구버전이 종류를 바꾸며
+      `money: null` 로 덮는 경우까지 막기 위해서다 — money 안의 표식은 money 째로
+      사라진다. 막는 것은 원장 필드가 실린 문서뿐이고, 그렇지 않은 문서는 구버전도
+      지금처럼 고친다. 부분 갱신(`task.order` · `keepPrivate`)은 합쳐진 문서에 표식이
+      남으므로 걸리지 않는다.
+    */
+    function schemaOf(d) {
+      return d.get('schema', 0);
+    }
+
+    function keepsLedger() {
+      return resource == null
+        || !hasLedgerData(resource.data.get('money', null))
+        || schemaOf(data()) >= 2;
+    }
+
+    // 계좌의 잔고 반영 목록도 같다. 구버전이 지우면 반영된 거래가 한도에서 또 빠진다.
+    function keepsReflected() {
+      return resource == null
+        || resource.data.get('reflectedEntryIds', []).size() == 0
+        || schemaOf(data()) >= 2;
+    }
+
     // 한 문서가 지나치게 커지는 것을 막는다. 이전 구조는 대출 목록 전체를
     // 한 문서의 memo 에 JSON 으로 넣었고, 그래서 다중 기기 덮어쓰기가 났다.
     function withinSize() {
@@ -62,7 +150,10 @@ service cloud.firestore {
           && (data().money == null || (
                data().money.amountMinor is int
                && data().money.currency is string
+               && validLedger(data())
              ))
+          && (!('schema' in data()) || data().schema is int)
+          && keepsLedger()
           // 같이 보기에 올리지 않는 표시. 옛 문서에는 없고 그것이 정상이다.
           && (!('keepPrivate' in data()) || data().keepPrivate is bool);
       }
@@ -78,7 +169,12 @@ service cloud.firestore {
           // checkedAt 은 정산 계산 기준점. 없으면 asOf 자정으로 폴백되므로
           // 규칙에서는 선택 항목으로 두되 형태만 본다.
           && (data().checkedAt == null
-              || (data().checkedAt is string && data().checkedAt.size() <= 40));
+              || (data().checkedAt is string && data().checkedAt.size() <= 40))
+          // 기준일 당일 거래 중 이 잔고에 이미 들어 있다고 고른 것 (`ledger.balanceInclusion`).
+          && (!('reflectedEntryIds' in data())
+              || (data().reflectedEntryIds is list && data().reflectedEntryIds.size() <= 500))
+          && (!('schema' in data()) || data().schema is int)
+          && keepsReflected();
       }
 
       match /debts/{debtId} {

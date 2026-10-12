@@ -4,7 +4,8 @@
  * 여기서 잘못 나누면 화면이 "없음" 과 "아직 못 받음" 을 같은 것으로 그린다.
  */
 import { describe, expect, it } from 'vitest';
-import { calcCaveat, calcHeadline, calcNotice, calcStateOf } from './calcState';
+import { newEntry } from '../domain/entry';
+import { calcCaveat, calcHeadline, calcNotice, calcScopeNotice, calcStateOf } from './calcState';
 
 const feed = (over: Partial<Parameters<typeof calcStateOf>[0]> = {}) => calcStateOf({
   status: 'live', ready: true, empty: false, fromCache: false, pending: false, ...over,
@@ -61,5 +62,17 @@ describe('덧붙이는 말', () => {
     expect(calcHeadline({ kind: 'loading' })).toBe('불러오는 중');
     expect(calcHeadline({ kind: 'error' })).toBe('불러오지 못함');
     expect(calcHeadline({ kind: 'unconfirmed' })).toBe('확인 전');
+  });
+});
+
+describe('calcScopeNotice', () => {
+  it('통화가 섞였으면 통화를 말한다', () => {
+    expect(calcScopeNotice({ ok: false, reason: 'currency', currencies: ['KRW', 'USD'] })).toContain('KRW · USD');
+  });
+
+  it('계좌를 모르는 실제 거래가 있으면 건수와 푸는 길을 말한다', () => {
+    const text = calcScopeNotice({ ok: false, reason: 'unassigned', entries: [newEntry('money'), newEntry('money')] });
+    expect(text).toContain('2건');
+    expect(text).toContain('계좌를 적거나');
   });
 });

@@ -14,8 +14,13 @@ import type { Account, Budget, Debt, Entry, Pin, RecoveryRule, Reserve } from '.
  * 올린 이유는 **읽는 쪽이 둘을 구분해야 하기 때문**이다. v3 파일에 두 배열이 없는 것은
  * 정상(그 구조가 없던 시절)이고, v4 파일에 없는 것은 망가진 파일이다. 버전을 그대로
  * 두면 그 둘을 가를 수 없어 어느 쪽이든 빈 배열로 넘겨짚게 된다.
+ *
+ * 5 는 구조가 4 와 같고 가계부 원장 필드(실제 거래 · 흐름 · 확정한 회차 · 잔고 반영
+ * 목록)가 실릴 수 있다. 올린 이유는 **구버전 앱이 이 파일을 거절하게 하려는 것**이다.
+ * 구버전은 그 필드를 읽지 않고 가져오므로, 실제 거래가 예정으로 들어가 같은 돈이 두 번
+ * 세어진다. 모르는 버전이면 구버전은 "새로고침해 최신 버전으로" 라고 말하고 멈춘다.
  */
-export const BACKUP_VERSION = 4;
+export const BACKUP_VERSION = 5;
 
 export interface BackupPayload {
   app: 'Dada Calendar';

@@ -91,6 +91,13 @@ export function useBalanceEditor(
       // 하루 안에 두 번 갈아엎을 때도 정산이 순서대로 잡힌다.
       asOf: today,
       checkedAt: now,
+      /*
+        기준일 당일 실제 거래 중 이 잔고에 들어 있다고 고른 것. 같은 날 다시 적으면
+        고른 것이 그대로 유효하고, 날이 바뀌면 뜻이 없어지므로 비운다 — 그 거래들은
+        이제 기준일보다 앞서 날짜만으로 들어 있다고 판정된다 (`ledger.balanceInclusion`).
+        고르는 자리는 아직 없다. 없는 동안 새로 고른 것으로 넘겨짚지 않는다.
+      */
+      reflectedEntryIds: primary?.asOf === today ? primary.reflectedEntryIds ?? [] : [],
       order: primary?.order ?? 0,
       createdAt: primary?.createdAt || now,
       updatedAt: now,
@@ -103,7 +110,10 @@ export function useBalanceEditor(
     const others = accounts.reduce((t, a) => (a.id === primary.id ? t : t + a.balanceMinor), 0);
     const newTotal = others + minor;
     const multi = accounts.length > 1;
-    const r = settle(accounts, entries, newTotal, today, coveredFrom);
+    // 저장한 뒤의 계좌 모양. 실제 거래 가운데 이번에 새로 잔고에 들어가는 것을 고른다.
+    const saved = build();
+    const next = accounts.map((a) => (a.id === saved.id ? saved : a));
+    const r = settle(accounts, entries, newTotal, today, coveredFrom, next);
     const items = summarize(r.passed);
 
     // 정산할 예정도 없고 diff 도 0 이면 조용히 저장.
@@ -169,8 +179,20 @@ export function useBalanceEditor(
   };
 }
 
-/** 확정 차액을 낼 수 없는 이유. 세 갈래가 각각 다른 말을 한다. */
+/** 확정 차액을 낼 수 없는 이유. 갈래마다 다른 말을 한다. */
 function SettleGap({ settlement: r }: { settlement: Settlement }) {
+  if (r.reason === 'unassigned') {
+    return (
+      <div className="settle">
+        <p>어느 계좌의 것인지 알 수 없는 실제 거래가 <b>{r.detail.length}건</b> 있습니다.</p>
+        <p className="dlg-note">
+          계좌마다 잔고를 적은 날이 달라, 그 거래가 잔고에 이미 들어 있는지 가를 수
+          없습니다. 넘겨짚은 차액은 그 금액만큼 틀립니다. 지금은 잔고만 바꿔 둘까요?
+        </p>
+      </div>
+    );
+  }
+
   if (r.reason === 'currency') {
     return (
       <div className="settle">

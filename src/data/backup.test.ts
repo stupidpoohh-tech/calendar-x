@@ -62,7 +62,7 @@ describe('buildBackup', () => {
     })));
     expect(r.ok).toBe(true);
     if (r.ok) {
-      expect(r.file.format).toBe('v4');
+      expect(r.file.format).toBe('v5');
       expect(r.file.data.budgets[0]).toEqual(budget);
       expect(r.file.data.reserves[0]).toEqual(reserve);
       // 건수는 파일 총계와 맞아떨어져야 한다.

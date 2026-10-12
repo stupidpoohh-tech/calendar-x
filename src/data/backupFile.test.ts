@@ -504,3 +504,84 @@ describe('v4 — 생활비와 세이브', () => {
     expect(read(v3({ entries: [entry()] })).ok).toBe(true);
   });
 });
+
+describe('v5 — 가계부 원장', () => {
+  const v5 = (over: Record<string, unknown> = {}) => ({
+    ...v3(), version: 5, budgets: [], reserves: [], ...over,
+  });
+  const ledger = (money: Record<string, unknown>, over: Record<string, unknown> = {}) => moneyEntry({
+    money: {
+      type: 'expense', amountMinor: 65_000, currency: 'KRW', linkedEntryId: null,
+      status: 'actual', flow: 'normal', categoryId: 'food', method: '현금',
+      accountId: 'a1', plannedRef: { entryId: 'rent', date: '2026-09-10' },
+      ...money,
+    },
+    ...over,
+  });
+
+  it('원장 필드와 잔고 반영 목록을 그대로 읽는다', () => {
+    const r = read(v5({
+      entries: [ledger({})],
+      accounts: [acct({ reflectedEntryIds: ['m1'] })],
+    }));
+    expect(r.ok).toBe(true);
+    if (r.ok) {
+      expect(r.file.format).toBe('v5');
+      const m = r.file.data.entries[0]?.money;
+      expect(m?.status).toBe('actual');
+      expect(m?.plannedRef).toEqual({ entryId: 'rent', date: '2026-09-10' });
+      expect(m?.categoryId).toBe('food');
+      expect(m?.accountId).toBe('a1');
+      expect(r.file.data.accounts[0]?.reflectedEntryIds).toEqual(['m1']);
+    }
+  });
+
+  it('v5 에도 생활비 · 세이브 배열은 필수다', () => {
+    const obj = v5();
+    delete (obj as Record<string, unknown>).budgets;
+    expect(problemsOf(read(obj)).some((x) => x.startsWith('budgets'))).toBe(true);
+  });
+
+  it('원장 필드가 없는 옛 가계부 항목은 예정으로 들어온다', () => {
+    const r = read(v5({ entries: [moneyEntry()] }));
+    expect(r.ok).toBe(true);
+    if (r.ok) {
+      expect(r.file.data.entries[0]?.money?.status).toBe('planned');
+      expect(r.file.data.entries[0]?.money?.flow).toBe('normal');
+    }
+  });
+
+  it('모르는 상태 · 흐름은 거절한다 — 조용히 예정 · 일반으로 바뀌면 뜻이 바뀐다', () => {
+    expect(problemsOf(read(v5({ entries: [ledger({ status: 'done' })] })))[0]).toContain('상태를 알 수 없습니다');
+    expect(problemsOf(read(v5({ entries: [ledger({ flow: 'refund' })] })))[0]).toContain('흐름을 알 수 없습니다');
+  });
+
+  it('실제 거래는 반복 · 기간 · legacy 종류를 갖지 않는다', () => {
+    const recur = { freq: 'monthly', interval: 1, until: null, count: null };
+    expect(problemsOf(read(v5({ entries: [ledger({}, { recurrence: recur })] })))[0]).toContain('반복할 수 없습니다');
+    expect(problemsOf(read(v5({ entries: [ledger({}, { endDate: '2026-09-20' })] })))[0]).toContain('기간을 가질 수 없습니다');
+    expect(problemsOf(read(v5({ entries: [ledger({ type: 'repay' })] })))[0]).toContain('입금 · 출금으로만');
+  });
+
+  it('확정한 회차는 실제 거래에만, 온전한 모양으로만 붙는다', () => {
+    expect(problemsOf(read(v5({ entries: [ledger({ status: 'planned' })] })))[0]).toContain('실제 거래에만');
+    expect(problemsOf(read(v5({ entries: [ledger({ plannedRef: { entryId: '', date: '2026-09-10' } })] })))[0])
+      .toContain('예정 항목 id');
+    expect(problemsOf(read(v5({ entries: [ledger({ plannedRef: { entryId: 'rent', date: '2026-02-30' } })] })))[0])
+      .toContain('날짜');
+  });
+
+  it('카드 · 대출 흐름은 나가는 돈에만 붙는다', () => {
+    expect(problemsOf(read(v5({ entries: [ledger({ type: 'income', flow: 'cardSpend', plannedRef: null })] })))[0])
+      .toContain('나가는 돈에만');
+  });
+
+  it('잔고 반영 목록은 문자열 배열이다', () => {
+    expect(problemsOf(read(v5({ accounts: [acct({ reflectedEntryIds: 'm1' })] })))[0]).toContain('배열이 아닙니다');
+    expect(problemsOf(read(v5({ accounts: [acct({ reflectedEntryIds: [1] })] })))[0]).toContain('문자열이 아닙니다');
+  });
+
+  it('예전 버전 파일에 원장 필드가 들어 있어도 검증한다', () => {
+    expect(problemsOf(read(v3({ entries: [ledger({ flow: 'refund' })] })))[0]).toContain('흐름을 알 수 없습니다');
+  });
+});

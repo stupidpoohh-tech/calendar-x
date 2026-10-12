@@ -107,6 +107,67 @@ export interface MoneyFields {
    * 계산에 영향을 주지 않는 표시값이다.
    */
   priority: boolean;
+
+  /*
+    ── 아래는 실제 거래(원장)를 위한 필드다 ─────────────────────────
+
+    모두 **선택 필드**다. 이 필드들이 생기기 전의 문서·백업·테스트 자료에는 없고, 없으면
+    지금까지와 똑같이 계산돼야 한다. 읽는 쪽은 언제나 `domain/ledger.ts` 의 접근자
+    (`moneyStatusOf` · `moneyFlowOf` …)를 거친다 — 필드를 직접 읽으면 `undefined` 를
+    잘못 해석하는 자리가 생긴다. 저장 계층(`converters`)은 늘 채워서 쓴다.
+  */
+
+  /** 예정인가, 실제로 일어난 거래인가. 없으면 예정이다 — 기존 항목은 전부 예정이다. */
+  status?: MoneyStatus;
+  /**
+   * 돈의 성격. 방향(`type`)과 별개다.
+   *
+   * 현금흐름과 소비 통계가 갈리는 자리다 — 카드 사용은 소비지만 그날 현금은 안 나가고,
+   * 카드 대금은 현금이 나가지만 소비가 아니다. 없으면 `normal`.
+   */
+  flow?: MoneyFlow;
+  /** 결산 · 통계용 분류. 한도 계산에는 쓰지 않는다. */
+  categoryId?: string | null;
+  /** 결제수단. 자유 입력이다. 계산에 쓰지 않는다. */
+  method?: string | null;
+  /**
+   * 이 실제 거래가 빠져나간(들어온) 계좌.
+   *
+   * 계좌가 여럿이고 잔고 기준일이 서로 다르면, 이 값 없이는 거래가 잔고에 이미 들어
+   * 있는지 판정할 수 없다. 모를 때 "반영됐다" 고 넘겨짚지 않는다 (`balanceInclusion`).
+   */
+  accountId?: string | null;
+  /**
+   * 이 실제 거래가 확정한 예정 회차.
+   *
+   * 예정 문서는 확정할 때 건드리지 않는다. 연결은 **실제 거래 쪽에만** 있고, 계산과
+   * 화면은 이 값을 보고 그 회차를 건너뛴다. 확정 취소는 이 문서 하나를 지우는 것이다.
+   */
+  plannedRef?: PlannedRef | null;
+}
+
+/** 예정 · 실제. */
+export type MoneyStatus = 'planned' | 'actual';
+
+/**
+ * 돈의 성격.
+ *
+ *   normal         일반 수입 · 지출
+ *   loanPrincipal  대출 원금 상환 — 현금은 나가지만 소비가 아니다
+ *   loanInterest   대출 이자 — 현금이 나가고, 소비가 아니라 금융비용이다
+ *   transfer       저축 · 계좌 간 이체 — 소비가 아니다
+ *   cardSpend      신용카드 사용 — 소비지만 **그날 현금은 나가지 않는다**
+ *   cardPayment    신용카드 대금 납부 — 현금은 나가지만 소비로 또 세지 않는다
+ */
+export type MoneyFlow =
+  | 'normal' | 'loanPrincipal' | 'loanInterest' | 'transfer' | 'cardSpend' | 'cardPayment';
+
+/** 실제 거래가 가리키는 예정 회차. 반복이 아니면 `date` 는 그 예정의 날짜다. */
+export interface PlannedRef {
+  /** 예정 원본의 id. 반복 전개분 id(`원본@날짜`)가 아니라 원본 그 자체다. */
+  entryId: string;
+  /** 확정한 회차의 날짜 — 실제 거래 날짜와 다를 수 있다. */
+  date: DateISO;
 }
 
 /**
@@ -203,6 +264,15 @@ export interface Account {
   asOf: DateISO;
   /** 잔고를 옮겨 적은 순간 (ISO datetime). 가장 최근 기록을 고르는 데만 쓴다. */
   checkedAt: string;
+  /**
+   * 이 잔고에 **이미 들어 있는**, 기준일 당일의 실제 거래.
+   *
+   * 기준일보다 앞선 거래는 날짜만으로 잔고에 들어 있다고 볼 수 있지만, 같은 날 거래는
+   * 잔고를 적기 전에 났는지 뒤에 났는지를 날짜로도 생성 시각으로도 알 수 없다. 그래서
+   * 사용자가 잔고를 적을 때 직접 고른 목록을 둔다. 기준일이 바뀌면 의미가 없어진다.
+   * 없으면 빈 목록이다 — 고르지 않은 거래를 "반영됐다" 고 넘겨짚지 않는다.
+   */
+  reflectedEntryIds?: string[];
   order: number;
   createdAt: string;
   updatedAt: string;

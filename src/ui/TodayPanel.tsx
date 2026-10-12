@@ -11,14 +11,14 @@
  */
 import { useMemo, useState } from 'react';
 import { MONEY_TYPE_BY_ID } from '../domain/constants';
-import { currencyScopeOf, headlineLimit, horizonOf } from '../domain/tide';
+import { calcScopeOf, headlineLimit, horizonOf } from '../domain/tide';
 import type { Account, Budget, Reserve } from '../domain/types';
 import { addDaysISO, fmtDayShort } from '../domain/date';
 import { displayTitle, effectiveEndDate, isDone, newEntry } from '../domain/entry';
 import { formatAmount } from '../domain/money';
 import type { Entry, TaskStatus } from '../domain/types';
 import { BalanceInput, BalanceNote, useBalanceEditor } from './balanceEditor';
-import { CALC_READY, calcCaveat, calcNotice, mixedCurrencyNotice, type CalcState } from './calcState';
+import { CALC_READY, calcCaveat, calcNotice, calcScopeNotice, type CalcState } from './calcState';
 import { Icon } from './Icon';
 
 interface Props {
@@ -86,7 +86,7 @@ export function TodayPanel({
   // '오늘 마감 예상' 대신 tide-over 규칙 — 다음 입금까지 남는 한도.
   const horizon = useMemo(() => horizonOf(tideEntries, todayISO), [tideEntries, todayISO]);
   // 통화가 섞이면 최소 단위가 달라 애초에 더할 수 없다.
-  const scope = useMemo(() => currencyScopeOf(accounts, tideEntries), [accounts, tideEntries]);
+  const scope = useMemo(() => calcScopeOf(accounts, tideEntries), [accounts, tideEntries]);
   const res = useMemo(() => ({ budgets, reserves }), [budgets, reserves]);
 
   const tideLimit = useMemo(
@@ -222,7 +222,7 @@ export function TodayPanel({
                   ) : calcState.kind !== 'ready' ? (
                     <p className="tp-empty">{calcNotice(calcState)}</p>
                   ) : !scope.ok ? (
-                    <p className="tp-empty">{mixedCurrencyNotice(scope.currencies)}</p>
+                    <p className="tp-empty">{calcScopeNotice(scope)}</p>
                   ) : (
                     <p className="tp-empty">잔고를 적으면 다음 입금까지 남는 한도가 여기 뜹니다.</p>
                   )}

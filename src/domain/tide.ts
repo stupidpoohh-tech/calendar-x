@@ -27,11 +27,31 @@
  *
  * money.type 의 sign(+1 = 입금, -1 = 출금, 0 = 흐름에 반영 안 함)이 tide-over의
  * income/expense 부호를 겸한다. save · free 는 sign 0 이라 이 계산에서 빠진다.
+ * 카드 사용(`flow: 'cardSpend'`)도 0 이다 — 현금은 카드 대금 날에 나간다 (`ledger.cashSignOf`).
+ *
+ * ─────────────────────────────────────────────────────────────────
+ * 예정과 실제 거래 (`ledger.ts`)
+ *
+ * 지금까지의 항목은 전부 **예정**이고 계산도 그대로다. 실제 거래가 들어오면서 두 가지가
+ * 늘었다.
+ *
+ *   1. 실제 거래가 확정한 예정 회차는 **건너뛴다.** 그 회차의 돈은 실제 거래가 대신
+ *      센다. 둘 다 세면 같은 월세가 두 번 빠진다. 실제 거래를 지우면 회차가 돌아온다.
+ *   2. 실제 거래는 날짜 구간이 아니라 **잔고에 들어 있는가**로 센다
+ *      (`ledger.balanceInclusion`). 들어 있으면 이미 잔고의 일부이고, 아니면 아직 잔고
+ *      밖의 움직임이다. 예정의 경계(`unsettledAfter`)를 쓰지 않는 이유는 같은 날
+ *      거래를 날짜로 가를 수 없기 때문이다.
+ *
+ * 건너뛸 회차의 집합은 **넘겨받은 목록 전체**에서 한 번 만든다. 항목 하나씩 떼어
+ * 계산하는 자리(`limitOn`)에서 그 한 건으로 집합을 만들면 늘 비어 버린다.
  */
-import { DEFAULT_CURRENCY, MONEY_TYPE_BY_ID } from './constants';
+import { DEFAULT_CURRENCY } from './constants';
 import { addDaysISO, daysBetween, localDateOf, normalizeDate, parseDate, toISO } from './date';
 import { effectiveEndDate } from './entry';
 import { inAnyBudget, reservedOn } from './budget';
+import {
+  ambiguousActuals, balanceInclusion, cashSignOf, confirmedKey, confirmedSetOf, isActual,
+} from './ledger';
 import { isVirtualEntry } from './recurrence';
 import type { Account, Budget, DateISO, Entry, Reserve } from './types';
 
@@ -114,6 +134,30 @@ export function currencyScopeOf(
 }
 
 /**
+ * 금액을 낼 수 있는가 — 통화와 잔고 반영 판정을 함께 본다.
+ *
+ *   currency    통화가 섞였다 (`currencyScopeOf`)
+ *   unassigned  계좌가 여럿인데, 잔고에 들어 있는지 가를 수 없는 실제 거래가 있다
+ *
+ * `unassigned` 는 넘겨짚지 않으려고 둔 갈래다. 기준일이 9/1 인 계좌와 9/10 인 계좌가
+ * 있고 9/5 거래가 어느 계좌의 것인지 모르면, 한쪽으로 가정한 한도는 그 거래 금액만큼
+ * 틀린다. 카드와 달력은 숫자 대신 이유를 적는다. 거래에 계좌를 적거나 잔고를 다시
+ * 적어 기준일을 맞추면 풀린다.
+ */
+export type CalcScope =
+  | { ok: true; currency: string }
+  | { ok: false; reason: 'currency'; currencies: string[] }
+  | { ok: false; reason: 'unassigned'; entries: Entry[] };
+
+export function calcScopeOf(accounts: readonly Account[], entries: readonly Entry[]): CalcScope {
+  const cur = currencyScopeOf(accounts, entries);
+  if (!cur.ok) return { ok: false, reason: 'currency', currencies: cur.currencies };
+  const unknown = ambiguousActuals(accounts, entries);
+  if (unknown.length > 0) return { ok: false, reason: 'unassigned', entries: unknown };
+  return cur;
+}
+
+/**
  * 예정 한 건의 하루 발생분. amount 는 그 날 몫(양수).
  * 반복 · 단발은 entry.money.amountMinor 그대로,
  * 기간(span)은 일할 몫(마지막 날에 나머지 몰아 준다).
@@ -125,10 +169,9 @@ export interface Occurrence {
   amountMinor: number;
 }
 
-/** money 종류로 부호를 판정한다. 0 이면 tide 계산에서 제외(세이브·가용). */
+/** 현금 부호. 0 이면 tide 계산에서 제외(세이브·가용 · 카드 사용). */
 function signOf(entry: Entry): -1 | 0 | 1 {
-  if (entry.kind !== 'money' || !entry.money) return 0;
-  return MONEY_TYPE_BY_ID[entry.money.type]?.sign ?? 0;
+  return cashSignOf(entry);
 }
 
 /** 이 항목이 tide 흐름에 반영되는가. */
@@ -152,6 +195,8 @@ function isSpan(entry: Entry): boolean {
  */
 export function occurrences(
   entries: readonly Entry[], after: DateISO, through: DateISO,
+  /** 실제 거래로 확정된 회차. 주지 않으면 `entries` 에서 만든다. */
+  confirmed: ReadonlySet<string> = confirmedSetOf(entries),
 ): Occurrence[] {
   assertOriginals(entries);
 
@@ -159,10 +204,12 @@ export function occurrences(
   const throughN = normalizeDate(through);
   if (!afterN || !throughN || afterN >= throughN) return [];
 
-  const out: Occurrence[] = [];
+  const raw: Occurrence[] = [];
 
   for (const entry of entries) {
     if (!participates(entry)) continue;
+    // 실제 거래는 예정의 구간 규칙으로 세지 않는다. 잔고 반영 여부로 센다.
+    if (isActual(entry)) continue;
 
     const amount = Math.abs(amountOf(entry));
     if (amount === 0) continue;
@@ -172,28 +219,60 @@ export function occurrences(
     // 반복이 있으면 반복이 이긴다. endDate 로 span 을 겸하는 항목은 없다고 본다.
     if (r) {
       if (r.freq === 'monthly') {
-        addMonthlyOccurrences(out, entry, amount, afterN, throughN, r.interval, r.until, r.count);
+        addMonthlyOccurrences(raw, entry, amount, afterN, throughN, r.interval, r.until, r.count);
       } else if (r.freq === 'weekly') {
-        addEveryOccurrences(out, entry, amount, afterN, throughN, r.interval * 7, r.until, r.count);
+        addEveryOccurrences(raw, entry, amount, afterN, throughN, r.interval * 7, r.until, r.count);
       } else {
-        addEveryOccurrences(out, entry, amount, afterN, throughN, r.interval, r.until, r.count);
+        addEveryOccurrences(raw, entry, amount, afterN, throughN, r.interval, r.until, r.count);
       }
       continue;
     }
 
     if (isSpan(entry)) {
-      addSpanOccurrences(out, entry, amount, afterN, throughN);
+      addSpanOccurrences(raw, entry, amount, afterN, throughN);
       continue;
     }
 
     // once
     const d = normalizeDate(entry.startDate);
     if (d && d > afterN && d <= throughN) {
-      out.push({ date: d, entry, amountMinor: amount });
+      raw.push({ date: d, entry, amountMinor: amount });
     }
   }
 
+  /*
+    확정된 회차를 건너뛴다. 기간(span)의 하루 몫은 회차가 아니므로 건너뛰지 않는다 —
+    기간 예정은 확정 대상이 아니다 (`confirm.ts`).
+  */
+  const out = confirmed.size === 0
+    ? raw
+    : raw.filter((o) => (isSpan(o.entry) && !o.entry.recurrence)
+      || !confirmed.has(confirmedKey(o.entry.id, o.date)));
+
   out.sort((a, b) => a.date.localeCompare(b.date) || a.entry.title.localeCompare(b.entry.title));
+  return out;
+}
+
+/**
+ * 아직 잔고 밖에 있는 실제 거래 가운데 `through` 까지의 것. 날짜 순이다.
+ *
+ * 하루 몫으로 쪼개지 않는다 — 실제 거래는 한 날짜의 사실이다.
+ */
+function unreflectedActuals(
+  accounts: readonly Account[], entries: readonly Entry[], through: DateISO,
+): Occurrence[] {
+  const out: Occurrence[] = [];
+  for (const entry of entries) {
+    if (!isActual(entry) || !participates(entry)) continue;
+    const amount = Math.abs(amountOf(entry));
+    if (amount === 0) continue;
+    const date = normalizeDate(entry.startDate);
+    if (!date || date > through) continue;
+    // 판정할 수 없는 거래(`ambiguous`)는 센다 — 그때는 화면이 숫자를 내지 않는다
+    // (`calcScopeOf`). 계산만 하는 자리에서는 더 작은 한도 쪽이 덜 위험하다.
+    if (balanceInclusion(entry, accounts) === 'in') continue;
+    out.push({ date, entry, amountMinor: amount });
+  }
   return out;
 }
 
@@ -305,9 +384,12 @@ export function totalOut(list: readonly Occurrence[]): number {
   return list.reduce((t, o) => (signOf(o.entry) < 0 ? t + o.amountMinor : t), 0);
 }
 
-/** (after, through] 구간의 순액. */
-export function netBetween(entries: readonly Entry[], after: DateISO, through: DateISO): number {
-  return netOf(occurrences(entries, after, through));
+/** (after, through] 구간의 예정 순액. */
+export function netBetween(
+  entries: readonly Entry[], after: DateISO, through: DateISO,
+  confirmed: ReadonlySet<string> = confirmedSetOf(entries),
+): number {
+  return netOf(occurrences(entries, after, through, confirmed));
 }
 
 /**
@@ -328,8 +410,11 @@ const FALLBACK_DAYS = 30;
 export function horizonOf(entries: readonly Entry[], today: DateISO): Horizon {
   // 거르기 전에 본다. 걸러낸 뒤에 검사하면 입금이 하나도 없는 화면용 목록이 통과한다.
   assertOriginals(entries);
-  const incomes = entries.filter((e) => signOf(e) > 0 && !isSpan(e));
-  const upcoming = occurrences(incomes, today, addDaysISO(today, SEARCH_DAYS));
+  // 다음 **예정** 입금이다. 이미 들어온 돈(실제 거래)은 끝점을 정하지 않고, 그것이
+  // 확정한 회차도 다음 입금이 아니다 — 25일 급여가 23일에 들어왔으면 다음은 다음 달이다.
+  const confirmed = confirmedSetOf(entries);
+  const incomes = entries.filter((e) => signOf(e) > 0 && !isSpan(e) && !isActual(e));
+  const upcoming = occurrences(incomes, today, addDaysISO(today, SEARCH_DAYS), confirmed);
   const next = upcoming[0]?.date;
   if (next) return { end: addDaysISO(next, -1), nextIncome: next };
   return { end: addDaysISO(today, FALLBACK_DAYS), nextIncome: null };
@@ -398,24 +483,29 @@ export function limitOn(
   const from = unsettledAfter(accounts, today);
   const budgets = res.budgets ?? NO_BUDGETS;
   const reserves = res.reserves ?? NO_RESERVES;
+  const confirmed = confirmedSetOf(entries);
   const balance = accounts.reduce((s, a) => s + a.balanceMinor, 0);
   let total = balance;
   for (const entry of entries) {
-    if (!participates(entry)) continue;
+    if (!participates(entry) || isActual(entry)) continue;
     // 예산에서 나가는 지출은 예산 몫 안에서 세어진다. 여기서 또 빼면 두 번 빠진다.
     if (inAnyBudget(entry, budgets)) continue;
     if (isSpan(entry) && !entry.recurrence) {
       const end = normalizeDate(effectiveEndDate(entry));
       const start = normalizeDate(entry.startDate);
       if (start && end && start <= date) {
-        total += netBetween([entry], from, end);
+        total += netBetween([entry], from, end, confirmed);
       }
     } else {
-      total += netBetween([entry], from, date);
+      total += netBetween([entry], from, date, confirmed);
     }
   }
+  // 아직 잔고에 들어 있지 않은 실제 거래. 예산에 걸린 것은 예산 몫에서 센다.
+  const actuals = unreflectedActuals(accounts, entries, normalizeDate(date))
+    .filter((o) => !inAnyBudget(o.entry, budgets));
+  total += netOf(actuals);
   // 확보해 둔 돈(생활비 예산 · 세이브)은 쓸 수 있는 한도에서 미리 빠진다.
-  return total - reservedOn(budgets, reserves, entries, date, from);
+  return total - reservedOn(budgets, reserves, entries, date, from, accounts);
 }
 
 /** 머리 숫자 — 다음 입금 전날(또는 30일 뒤)까지 남는 한도. */
@@ -458,12 +548,23 @@ export interface Settlement {
    *   accounts  계좌가 여럿인데 기준일이 서로 다르다. 정산은 총액 하나를 그 구간의
    *             예정과 비교하는 일이라, 계좌마다 구간이 다르면 하나로 잴 수 없다.
    *   currency  통화가 섞여 있다. 최소 단위가 달라 애초에 더할 수 없다.
+   *   unassigned 계좌가 여럿인데 실제 거래가 어느 계좌의 것인지 몰라, 그 거래가 이미
+   *             잔고에 들어 있었는지(또는 새 잔고에 들어 있는지) 가를 수 없다.
    */
-  reason: null | 'coverage' | 'accounts' | 'currency';
+  reason: null | 'coverage' | 'accounts' | 'currency' | 'unassigned';
   /** 자료가 있는 가장 이른 날. reason 이 coverage 일 때 어디부터 비는지 알려 준다. */
   coveredFrom: DateISO | null;
-  /** reason 이 accounts 일 때 계좌별 기준일. currency 일 때 섞인 통화 목록. */
+  /**
+   * reason 이 accounts 일 때 계좌별 기준일. currency 일 때 섞인 통화 목록.
+   * unassigned 일 때 판정할 수 없는 실제 거래의 id.
+   */
   detail: string[];
+  /**
+   * 그 사이 지나간 예정과, 이번에 새로 잔고에 들어간 실제 거래.
+   *
+   * 실제 거래는 예정과 같은 줄에 선다 — 둘 다 "새 잔고에 이만큼 들어 있어야 한다" 의
+   * 근거다. 확정된 예정 회차는 이미 빠져 있다(실제 거래가 대신 선다).
+   */
   passed: Occurrence[];
   passedIn: number;
   passedOut: number;
@@ -478,6 +579,12 @@ export function settle(
   newAmountMinor: number, todayISO: DateISO,
   /** `entries` 가 덮는 가장 이른 날. 주지 않으면 자료가 충분하다고 본다. */
   coveredFrom?: DateISO | null,
+  /**
+   * 저장할 계좌들 — 새 잔고를 적은 뒤의 모양. 실제 거래 가운데 이번에 **새로** 잔고에
+   * 들어가는 것을 고르는 데 쓴다. 주지 않으면 모든 계좌를 오늘 다시 적은 것으로 본다
+   * (같은 날이면 반영 목록을 그대로 두고, 아니면 비운다 — `balanceEditor` 와 같은 규칙).
+   */
+  next?: readonly Account[],
 ): Settlement {
   // 정산 구간이 비면 occurrences 를 거치지 않고 끝난다. 여기서도 직접 본다.
   assertOriginals(entries);
@@ -499,9 +606,34 @@ export function settle(
     한도(`unsettledAfter`)가 오늘 것을 세는 것과 짝이다 — 한쪽이 흡수하고 다른 쪽도 세면
     같은 돈이 두 번 빠진다.
   */
-  const passed = occurrences(entries, since, addDaysISO(todayISO, -1));
+  const planned = occurrences(entries, since, addDaysISO(todayISO, -1));
+  /*
+    실제 거래는 구간이 아니라 **잔고에 들어 있는가** 가 바뀌는 것으로 센다. 앞 잔고에는
+    없었고 새 잔고에는 있는 거래가 이번 정산이 흡수하는 몫이다. 날짜로 자르면 기준일
+    당일 거래를 두 번 세거나 놓친다.
+  */
+  const after = next ?? accounts.map((a) => ({
+    ...a,
+    asOf: todayISO,
+    reflectedEntryIds: normalizeDate(a.asOf) === todayISO ? a.reflectedEntryIds ?? [] : [],
+  }));
+  const absorbed: Occurrence[] = [];
+  for (const entry of entries) {
+    if (!isActual(entry) || !participates(entry)) continue;
+    const amount = Math.abs(amountOf(entry));
+    if (amount === 0) continue;
+    if (balanceInclusion(entry, accounts) !== 'in' && balanceInclusion(entry, after) === 'in') {
+      absorbed.push({ date: normalizeDate(entry.startDate), entry, amountMinor: amount });
+    }
+  }
+  const passed = [...planned, ...absorbed]
+    .sort((a, b) => a.date.localeCompare(b.date) || a.entry.title.localeCompare(b.entry.title));
   const expected = currentBalance + netOf(passed);
   const from = coveredFrom ? normalizeDate(coveredFrom) : null;
+  const unknown = [
+    ...new Set([...ambiguousActuals(accounts, entries), ...ambiguousActuals(after, entries)]
+      .map((e) => e.id)),
+  ];
 
   /*
     확정 차액을 낼 수 없는 세 갈래. 순서대로 본다 — 통화가 섞였으면 나머지는 따질 것도 없다.
@@ -518,6 +650,9 @@ export function settle(
     // 계좌마다 마지막으로 적은 날이 다르다. 총액 하나로 한 구간을 잴 수 없다.
     reason = 'accounts';
     detail = asOfs;
+  } else if (unknown.length > 0) {
+    reason = 'unassigned';
+    detail = unknown;
   } else if (from && since < from) {
     reason = 'coverage';
     detail = [];
@@ -551,9 +686,10 @@ export function upcomingInHorizon(
   // 머리 숫자와 같은 경계에서 세야 목록의 합과 숫자가 맞는다.
   const from = unsettledAfter(accounts, today);
   const budgets = res.budgets ?? NO_BUDGETS;
+  const confirmed = confirmedSetOf(entries);
   const out: Occurrence[] = [];
   for (const entry of entries) {
-    if (!participates(entry)) continue;
+    if (!participates(entry) || isActual(entry)) continue;
     // 예산에서 나가는 지출은 예산 줄에 들어간다. 여기에 또 세우면 두 번 보인다.
     if (inAnyBudget(entry, budgets)) continue;
     if (isSpan(entry) && !entry.recurrence) {
@@ -561,11 +697,14 @@ export function upcomingInHorizon(
       const end = normalizeDate(effectiveEndDate(entry));
       // `limitOn` 과 같은 조건이라야 목록의 합과 머리 숫자가 맞는다.
       // 끝점 뒤에 시작하는 기간 예산은 한도를 건드리지 않으므로 목록에도 넣지 않는다.
-      if (start && end && start <= h.end) out.push(...occurrences([entry], from, end));
+      if (start && end && start <= h.end) out.push(...occurrences([entry], from, end, confirmed));
     } else {
-      out.push(...occurrences([entry], from, h.end));
+      out.push(...occurrences([entry], from, h.end, confirmed));
     }
   }
+  // 아직 잔고 밖인 실제 거래도 머리 숫자에 들어 있다. 목록에도 같은 조건으로 세운다.
+  out.push(...unreflectedActuals(accounts, entries, h.end)
+    .filter((o) => !inAnyBudget(o.entry, budgets)));
   out.sort((a, b) => a.date.localeCompare(b.date) || a.entry.title.localeCompare(b.entry.title));
   return out;
 }
@@ -609,9 +748,22 @@ export function summarize(list: readonly Occurrence[]): Summary[] {
   return out;
 }
 
-/** 하루치 (전날, 그날] 구간의 예정. */
+/**
+ * 하루치 (전날, 그날] 구간의 예정과 그 날의 실제 거래.
+ *
+ * 이 날 무엇이 움직이는가를 보여 주는 자리라 잔고 반영 여부와 무관하게 그 날짜의 실제
+ * 거래를 함께 담는다. 확정된 예정 회차는 빠진다 — 실제 거래가 그 자리에 선다.
+ */
 export function entriesOn(entries: readonly Entry[], date: DateISO): Occurrence[] {
-  return occurrences(entries, addDaysISO(date, -1), date);
+  const day = normalizeDate(date);
+  const planned = occurrences(entries, addDaysISO(day, -1), day);
+  const actual: Occurrence[] = [];
+  for (const entry of entries) {
+    if (!isActual(entry) || !participates(entry)) continue;
+    const amount = Math.abs(amountOf(entry));
+    if (amount > 0 && normalizeDate(entry.startDate) === day) actual.push({ date: day, entry, amountMinor: amount });
+  }
+  return [...planned, ...actual];
 }
 
 /** 이 항목이 tide 흐름에 참여하는가 (컴포넌트에서도 쓴다). */

@@ -40,22 +40,28 @@
 import { DEFAULT_CURRENCY } from './constants';
 import { endOfMonth, parseDate, startOfMonth, todayISO, toISO } from './date';
 import { uid } from './entry';
-import type { Budget, DateISO, Entry, Reserve } from './types';
+import {
+  balanceInclusion, confirmedKey, confirmedSetOf, isActual, moneyFlowOf,
+} from './ledger';
+import type { Account, Budget, DateISO, Entry, Reserve } from './types';
 
 /**
  * 이 지출이 그 예산에서 나가는가.
  *
- * 세 가지를 모두 만족해야 한다.
+ * 네 가지를 모두 만족해야 한다.
  *   1. `budgetId` 가 그 예산을 가리킨다
  *   2. 날짜가 예산 기간 **안**에 있다 — 기간 밖 지출은 일반 지출이다
  *   3. 반복 항목이 아니다 — 주머니 하나에 몇 번 들어갈지가 애매해진다
+ *   4. 카드 사용이 아니다 — 카드 사용의 현금은 나중에 카드 대금으로 나간다. 주머니가
+ *      그 사용을 쓴 돈으로 세면, 대금이 나갈 때 일반 지출로 한 번 더 빠진다.
  *
- * 2번과 3번이 어긋나면 일반 지출로 돌아간다. 어디에도 안 세어지는 돈은 만들지 않는다.
+ * 2~4번이 어긋나면 일반 지출로 돌아간다. 어디에도 안 세어지는 돈은 만들지 않는다.
  */
 export function inBudget(entry: Entry, budget: Budget): boolean {
   const m = entry.money;
   if (!m || m.budgetId !== budget.id) return false;
   if (entry.recurrence) return false;
+  if (moneyFlowOf(m) === 'cardSpend') return false;
   return entry.startDate >= budget.startDate && entry.startDate <= budget.endDate;
 }
 
@@ -64,10 +70,19 @@ export function inAnyBudget(entry: Entry, budgets: readonly Budget[]): boolean {
   return budgets.some((b) => inBudget(entry, b));
 }
 
-/** 예산에 연결된 실제 지출. 날짜 오름차순이다. */
-export function spendingIn(budget: Budget, entries: readonly Entry[]): Entry[] {
+/**
+ * 예산에 연결된 지출. 날짜 오름차순이다.
+ *
+ * 실제 거래로 확정된 예정은 빠진다 — 같은 지출이 예정과 실제로 두 번 세어지면 주머니가
+ * 두 배로 빈다. 확정을 지우면 예정이 다시 들어온다.
+ */
+export function spendingIn(
+  budget: Budget, entries: readonly Entry[],
+  confirmed: ReadonlySet<string> = confirmedSetOf(entries),
+): Entry[] {
   return entries
     .filter((e) => inBudget(e, budget))
+    .filter((e) => isActual(e) || !confirmed.has(confirmedKey(e.id, e.startDate)))
     .sort((a, b) => a.startDate.localeCompare(b.startDate) || a.title.localeCompare(b.title));
 }
 
@@ -84,8 +99,11 @@ export interface BudgetState {
   count: number;
 }
 
-export function budgetState(budget: Budget, entries: readonly Entry[]): BudgetState {
-  const linked = spendingIn(budget, entries);
+export function budgetState(
+  budget: Budget, entries: readonly Entry[],
+  confirmed: ReadonlySet<string> = confirmedSetOf(entries),
+): BudgetState {
+  const linked = spendingIn(budget, entries, confirmed);
   const spentMinor = linked.reduce((t, e) => t + Math.abs(e.money?.amountMinor ?? 0), 0);
   return {
     budget,
@@ -99,8 +117,9 @@ export function budgetState(budget: Budget, entries: readonly Entry[]): BudgetSt
 export function budgetStates(
   budgets: readonly Budget[], entries: readonly Entry[],
 ): BudgetState[] {
+  const confirmed = confirmedSetOf(entries);
   return budgets
-    .map((b) => budgetState(b, entries))
+    .map((b) => budgetState(b, entries, confirmed))
     .sort((a, b) => a.budget.startDate.localeCompare(b.budget.startDate));
 }
 
@@ -112,24 +131,32 @@ export function budgetCovers(budget: Budget, date: DateISO): boolean {
 /**
  * 예산과 세이브가 `date` 시점의 한도에서 차지하는 자리. **양수**로 돌려준다.
  *
- * @param unsettledAfter 잔고가 말해 주는 마지막 날. 이 날까지 나간 예산 지출은 이미
- *   잔고에 반영돼 있으므로 몫에서 뺀다.
+ * @param unsettledAfter 잔고가 말해 주는 마지막 날. 이 날까지 나간 예산 **예정**
+ *   지출은 이미 잔고에 반영돼 있으므로 몫에서 뺀다.
+ * @param accounts 실제 거래가 잔고에 들어 있는지 가르는 데 쓴다 (`ledger.balanceInclusion`).
+ *   실제 거래는 날짜가 아니라 그 판정으로 반영 여부를 정한다 — 기준일 당일 거래를 날짜로
+ *   가르면 두 번 빠지거나 한 번도 안 빠진다. 주지 않으면 실제 거래도 날짜로 가른다.
  */
 export function reservedOn(
   budgets: readonly Budget[], reserves: readonly Reserve[],
   entries: readonly Entry[], date: DateISO, unsettledAfter: DateISO,
+  accounts?: readonly Account[],
 ): number {
   let total = 0;
+  const confirmed = confirmedSetOf(entries);
+  const inBalance = (e: Entry): boolean => (accounts && isActual(e)
+    ? balanceInclusion(e, accounts) === 'in'
+    : e.startDate <= unsettledAfter);
 
   for (const budget of budgets) {
     // 아직 시작하지 않은 예산은 자리를 잡지 않는다 — 기간형 지출과 같은 규칙이다.
     if (budget.startDate > date) continue;
 
-    const linked = spendingIn(budget, entries);
+    const linked = spendingIn(budget, entries, confirmed);
     const spent = linked.reduce((t, e) => t + Math.abs(e.money?.amountMinor ?? 0), 0);
     // 잔고에 이미 반영된 지출. 여기서 또 빼면 두 번 빠진다.
     const settled = linked
-      .filter((e) => e.startDate <= unsettledAfter)
+      .filter(inBalance)
       .reduce((t, e) => t + Math.abs(e.money?.amountMinor ?? 0), 0);
 
     total += Math.max(budget.amountMinor, spent) - settled;

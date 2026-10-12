@@ -15,24 +15,34 @@
  *   unconfirmed  받기는 받았는데 전부 캐시에서 왔고 전부 비어 있다 —
  *                "없음" 을 확정할 수 없다
  *   ready        숫자를 보여 준다. `fromCache` 면 완전성 한계를 함께 적는다
+ *
+ * 다섯 번째 갈래 `outOfRange` 는 기다려도 풀리지 않는다. 잔고 기준일이 계산 창이 거슬러
+ * 갈 수 있는 상한(`repo.TIDE_WINDOW_MAX_BACK_MONTHS`)보다 오래돼, 그 사이 입출금을 다
+ * 받을 수 없다. 잔고를 다시 적으면 풀린다.
  */
+import type { CalcScope } from '../domain/tide';
+
 export type CalcState =
   | { kind: 'ready'; fromCache: boolean; pending: boolean }
   | { kind: 'loading' }
   | { kind: 'error' }
-  | { kind: 'unconfirmed' };
+  | { kind: 'unconfirmed' }
+  | { kind: 'outOfRange' };
 
 export const CALC_READY: CalcState = { kind: 'ready', fromCache: false, pending: false };
 export const CALC_LOADING: CalcState = { kind: 'loading' };
 export const CALC_ERROR: CalcState = { kind: 'error' };
 export const CALC_UNCONFIRMED: CalcState = { kind: 'unconfirmed' };
+export const CALC_OUT_OF_RANGE: CalcState = { kind: 'outOfRange' };
 
 /** 구독 상태에서 화면이 쓸 갈래를 뽑는다. */
 export function calcStateOf(feed: {
   status: 'loading' | 'cache' | 'live' | 'error';
   ready: boolean; empty: boolean; fromCache: boolean; pending: boolean;
+  outOfRange?: boolean;
 }): CalcState {
   if (feed.status === 'error') return CALC_ERROR;
+  if (feed.outOfRange) return CALC_OUT_OF_RANGE;
   if (!feed.ready) return CALC_LOADING;
   // 캐시가 비어 있는 것은 자료 없음이 아니다. 그 위에 숫자를 세우지 않는다.
   if (feed.fromCache && feed.empty) return CALC_UNCONFIRMED;
@@ -43,6 +53,7 @@ export function calcStateOf(feed: {
 export function calcHeadline(state: Exclude<CalcState, { kind: 'ready' }>): string {
   if (state.kind === 'error') return '불러오지 못함';
   if (state.kind === 'unconfirmed') return '확인 전';
+  if (state.kind === 'outOfRange') return '잔고가 오래됨';
   return '불러오는 중';
 }
 
@@ -54,6 +65,10 @@ export function calcNotice(state: Exclude<CalcState, { kind: 'ready' }>): string
   if (state.kind === 'unconfirmed') {
     return '이 기기에 저장된 자료가 비어 있어 "예정 없음" 인지 "아직 못 받았는지" 를 가릴 수 없습니다. '
       + '연결되면 서버 자료를 받아 한도를 냅니다.';
+  }
+  if (state.kind === 'outOfRange') {
+    return '잔고를 적은 날이 10년보다 오래돼, 그 사이의 입출금을 모두 불러올 수 없습니다. '
+      + '빠진 것을 뺀 한도는 실제보다 크게 틀리므로 비워 둡니다. 지금 잔고를 다시 적으면 계산합니다.';
   }
   return '예정 입출금을 불러오는 중입니다.';
 }
@@ -76,4 +91,18 @@ export function mixedCurrencyNotice(currencies: readonly string[]): string {
   return `통화가 섞여 있습니다 (${currencies.join(' · ')}). `
     + '이 앱은 한 번에 한 통화만 다룹니다 — 환율 변환을 하지 않으므로 '
     + '서로 다른 통화의 금액을 더하지 않습니다.';
+}
+
+/**
+ * 계산 범위를 벗어났을 때 숫자 대신 적는 말 (`tide.calcScopeOf`).
+ *
+ * 계좌를 모르는 실제 거래는 그 거래가 잔고에 이미 들어 있는지 가를 수 없다. 한쪽으로
+ * 넘겨짚은 한도는 그 금액만큼 틀리므로, 무엇이 모자란지 적고 숫자를 내지 않는다.
+ */
+export function calcScopeNotice(scope: Exclude<CalcScope, { ok: true }>): string {
+  if (scope.reason === 'currency') return mixedCurrencyNotice(scope.currencies);
+  const n = scope.entries.length;
+  return `어느 계좌의 것인지 알 수 없는 실제 거래가 ${n}건 있습니다. `
+    + '계좌마다 잔고를 적은 날이 달라, 그 거래가 잔고에 이미 들어 있는지 가를 수 없습니다. '
+    + '거래에 계좌를 적거나 계좌 잔고를 같은 날 함께 적으면 다시 계산합니다.';
 }

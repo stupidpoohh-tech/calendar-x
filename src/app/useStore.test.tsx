@@ -465,3 +465,61 @@ describe('계산 상태는 다섯 구독을 종합한다', () => {
     expect(result.current.loading).toBe(false);
   });
 });
+
+describe('잔고 기준일이 오래됐을 때 — 계산 창이 거슬러 간다', () => {
+  const ready = (accounts: unknown[]) => {
+    one('recurring').push([], LIVE);
+    one('accounts').push(accounts, LIVE);
+    one('budgets').push([], LIVE);
+    one('reserves').push([], LIVE);
+  };
+  const aliveCalc = () => subs.filter((s) => s.kind === 'entries' && s.alive && s.months.includes('2026-12'));
+
+  it('기준일의 달까지 창을 넓혀 다시 붙고, 새 창이 오기 전에는 준비됨이 아니다', () => {
+    const { result } = renderHook(() => useStore('u1', '2026-09-15', TODAY));
+    const first = calcSubs()[0]!;
+    act(() => {
+      first.push([entryAt('m', '2026-09-20')], LIVE);
+      ready([{ id: 'a1', asOf: '2026-05-03' }]);
+    });
+
+    // 기준일 5/3 — 창이 5월부터 시작한다. 앞 창(8월부터)은 끊긴다.
+    expect(first.alive).toBe(false);
+    const wide = aliveCalc();
+    expect(wide).toHaveLength(1);
+    expect(wide[0]!.months[0]).toBe('2026-05');
+    expect(result.current.tideMonths).toEqual(tideWindow(TODAY, '2026-05-03'));
+    // 앞 창의 목록은 버린다. 그 사이 한도는 빠진 달이 있는 숫자다.
+    expect(result.current.calc.ready).toBe(false);
+    expect(result.current.tideEntries).toEqual([]);
+
+    act(() => { wide[0]!.push([entryAt('old', '2026-06-01'), entryAt('m', '2026-09-20')], LIVE); });
+    expect(result.current.calc.status).toBe('live');
+    expect(result.current.tideEntries.map((e) => e.id).sort()).toEqual(['m', 'old']);
+  });
+
+  it('기준일이 창 안에 있으면 다시 붙지 않는다', () => {
+    renderHook(() => useStore('u1', '2026-09-15', TODAY));
+    const first = calcSubs()[0]!;
+    act(() => ready([{ id: 'a1', asOf: '2026-08-20' }]));
+    expect(first.alive).toBe(true);
+    expect(subs.filter((s) => s.kind === 'entries' && s.alive)).toHaveLength(2);
+  });
+
+  it('계좌가 여럿이면 가장 이른 기준일을 따른다', () => {
+    const { result } = renderHook(() => useStore('u1', '2026-09-15', TODAY));
+    act(() => ready([{ id: 'a', asOf: '2026-09-01' }, { id: 'b', asOf: '2026-03-15' }]));
+    expect(result.current.tideMonths[0]).toBe('2026-03');
+  });
+
+  it('10년보다 오래된 기준일은 창을 늘리지 않고 계산을 멈춘다', () => {
+    const { result } = renderHook(() => useStore('u1', '2026-09-15', TODAY));
+    act(() => ready([{ id: 'a1', asOf: '2014-01-01' }]));
+    expect(result.current.tideMonths.length).toBe(120 + 1 + 14);
+    expect(result.current.calc.outOfRange).toBe(true);
+    expect(result.current.calc.ready).toBe(false);
+    // 그 창으로 자료가 와도 확정되지 않는다.
+    act(() => { aliveCalc()[0]!.push([], LIVE); });
+    expect(result.current.calc.ready).toBe(false);
+  });
+});

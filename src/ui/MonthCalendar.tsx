@@ -3,7 +3,7 @@ import { colorHex, MONEY_TYPE_BY_ID } from '../domain/constants';
 import { isWeekend, monthGrid, normalizeDate, toISO, weekdayLabels, ymOf } from '../domain/date';
 import { displayTitle, effectiveEndDate, isDone } from '../domain/entry';
 import { compactAmount } from '../domain/money';
-import { currencyScopeOf, limitOn } from '../domain/tide';
+import { calcScopeOf, limitOn } from '../domain/tide';
 import type { Account, Budget, Entry, LensId, Reserve, WeekStart, YearMonth } from '../domain/types';
 import { Icon } from './Icon';
 import { isRecoveryEntry } from '../domain/recovery';
@@ -122,8 +122,9 @@ export function MonthCalendar({
   /*
     통화가 섞이면 최소 단위가 달라 애초에 더할 수 없다. 카드가 숫자를 내지 않는 상태에서
     달력만 셀마다 금액을 적으면, 카드가 거절한 바로 그 숫자를 달력이 지어내는 꼴이 된다.
+    계좌를 모르는 실제 거래가 있을 때도 같다 (`calcScopeOf`).
   */
-  const scope = useMemo(() => currencyScopeOf(accounts, tideEntries), [accounts, tideEntries]);
+  const scope = useMemo(() => calcScopeOf(accounts, tideEntries), [accounts, tideEntries]);
   // 셀의 한도도 카드와 같은 예약(생활비 · 세이브)을 본다. 한쪽만 빼면 달력이 카드보다
   // 큰 숫자를 적어, 카드가 거절한 돈을 달력이 쓸 수 있는 것처럼 보여 준다.
   const res = useMemo(() => ({ budgets, reserves }), [budgets, reserves]);

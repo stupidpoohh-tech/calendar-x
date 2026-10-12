@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { convertKind, displayTitle, effectiveEndDate, isRanged, newEntry, newMoney, occursOn, setRecurrence, withDerived } from './entry';
+import type { Entry, MoneyFields } from './types';
 import { formatMoney, formatSigned, parseAmountToMinor } from './money';
 
 describe('newEntry', () => {
@@ -110,5 +111,52 @@ describe('금액 파싱', () => {
     expect(formatSigned(-45_000)).toBe('−45,000');
     expect(formatSigned(45_000)).toBe('+45,000');
     expect(formatSigned(0)).toBe('0');
+  });
+});
+
+describe('withDerived — 실제 거래', () => {
+  const actual = (over: Partial<Entry> = {}, m: Partial<MoneyFields> = {}) => newEntry('money', {
+    startDate: '2026-10-02',
+    money: newMoney({ status: 'actual', amountMinor: 500_000, ...m }),
+    ...over,
+  });
+
+  it('반복과 기간을 접는다', () => {
+    const e = withDerived(actual({
+      endDate: '2026-10-05',
+      recurrence: { freq: 'monthly', interval: 1, until: null, count: null },
+    }));
+    expect(e.endDate).toBeNull();
+    expect(e.recurrence).toBeNull();
+    expect(e.isRecurring).toBe(false);
+  });
+
+  it('확정한 회차의 달을 조회 인덱스에 넣는다 — 다른 달에 낸 월세', () => {
+    const e = actual({}, { plannedRef: { entryId: 'rent', date: '2026-09-25' } });
+    expect(e.ymSpan).toEqual(['2026-09', '2026-10']);
+  });
+
+  it('같은 달이면 한 번만 넣는다', () => {
+    const e = actual({}, { plannedRef: { entryId: 'rent', date: '2026-10-01' } });
+    expect(e.ymSpan).toEqual(['2026-10']);
+  });
+
+  it('예정 항목은 지금과 같다 — 반복 · 기간이 남고 회차 연결은 지운다', () => {
+    const e = newEntry('money', {
+      startDate: '2026-10-02', endDate: '2026-10-05',
+      recurrence: { freq: 'monthly', interval: 1, until: null, count: null },
+      money: newMoney({ plannedRef: { entryId: 'rent', date: '2026-09-25' } }),
+    });
+    expect(e.endDate).toBe('2026-10-05');
+    expect(e.isRecurring).toBe(true);
+    expect(e.money?.plannedRef).toBeNull();
+    expect(e.ymSpan).toEqual(['2026-10']);
+  });
+
+  it('새 가계부 항목은 예정 · 일반으로 시작한다', () => {
+    const m = newEntry('money').money;
+    expect(m?.status).toBe('planned');
+    expect(m?.flow).toBe('normal');
+    expect(m?.plannedRef).toBeNull();
   });
 });

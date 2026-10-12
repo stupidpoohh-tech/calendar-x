@@ -8,6 +8,7 @@
 import { MAX_RECURRENCE_OCCURRENCES } from './constants';
 import { addDaysISO, addMonthsISO, daysBetween, normalizeDate, parseDate, ymRange } from './date';
 import { effectiveEndDate } from './entry';
+import { confirmedKey, confirmedSetOf, isActual } from './ledger';
 import type { DateISO, Entry, Recurrence } from './types';
 
 const OCCURRENCE_SEP = '@';
@@ -139,13 +140,23 @@ export function expandEntry(entry: Entry, from: DateISO, to: DateISO): Entry[] {
 /**
  * 조회 결과를 화면에 올릴 형태로 정리한다.
  * 반복 항목은 원본을 빼고 전개분으로 대체하므로, 원본이 첫 발생일에 중복 표시되지 않는다.
+ *
+ * 실제 거래로 확정된 예정 회차는 그리지 않는다 — 그 자리에는 실제 거래가 선다. 같은
+ * 월세가 예정과 실제로 두 줄 보이면 두 번 나간 것으로 읽힌다. 실제 거래가 다른 달에
+ * 있어도 그 회차의 달 조회에 함께 걸린다 (`withDerived` 의 `ymSpan`).
  */
 export function materialize(entries: readonly Entry[], from: DateISO, to: DateISO): Entry[] {
+  const confirmed = confirmedSetOf(entries);
+  const shown = (e: Entry, date: DateISO): boolean =>
+    confirmed.size === 0 || isActual(e)
+    // 기간 예정은 확정 대상이 아니다. 계산(`tide.occurrences`)도 건너뛰지 않는다.
+    || (!e.recurrence && !!e.endDate && e.endDate > e.startDate)
+    || !confirmed.has(confirmedKey(baseIdOf(e.id), date));
   const out: Entry[] = [];
   for (const e of entries) {
     if (e.isRecurring && e.recurrence) {
-      out.push(...expandEntry(e, from, to));
-    } else {
+      out.push(...expandEntry(e, from, to).filter((o) => shown(e, o.startDate)));
+    } else if (shown(e, e.startDate)) {
       out.push(e);
     }
   }

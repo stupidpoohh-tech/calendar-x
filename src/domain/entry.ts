@@ -1,7 +1,7 @@
 import {
   DEFAULT_COLOR, DEFAULT_CURRENCY, MONEY_TYPE_BY_ID, STATUS_BY_ID,
 } from './constants';
-import { normalizeDate, todayISO, ymRange } from './date';
+import { normalizeDate, todayISO, ymOf, ymRange } from './date';
 import { formatAmount } from './money';
 import type {
   ColorId, DateISO, Entry, EntryKind, MoneyFields, MoneyType, Recurrence, TaskStatus,
@@ -32,16 +32,48 @@ export function isRanged(e: Pick<Entry, 'startDate' | 'endDate'>): boolean {
  */
 export function withDerived(e: Entry, now = new Date().toISOString()): Entry {
   const startDate = normalizeDate(e.startDate) || todayISO();
-  const endRaw = normalizeDate(e.endDate);
+  /*
+    실제 거래는 한 날짜에 일어난 사실이다. 반복도 기간도 갖지 않는다.
+
+    반복이 붙은 실제 거래를 허용하면 tide 가 그것을 다시 전개해 같은 거래를 여러 번
+    세고, 기간이 붙으면 하루 몫으로 쪼개 센다. 규칙(`firestore.rules`)도 같은 것을
+    거절하지만, 저장 직전 이 자리에서 먼저 접는다.
+  */
+  const actual = e.kind === 'money' && e.money?.status === 'actual';
+  const endRaw = actual ? '' : normalizeDate(e.endDate);
   const endDate = endRaw && endRaw >= startDate ? endRaw : null;
+  const recurrence = actual ? null : e.recurrence;
+  // 회차 연결은 실제 거래에만 뜻이 있다. 예정으로 되돌린 항목에 남기면 규칙이 거절한다.
+  const money = e.money && !actual && e.money.plannedRef ? { ...e.money, plannedRef: null } : e.money;
   return {
     ...e,
+    money,
     startDate,
     endDate,
-    ymSpan: ymRange(startDate, endDate ?? startDate),
-    isRecurring: e.recurrence != null,
+    recurrence,
+    ymSpan: spanMonthsOf({ ...e, money }, startDate, endDate),
+    isRecurring: recurrence != null,
     updatedAt: now,
   };
+}
+
+/**
+ * 이 항목을 월 조회로 찾아야 하는 달.
+ *
+ * 보통은 항목이 걸친 달이다. **예정 회차를 확정한 실제 거래**는 그 회차의 달도 함께
+ * 넣는다 — 25일 월세를 다음 달 2일에 냈으면 실제 거래는 다음 달에 있지만, 9월 달력을
+ * 그릴 때 "9월 25일 회차는 이미 확정됐다" 를 알려면 9월 조회에도 걸려야 한다.
+ * 그러지 않으면 보고 있는 달 밖으로 나간 확정 거래 때문에 예정 회차가 다시 보이고
+ * 계산에서는 두 번 세어진다.
+ *
+ * `ymSpan` 은 조회 인덱스일 뿐 화면 배치에 쓰이지 않는다 (배치는 날짜로 한다).
+ */
+function spanMonthsOf(e: Entry, startDate: DateISO, endDate: DateISO | null): string[] {
+  const own = ymRange(startDate, endDate ?? startDate);
+  const ref = e.kind === 'money' ? normalizeDate(e.money?.plannedRef?.date) : '';
+  if (!ref) return own;
+  const refMonth = ymOf(ref);
+  return own.includes(refMonth) ? own : [...own, refMonth].sort();
 }
 
 export function newEntry(kind: EntryKind, patch: Partial<Entry> = {}): Entry {
@@ -92,6 +124,13 @@ export function newMoney(patch: Partial<MoneyFields> = {}): MoneyFields {
     budgetId: null,
     debtId: null,
     priority: false,
+    // 원장 필드. 기본값은 "지금까지와 같은 예정 항목" 이다.
+    status: 'planned',
+    flow: 'normal',
+    categoryId: null,
+    method: null,
+    accountId: null,
+    plannedRef: null,
     ...patch,
   };
 }
