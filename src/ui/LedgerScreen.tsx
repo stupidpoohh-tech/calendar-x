@@ -7,9 +7,10 @@
  * 바꾸는지가 흐렸다. 지금은 보기마다 자기 기간 도구를 하나씩 가진다.
  *
  *   내역      정산 기간 하나 — 수입 · 지출 · 수지와 거래 목록, 검색, 거래 추가
- *   현금흐름  달력 월 하나 — '며칠 버티나' 카드와 날짜별 한도 달력 (App 이 그려 넘긴다)
- *   예산      정산 기간 하나 — "계획대로 쓰고 있는가". 카테고리 예산 · 실제 사용 · 남음 · 초과와
- *             생활비 주머니 · 세이브(한도 예약). 지난 기간과 견주지 않는다
+ *   현금흐름  달력 월 하나 — '며칠 버티나' 카드와 날짜별 예상 잔고 달력, 거래 추가. 생활비 · 세이브도
+ *             여기서 관리한다(카드의 확보 줄 · 달력의 생활비 막대 → PocketSheet). App 이 그려 넘긴다
+ *   예산      정산 기간 하나 — "계획대로 쓰고 있는가". 카테고리 예산 · 실제 사용 · 남음 · 초과.
+ *             지난 기간과 견주지 않는다. 생활비 · 세이브는 없다(현금흐름의 일이다)
  *   분석      정산 기간 하나 — "평소 어디에 얼마나 쓰는가". 월별 추이(기간 열둘) · 카테고리
  *             (비중 · 직전 대비 · 월평균 · 수입원) 둘 중 하나, 그 아래 기간 돌아보기 한 장
  *
@@ -85,8 +86,6 @@ export interface LedgerScreenProps {
   subscribeAll: SubscribeAll;
   /** 현금흐름 본문 — 카드와 한도 달력, 달력의 월 이동. App 이 그린다. */
   cashflow?: ReactNode;
-  /** 예산 보기의 생활비 주머니 · 세이브 구역. App 이 그린다. 카테고리 예산과 합산하지 않는다. */
-  pockets?: ReactNode;
 }
 
 export function LedgerScreen(props: LedgerScreenProps) {
@@ -140,17 +139,6 @@ export function LedgerScreen(props: LedgerScreenProps) {
         <>
           <div className="led-toolbar">{periodNav}</div>
           {gated(<LedgerBudget {...props} period={period} />)}
-          {props.pockets && (
-            <section className="led-sec" aria-labelledby="led-pockets-h">
-              <h3 className="led-sec-h" id="led-pockets-h">생활비 주머니 · 세이브</h3>
-              <p className="led-note">
-                한도에서 <b>미리 빼 두는 돈</b>입니다. 카테고리 예산과 따로 셉니다 — 카테고리 예산은 쓴 돈과
-                견주기만 하고, 이 돈은 &lsquo;며칠 버티나&rsquo; 한도를 줄입니다. 기간과 무관하게 지금 살아 있는 주머니를
-                모두 보여 줍니다.
-              </p>
-              {props.pockets}
-            </section>
-          )}
         </>
       )}
 
@@ -434,7 +422,7 @@ function PeriodNote({ period, note, feed, onSave }: {
  * 남음 +275,000 이 섰다 — 두 숫자가 서로 다른 범위를 봤다. 예산 밖 지출(예산 없는 카테고리 ·
  * 미분류)은 빠뜨리지 않고 한 줄로 따로 적는다. 숫자는 그대로 `budgetSummary` 다.
  *
- * 지난 기간 결산 · 수입 · 장기 추이는 분석 보기의 몫이다.
+ * 지난 기간 결산 · 수입 · 장기 추이는 분석 보기의 몫이고, 생활비 · 세이브는 현금흐름 보기의 몫이다.
  */
 function LedgerBudget({
   entries, period, todayISO, settleDay, categories, categoryBudgets, categoriesReady,
@@ -500,7 +488,7 @@ function LedgerBudget({
           </p>
         )}
         <p className="led-note">
-          사용 = 실제로 쓴 지출(소비 + 대출 이자). 결산용이라 한도에서 미리 빼지 않습니다
+          사용 = 실제로 쓴 지출(소비 + 대출 이자)
           {phase === 'current' && ' · 진행 중인 기간입니다'}
         </p>
       </div>

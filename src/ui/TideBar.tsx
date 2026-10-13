@@ -15,7 +15,7 @@
  * 고치는 자리는 확인 잔고 줄 하나다. 생활비 · 세이브로 확보된 몫은 접힌 줄에서 펼쳐 본다.
  */
 import { useMemo, type ReactNode } from 'react';
-import { budgetStates } from '../domain/budget';
+import { budgetEnded, budgetStates } from '../domain/budget';
 import { MONEY_TYPE_BY_ID } from '../domain/constants';
 import { daysBetween, fmtDayShort } from '../domain/date';
 import { formatAmount, formatSigned } from '../domain/money';
@@ -24,6 +24,7 @@ import {
   type Summary,
 } from '../domain/tide';
 import type { Account, Budget, Entry, Reserve } from '../domain/types';
+import type { PocketFocus } from './BudgetPanel';
 import { Icon } from './Icon';
 import { BalanceInput, BalanceNote, useBalanceEditor } from './balanceEditor';
 import {
@@ -57,6 +58,11 @@ interface Props {
   onToggleCollapsed: () => void;
   /** 대출 · 고정 메모. 이 카드 안쪽 아래에 접힌 줄로 붙는다. */
   children?: ReactNode;
+  /**
+   * 생활비 · 세이브 창을 연다(`PocketSheet`). 주면 확보 줄의 생활비 · 세이브가 눌리는 자리가 되고
+   * '+ 생활비' · '+ 세이브' 가 붙는다 — 관리하러 다른 보기로 가지 않는다.
+   */
+  onOpenPockets?: (focus: PocketFocus) => void;
 }
 
 const NO_BUDGETS: readonly Budget[] = [];
@@ -66,7 +72,7 @@ export function TideBar({
   todayISO, accounts, entries, budgets = NO_BUDGETS, reserves = NO_RESERVES,
   tideFrom, calcState = CALC_READY,
   hasBalance, onSaveAccount, onEntryClick,
-  collapsed, onToggleCollapsed, children,
+  collapsed, onToggleCollapsed, children, onOpenPockets,
 }: Props) {
   const today = todayISO;
   const editor = useBalanceEditor(accounts, entries, onSaveAccount, tideFrom, todayISO);
@@ -92,9 +98,10 @@ export function TideBar({
   );
   const pockets = useMemo(() => {
     const from = unsettledAfter(accounts, today);
+    // 관리하는 자리이기도 하다 — 끝나지 않은 생활비는 확보액이 0이어도 보인다.
     return budgetStates(budgets, entries, { accounts, today, unsettledAfter: from })
-      .filter((s) => s.budget.startDate <= horizon.end && s.reservedMinor > 0);
-  }, [budgets, entries, accounts, today, horizon.end]);
+      .filter((s) => onOpenPockets ? !budgetEnded(s.budget, today) : s.budget.startDate <= horizon.end && s.reservedMinor > 0);
+  }, [budgets, entries, accounts, today, horizon.end, onOpenPockets]);
   const daysLeft = useMemo(() => Math.max(1, daysBetween(today, horizon.end) + 1), [today, horizon.end]);
   const upcoming = useMemo(
     () => summarize(upcomingInHorizon(accounts, entries, today, horizon, res)),
@@ -176,6 +183,12 @@ export function TideBar({
               여기에 뜹니다.
             </p>
             {editor.editing ? <BalanceInput editor={editor} /> : <BalanceNote editor={editor} />}
+            {onOpenPockets && (
+              <div className="tide-pk-empty">
+                <span>생활비 · 세이브</span>
+                <PocketAdd onOpen={onOpenPockets} />
+              </div>
+            )}
             {children && <div className="tide-more">{children}</div>}
           </>
         )}
@@ -220,31 +233,54 @@ export function TideBar({
             <BalanceNote editor={editor} />
           </div>
         )}
-        {view.held !== 0 && (
+        {(view.held !== 0 || (onOpenPockets && (pockets.length > 0 || reserves.length > 0))) ? (
           <details className="tide-held">
             <summary className="num">
               생활비 · 세이브로 확보 <b>₩ {formatAmount(view.held)}</b>
             </summary>
-            <ul>
-              {pockets.map((p) => (
-                <li key={p.budget.id} className="num">
-                  <span>{p.budget.name} <i>{fmtDayShort(p.budget.startDate)}–{fmtDayShort(p.budget.endDate)}</i></span>
-                  <span>
-                    남음 {formatAmount(p.remainingMinor)}
-                    {p.plannedMinor > 0 && ` · 예정 ${formatAmount(p.plannedMinor)}`}
-                    {p.overspentMinor > 0 && ` · 초과 ${formatAmount(p.overspentMinor)}`}
-                  </span>
+            <ul aria-label="생활비 · 세이브">
+              {pockets.map((p) => {
+                const body = (
+                  <>
+                    <span>{p.budget.name} <i>{fmtDayShort(p.budget.startDate)}–{fmtDayShort(p.budget.endDate)}</i></span>
+                    <span>
+                      {onOpenPockets && `사용 ${formatAmount(p.actualMinor)} · `}
+                      {p.overspentMinor > 0 ? `초과 ${formatAmount(p.overspentMinor)}` : `남음 ${formatAmount(p.remainingMinor)}`}
+                      {p.plannedMinor > 0 && ` · 예정 ${formatAmount(p.plannedMinor)}`}
+                    </span>
+                  </>
+                );
+                return (
+                  <li key={p.budget.id} className="num">
+                    {onOpenPockets ? (
+                      <button className="tide-pk" onClick={() => onOpenPockets({ kind: 'budget', id: p.budget.id })}
+                        aria-label={`생활비 ${p.budget.name} 열기`}>{body}</button>
+                    ) : body}
+                  </li>
+                );
+              })}
+              {reserves.filter((r) => onOpenPockets || r.amountMinor > 0).map((r) => (
+                <li key={r.id} className="num">
+                  {onOpenPockets ? (
+                    <button className="tide-pk" onClick={() => onOpenPockets({ kind: 'reserve', id: r.id })}
+                      aria-label={`세이브 ${r.name} 열기`}>
+                      <span>{r.name} <i>세이브</i></span><span>{formatAmount(r.amountMinor)}</span>
+                    </button>
+                  ) : <><span>{r.name} <i>세이브</i></span><span>{formatAmount(r.amountMinor)}</span></>}
                 </li>
               ))}
-              {reserves.filter((r) => r.amountMinor > 0).map((r) => (
-                <li key={r.id} className="num"><span>{r.name} <i>세이브</i></span><span>{formatAmount(r.amountMinor)}</span></li>
-              ))}
             </ul>
+            {onOpenPockets && <PocketAdd onOpen={onOpenPockets} />}
             <p className="tide-held-n num">
               {Number(view.date.slice(5, 7))}월 {Number(view.date.slice(8))}일 예상 잔고 {formatAmount(view.projected)} − 확보 {formatAmount(view.held)} = 쓸 수 있는 돈 {formatAmount(limit)}.
               생활비 · 세이브는 통장에서 빠진 돈이 아니라 잔고 안에서 떼어 둔 몫입니다.
             </p>
           </details>
+        ) : onOpenPockets && (
+          <div className="tide-pk-empty">
+            <span>생활비 · 세이브</span>
+            <PocketAdd onOpen={onOpenPockets} />
+          </div>
         )}
         {caveat && <p className="tide-caveat">{caveat}</p>}
       </div>
@@ -289,5 +325,15 @@ function TideRow({ summary, onClick }: { summary: Summary; onClick: () => void }
         </span>
       </button>
     </li>
+  );
+}
+
+/** '+ 생활비' · '+ 세이브' — 생활비 · 세이브 창을 새로 만들기로 연다. */
+function PocketAdd({ onOpen }: { onOpen: (f: PocketFocus) => void }) {
+  return (
+    <span className="tide-pk-add">
+      <button className="chip" onClick={() => onOpen({ kind: 'newBudget' })}>+ 생활비</button>
+      <button className="chip" onClick={() => onOpen({ kind: 'newReserve' })}>+ 세이브</button>
+    </span>
   );
 }

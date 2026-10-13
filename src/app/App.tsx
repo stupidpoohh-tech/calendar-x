@@ -43,6 +43,8 @@ import type {
 } from '../domain/types';
 import { ConfirmSheet } from '../ui/ConfirmSheet';
 import { LedgerScreen, type SubscribeAll } from '../ui/LedgerScreen';
+import { PocketSheet } from '../ui/PocketSheet';
+import type { PocketFocus } from '../ui/BudgetPanel';
 import { LedgerImportPreview, LedgerImportProblems } from '../ui/LedgerImport';
 import { monthsOfPeriods, periodByKey, periodOf, periodsBetween, periodsOfYear, shiftPeriodKey } from '../domain/period';
 import { combineFeeds, FEED_DEMO } from './useStore';
@@ -59,7 +61,6 @@ import { ListView } from '../ui/ListView';
 import { MonthCalendar } from '../ui/MonthCalendar';
 import { MonthPicker } from '../ui/MonthPicker';
 import { MoneyPanel } from '../ui/MoneyPanel';
-import { BudgetPanel } from '../ui/BudgetPanel';
 import { FailedWrites } from '../ui/FailedWrites';
 import { PinnedSection } from '../ui/PinnedSection';
 import { RecoveryDebtBar } from '../ui/RecoveryDebtBar';
@@ -124,6 +125,8 @@ function Workspace({ uid, user, onSignOut }: WorkspaceProps) {
   const [showSettings, setShowSettings] = useState(false);
   const [showPicker, setShowPicker] = useState(false);
   const [daySheet, setDaySheet] = useState<string | null>(null);
+  // 생활비 · 세이브 창. 카드의 확보 줄 · 달력의 생활비 막대 · '+ 생활비' 가 모두 이 하나를 연다.
+  const [pocketFocus, setPocketFocus] = useState<PocketFocus | null>(null);
   const [modal, setModal] = useState<{
     open: boolean; mode: 'create' | 'edit'; entry: Entry | null;
     /** 반복 발생분을 눌렀으면 그 회차 날짜. 편집은 원본을 향하지만 확정은 이 회차를 향한다. */
@@ -1981,6 +1984,10 @@ function Workspace({ uid, user, onSignOut }: WorkspaceProps) {
                     </button>
                     <button className="today-btn" onClick={() => setCursor(new Date())}>오늘</button>
                   </div>
+                  {/* 기존 거래 창 그대로 — 내역 보기로 가지 않고 여기서 바로 적는다. */}
+                  <button className="btn primary led-add" onClick={() => openCreate({ startDate: today })}>
+                    <Icon.Plus size={14} />거래 추가
+                  </button>
                 </div>
           <TideBar
             todayISO={today}
@@ -1995,6 +2002,7 @@ function Workspace({ uid, user, onSignOut }: WorkspaceProps) {
             onEntryClick={openEdit}
             collapsed={prefs.moneyCardCollapsed}
             onToggleCollapsed={() => set('moneyCardCollapsed', !prefs.moneyCardCollapsed)}
+            onOpenPockets={setPocketFocus}
           >
             <MoneyPanel
               debts={store.debts}
@@ -2011,12 +2019,10 @@ function Workspace({ uid, user, onSignOut }: WorkspaceProps) {
               }}
             />
           </TideBar>
-          {hasBalance && (
-            <p className="led-note cal-legend">
-              날짜 아래 숫자는 그 날의 <b>예상 잔고</b>입니다 — 적어 둔 입출금만 더하고, 생활비 · 세이브는 빼지 않습니다.
-              쓸 수 있는 돈은 날짜를 눌러 확인합니다.
-            </p>
-          )}
+          <p className="led-note cal-legend">
+            {hasBalance && <>날짜 아래 숫자는 <b>예상 잔고</b>(생활비 · 세이브는 빼지 않음). </>}
+            날짜 숫자 → 그 날 상세 · 빈 칸 → 그 날짜로 거래 입력 · 점선 막대 → 생활비.
+          </p>
           <MonthCalendar
             cursor={cursor}
             onCursorChange={setCursor}
@@ -2033,34 +2039,10 @@ function Workspace({ uid, user, onSignOut }: WorkspaceProps) {
             onDayOpen={setDaySheet}
             onDayCreate={(iso) => openCreate({ startDate: iso })}
             ledgerSummary={ledgerSummary}
+            pockets={store.budgets}
+            onPocketClick={(id) => setPocketFocus({ kind: 'budget', id })}
           />
               </div>
-            )}
-            pockets={(
-            <BudgetPanel
-              budgets={store.budgets}
-              reserves={store.reserves}
-              entries={store.tideEntries}
-              accounts={store.accounts}
-              collapsed={false}
-              onToggleCollapsed={() => undefined}
-              bare
-              todayISO={today}
-              onSaveBudget={(b) => { void saveBudget(b); }}
-              onDeleteBudget={(b) => { void deleteBudget(b); }}
-              onSaveReserve={(r) => {
-                if (isAnon || !uid) { void promptLogin(); return; }
-                commit({ kind: 'reserve', label: '세이브', summary: r.name, payload: r });
-              }}
-              onDeleteReserve={async (r) => {
-                if (isAnon || !uid) { void promptLogin(); return; }
-                const ok = await dialog.confirm({ title: `'${r.name}'을(를) 삭제할까요?`, danger: true, confirmLabel: '삭제' });
-                if (ok) commit({ kind: 'reserveDelete', label: '세이브 삭제', summary: r.name, payload: { id: r.id } });
-              }}
-              onEntryClick={openEdit}
-              onLinkEntries={linkToPocket}
-              onMarkOutside={markOutsidePocket}
-            />
             )}
           />
         ) : view === 'calendar' ? (
@@ -2104,6 +2086,31 @@ function Workspace({ uid, user, onSignOut }: WorkspaceProps) {
         />
       )}
 
+      {pocketFocus && ledgerOn && (
+        <PocketSheet
+          focus={pocketFocus}
+          onClose={() => setPocketFocus(null)}
+          budgets={store.budgets}
+          reserves={store.reserves}
+          entries={store.tideEntries}
+          accounts={store.accounts}
+          todayISO={today}
+          onSaveBudget={(b) => { void saveBudget(b); }}
+          onDeleteBudget={(b) => { void deleteBudget(b); }}
+          onSaveReserve={(r) => {
+            if (isAnon || !uid) { void promptLogin(); return; }
+            commit({ kind: 'reserve', label: '세이브', summary: r.name, payload: r });
+          }}
+          onDeleteReserve={async (r) => {
+            if (isAnon || !uid) { void promptLogin(); return; }
+            const ok = await dialog.confirm({ title: `'${r.name}'을(를) 삭제할까요?`, danger: true, confirmLabel: '삭제' });
+            if (ok) commit({ kind: 'reserveDelete', label: '세이브 삭제', summary: r.name, payload: { id: r.id } });
+          }}
+          onEntryClick={(e) => { setPocketFocus(null); openEdit(e); }}
+          onLinkEntries={linkToPocket}
+          onMarkOutside={markOutsidePocket}
+        />
+      )}
       {daySheet && (
         <DaySheet
           dateISO={daySheet}

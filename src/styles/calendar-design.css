@@ -208,3 +208,11 @@
   .bp-compact { padding-left: 12px; padding-right: 12px; }
 }
 .spx-l { display: inline; }
+
+/* 생활비 주머니(Budget) 막대 — 입출금이 아니라 잔고 안에서 떼어 둔 기간이다. 점선 윤곽으로 갈라 둔다. */
+.cal-bar.pocket {
+  --bar: var(--lens-money);
+  background: color-mix(in oklab, var(--bar) 8%, var(--bg));
+  border: 1px dashed var(--bar); border-left: 3px solid var(--bar);
+}
+.cal-bar.pocket.cont-l { border-left-width: 1px; border-left-style: dashed; }

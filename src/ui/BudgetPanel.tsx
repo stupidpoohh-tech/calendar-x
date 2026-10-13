@@ -8,11 +8,19 @@
  * 돈의 **상한**인데 항목이 하나 더 늘어난 셈이었다. 지금 생활비는 주머니 하나이고,
  * 지출은 그 주머니를 **가리킨다** (`money.budgetId`).
  *
- * 가계부의 '예산' 보기에서 카테고리 예산과 **다른 구역**으로 펼쳐 둔다(`bare`). 카테고리
- * 예산은 결산용이고 이것은 한도를 예약하는 돈이라, 한 목록에 섞으면 둘 다 한도를 줄이는
- * 것처럼 읽힌다.
+ * 현금흐름 보기의 '생활비 · 세이브' 창(`PocketSheet`) 안에 펼쳐 둔다(`bare`). 카드의 확보 줄과
+ * 달력의 생활비 막대가 **같은 이 조각**을 연다 — 고르는 자리가 둘이어도 고치는 화면은 하나다.
+ * 카테고리 예산(예산 보기)과는 섞지 않는다. 그쪽은 결산용이고 이것은 한도를 예약하는 돈이다.
  */
-import { useState } from 'react';
+
+/** 창을 열 때 무엇을 펼쳐 둘지. 생활비 · 세이브 하나를 열거나 새로 만들기를 바로 연다. */
+export type PocketFocus =
+  | { kind: 'budget'; id: string }
+  | { kind: 'reserve'; id: string }
+  | { kind: 'newBudget' }
+  | { kind: 'newReserve' }
+  | { kind: 'list' };
+import { useEffect, useRef, useState } from 'react';
 import {
   budgetEnded, budgetStates, newBudget, newReserve, spendingIn, unlinkedSpendingFor, type BudgetState,
 } from '../domain/budget';
@@ -49,17 +57,33 @@ interface Props {
   onLinkEntries?: (es: Entry[], b: Budget) => void;
   /** 그 지출을 "생활비 외" 로 명시한다. 미결정 목록에서 빠진다. */
   onMarkOutside?: (e: Entry) => void;
+  /** 처음 열 때 펼쳐 둘 것. 그 줄로 스크롤한다. */
+  focus?: PocketFocus;
 }
 
 export function BudgetPanel({
   budgets, reserves, entries, collapsed: collapsedPref, onToggleCollapsed, bare = false, todayISO, accounts,
-  onSaveBudget, onDeleteBudget, onSaveReserve, onDeleteReserve, onEntryClick, onLinkEntries, onMarkOutside,
+  onSaveBudget, onDeleteBudget, onSaveReserve, onDeleteReserve, onEntryClick, onLinkEntries, onMarkOutside, focus,
 }: Props) {
-  const [draft, setDraft] = useState<Budget | null>(null);
+  const [draft, setDraft] = useState<Budget | null>(() => (focus?.kind === 'newBudget' ? newBudget() : null));
   const [amountText, setAmountText] = useState('');
-  const [openId, setOpenId] = useState<string | null>(null);
-  const [reserveDraft, setReserveDraft] = useState<Reserve | null>(null);
-  const [reserveText, setReserveText] = useState('');
+  const [openId, setOpenId] = useState<string | null>(focus?.kind === 'budget' ? focus.id : null);
+  const [reserveDraft, setReserveDraft] = useState<Reserve | null>(() => {
+    if (focus?.kind === 'newReserve') return newReserve();
+    if (focus?.kind === 'reserve') return reserves.find((r) => r.id === focus.id) ?? null;
+    return null;
+  });
+  const [reserveText, setReserveText] = useState(() => {
+    const r = focus?.kind === 'reserve' ? reserves.find((x) => x.id === focus.id) : null;
+    return r?.amountMinor ? minorToInput(r.amountMinor, r.currency) : '';
+  });
+  const root = useRef<HTMLDivElement>(null);
+  // 연 줄로 한 번 스크롤한다 — 생활비가 여럿이면 고른 것이 창 아래에 묻힐 수 있다.
+  useEffect(() => {
+    const key = focus && 'id' in focus ? focus.id : focus?.kind;
+    if (!key) return;
+    root.current?.querySelector(`[data-focus="${CSS.escape(key)}"]`)?.scrollIntoView?.({ block: 'nearest' });
+  }, [focus]);
 
   const collapsed = bare ? false : collapsedPref;
   const states = budgetStates(budgets, entries, { accounts, today: todayISO });
@@ -106,7 +130,7 @@ export function BudgetPanel({
   ].filter(Boolean).join(' · ');
 
   return (
-    <div className={'bp' + (bare ? ' bare' : '')}>
+    <div className={'bp' + (bare ? ' bare' : '')} ref={root}>
       {!bare && (
         <button className="debt-h" onClick={onToggleCollapsed} aria-expanded={!collapsed}>
           <Icon.Chevron size={13} dir={collapsed ? 'right' : 'down'} />
@@ -130,13 +154,14 @@ export function BudgetPanel({
           {states.map((s) => (
             draft?.id === s.budget.id ? (
               <BudgetForm
-                key={s.budget.id} draft={draft} amountText={amountText}
+                key={s.budget.id} focusKey={s.budget.id} draft={draft} amountText={amountText}
                 onDraft={setDraft} onAmount={setAmountText}
                 onCancel={() => setDraft(null)} onSave={commitBudget}
               />
             ) : (
               <BudgetRow
                 key={s.budget.id}
+                focusKey={s.budget.id}
                 state={s}
                 open={openId === s.budget.id}
                 entries={entries}
@@ -153,6 +178,7 @@ export function BudgetPanel({
 
           {draft && !budgets.some((b) => b.id === draft.id) ? (
             <BudgetForm
+              focusKey="newBudget"
               draft={draft} amountText={amountText}
               onDraft={setDraft} onAmount={setAmountText}
               onCancel={() => setDraft(null)} onSave={commitBudget}
@@ -168,7 +194,7 @@ export function BudgetPanel({
           {reserves.map((r) => (
             reserveDraft?.id === r.id ? (
               <ReserveForm
-                key={r.id} draft={reserveDraft} amountText={reserveText}
+                key={r.id} focusKey={r.id} draft={reserveDraft} amountText={reserveText}
                 onDraft={setReserveDraft} onAmount={setReserveText}
                 onCancel={() => setReserveDraft(null)} onSave={commitReserve}
               />
@@ -187,6 +213,7 @@ export function BudgetPanel({
 
           {reserveDraft && !reserves.some((r) => r.id === reserveDraft.id) ? (
             <ReserveForm
+              focusKey="newReserve"
               draft={reserveDraft} amountText={reserveText}
               onDraft={setReserveDraft} onAmount={setReserveText}
               onCancel={() => setReserveDraft(null)} onSave={commitReserve}
@@ -207,9 +234,10 @@ export function BudgetPanel({
 }
 
 function BudgetRow({
-  state, open, entries, onToggle, onEdit, onDelete, onEntryClick, onLinkEntries, onMarkOutside, ended = false,
+  state, open, entries, onToggle, onEdit, onDelete, onEntryClick, onLinkEntries, onMarkOutside, ended = false, focusKey,
 }: {
   ended?: boolean;
+  focusKey?: string;
   state: BudgetState;
   open: boolean;
   entries: readonly Entry[];
@@ -241,7 +269,7 @@ function BudgetRow({
   });
 
   return (
-    <div className="bp-i">
+    <div className="bp-i" data-focus={focusKey}>
       <div className="debt-i">
         <button className="debt-i-main" onClick={onToggle} aria-expanded={open}>
           <span className="debt-n">{budget.name}</span>
@@ -363,8 +391,9 @@ function BudgetRow({
 }
 
 function BudgetForm({
-  draft, amountText, onDraft, onAmount, onCancel, onSave,
+  draft, amountText, onDraft, onAmount, onCancel, onSave, focusKey,
 }: {
+  focusKey?: string;
   draft: Budget;
   amountText: string;
   onDraft: (b: Budget) => void;
@@ -373,7 +402,7 @@ function BudgetForm({
   onSave: () => void;
 }) {
   return (
-    <div className="debt-f">
+    <div className="debt-f" data-focus={focusKey}>
       <input
         className="mod-input" placeholder="이름 (예: 9월 생활비)" value={draft.name} autoFocus
         onChange={(e) => onDraft({ ...draft, name: e.target.value })}
@@ -409,8 +438,9 @@ function BudgetForm({
 }
 
 function ReserveForm({
-  draft, amountText, onDraft, onAmount, onCancel, onSave,
+  draft, amountText, onDraft, onAmount, onCancel, onSave, focusKey,
 }: {
+  focusKey?: string;
   draft: Reserve;
   amountText: string;
   onDraft: (r: Reserve) => void;
@@ -419,7 +449,7 @@ function ReserveForm({
   onSave: () => void;
 }) {
   return (
-    <div className="debt-f">
+    <div className="debt-f" data-focus={focusKey}>
       <input
         className="mod-input" placeholder="이름 (예: 비상금)" value={draft.name} autoFocus
         onChange={(e) => onDraft({ ...draft, name: e.target.value })}

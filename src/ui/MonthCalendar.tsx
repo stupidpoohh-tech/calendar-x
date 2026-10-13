@@ -2,9 +2,9 @@ import { useMemo, useRef } from 'react';
 import { colorHex, MONEY_TYPE_BY_ID } from '../domain/constants';
 import { isWeekend, monthGrid, normalizeDate, toISO, weekdayLabels, ymOf } from '../domain/date';
 import { displayTitle, effectiveEndDate, isDone } from '../domain/entry';
-import { compactAmount } from '../domain/money';
+import { compactAmount, formatAmount } from '../domain/money';
 import { calcScopeOf, projectedBalanceOn } from '../domain/tide';
-import type { Account, Entry, LensId, WeekStart, YearMonth } from '../domain/types';
+import type { Account, Budget, Entry, LensId, WeekStart, YearMonth } from '../domain/types';
 import { Icon } from './Icon';
 import { isRecoveryEntry } from '../domain/recovery';
 import { daySummary, type DaySummary } from '../domain/daySummary';
@@ -46,16 +46,31 @@ interface Props {
    * `ready` 가 아니면 셀에 아무 숫자도 적지 않는다 — 덜 받은 목록의 합을 0원처럼 내지 않는다.
    */
   ledgerSummary?: { entries: readonly Entry[]; ready: boolean };
+  /**
+   * 생활비 주머니 막대 — **`Budget` 에서** 그린다. 입출금 `Entry` 가 아니므로 예상 잔고 · 요약 ·
+   * 한도 계산에 들어가지 않고, 누르면 거래 창이 아니라 `onPocketClick(budget.id)` 로 간다. 여러 주에
+   * 걸쳐 끊겨 그려져도 조각마다 같은 id 다. 현금흐름 달력만 준다.
+   */
+  pockets?: readonly Budget[];
+  onPocketClick?: (budgetId: string) => void;
 }
 
+/** 한 주에 놓는 막대 하나 — 입출금 · 할 일(`Entry`) 또는 생활비 주머니(`Budget`). */
+type BarItem =
+  | { kind: 'entry'; entry: Entry }
+  | { kind: 'pocket'; budget: Budget };
+
 interface Placed {
-  entry: Entry;
+  item: BarItem;
   lane: number;
   from: number;
   to: number;
   continuesLeft: boolean;
   continuesRight: boolean;
 }
+
+const itemStart = (it: BarItem) => normalizeDate(it.kind === 'entry' ? it.entry.startDate : it.budget.startDate);
+const itemEnd = (it: BarItem) => (it.kind === 'entry' ? effectiveEndDate(it.entry) : normalizeDate(it.budget.endDate));
 
 /**
  * 겹치지 않는 가장 위쪽 레인에 배치한다.
@@ -64,36 +79,42 @@ interface Placed {
  * 차지한다). 그 날에 걸친 기간 항목은 그 날부터 그린다.
  */
 function placeWeek(
-  entries: readonly Entry[], weekISO: readonly string[], floor?: string,
+  items: readonly BarItem[], weekISO: readonly string[], floor?: string,
 ): { placed: Placed[]; laneCount: number } {
   const first = weekISO[0] ?? '';
   const last = weekISO[6] ?? '';
-  const startOf = (e: Entry) => {
-    const start = normalizeDate(e.startDate);
+  const startOf = (it: BarItem) => {
+    const start = itemStart(it);
     return floor && start < floor ? floor : start;
   };
 
-  const visible = entries.filter((e) => {
-    const start = startOf(e);
-    return start <= last && effectiveEndDate(e) >= first;
+  const visible = items.filter((it) => {
+    const start = startOf(it);
+    return start <= last && itemEnd(it) >= first && itemEnd(it) >= start;
   });
 
+  // 생활비 주머니가 맨 위 — 그 아래 막대들이 어느 기간 안에 있는지 읽힌다.
   // 기간이 긴 항목을 위로 올려야 바가 계단처럼 흩어지지 않는다.
   visible.sort((a, b) => {
-    const recoveryOrder = Number(isRecoveryEntry(a)) - Number(isRecoveryEntry(b));
+    const pocketOrder = Number(b.kind === 'pocket') - Number(a.kind === 'pocket');
+    if (pocketOrder) return pocketOrder;
+    if (a.kind === 'pocket' || b.kind === 'pocket') return itemStart(a).localeCompare(itemStart(b));
+    const ea = a.entry;
+    const eb = b.entry;
+    const recoveryOrder = Number(isRecoveryEntry(ea)) - Number(isRecoveryEntry(eb));
     if (recoveryOrder) return recoveryOrder;
-    const aSpan = effectiveEndDate(a) > a.startDate ? 0 : 1;
-    const bSpan = effectiveEndDate(b) > b.startDate ? 0 : 1;
+    const aSpan = effectiveEndDate(ea) > ea.startDate ? 0 : 1;
+    const bSpan = effectiveEndDate(eb) > eb.startDate ? 0 : 1;
     if (aSpan !== bSpan) return aSpan - bSpan;
-    const aKey = `${a.startDate}T${a.startTime ?? '00:00'}`;
-    const bKey = `${b.startDate}T${b.startTime ?? '00:00'}`;
+    const aKey = `${ea.startDate}T${ea.startTime ?? '00:00'}`;
+    const bKey = `${eb.startDate}T${eb.startTime ?? '00:00'}`;
     return aKey.localeCompare(bKey);
   });
 
   const lanes: { from: number; to: number }[][] = [];
-  const placed: Placed[] = visible.map((entry) => {
-    const start = startOf(entry);
-    const end = effectiveEndDate(entry);
+  const placed: Placed[] = visible.map((item) => {
+    const start = startOf(item);
+    const end = itemEnd(item);
     const rawFrom = weekISO.indexOf(start);
     const rawTo = weekISO.indexOf(end);
     const from = start < first ? 0 : Math.max(0, rawFrom);
@@ -103,11 +124,13 @@ function placeWeek(
     while (lanes[lane]?.some((r) => !(to < r.from || from > r.to))) lane++;
     (lanes[lane] ??= []).push({ from, to });
 
-    return { entry, lane, from, to, continuesLeft: start < first, continuesRight: end > last };
+    return { item, lane, from, to, continuesLeft: start < first, continuesRight: end > last };
   });
 
   return { placed, laneCount: lanes.length };
 }
+
+const isRecoveryItem = (it: BarItem) => it.kind === 'entry' && isRecoveryEntry(it.entry);
 
 /**
  * 항목을 숨기지 않는다. "+N개 더" 대신 개수에 따라 바 높이를 압축해 전부 보여 준다.
@@ -123,7 +146,7 @@ function barMetrics(laneCount: number) {
 export function MonthCalendar({
   cursor, onCursorChange, entries, tideEntries,
   tideMonths, accounts, hasBalance, lens, weekStart, todayISO,
-  onEntryClick, onDayOpen, onDayCreate, ledgerSummary,
+  onEntryClick, onDayOpen, onDayCreate, ledgerSummary, pockets, onPocketClick,
 }: Props) {
   const grid = useMemo(() => monthGrid(cursor, weekStart), [cursor, weekStart]);
   const weeks = useMemo(
@@ -177,6 +200,10 @@ export function MonthCalendar({
       return effectiveEndDate(e) >= todayISO;
     })
     : entries), [summaryMode, entries, todayISO]);
+  const barItems = useMemo<BarItem[]>(() => [
+    ...(pockets ?? []).map((budget) => ({ kind: 'pocket' as const, budget })),
+    ...barEntries.map((entry) => ({ kind: 'entry' as const, entry })),
+  ], [pockets, barEntries]);
   const summaries = useMemo(() => {
     if (!ledgerSummary?.ready) return null;
     const map = new Map<string, DaySummary>();
@@ -217,11 +244,11 @@ export function MonthCalendar({
 
       {weeks.map((week, wi) => {
         const weekISO = week.map(toISO);
-        const { placed, laneCount } = placeWeek(barEntries, weekISO, summaryMode ? todayISO : undefined);
+        const { placed, laneCount } = placeWeek(barItems, weekISO, summaryMode ? todayISO : undefined);
         const { height, gap, showText } = barMetrics(laneCount);
         // Recovery remains readable even when ordinary events compress to strips.
         const laneHeights = Array.from({ length: laneCount }, (_, lane) =>
-          placed.some((p) => p.lane === lane && isRecoveryEntry(p.entry)) ? Math.max(height, 18) : height);
+          placed.some((p) => p.lane === lane && isRecoveryItem(p.item)) ? Math.max(height, 18) : height);
         const laneOffsets: number[] = [];
         let contentHeight = 0;
         for (const laneHeight of laneHeights) {
@@ -293,7 +320,33 @@ export function MonthCalendar({
             </div>
 
             <div className="cal-bars" style={{ top: topOffset }}>
-              {placed.map(({ entry, lane, from, to, continuesLeft, continuesRight }) => {
+              {placed.map(({ item, lane, from, to, continuesLeft, continuesRight }) => {
+                if (item.kind === 'pocket') {
+                  const b = item.budget;
+                  const label = b.name.includes('생활비') ? b.name : `생활비 · ${b.name}`;
+                  return (
+                    <button
+                      key={`pocket:${b.id}`}
+                      className={'cal-bar pocket' + (continuesLeft ? ' cont-l' : '') + (continuesRight ? ' cont-r' : '')}
+                      style={{
+                        top: laneOffsets[lane],
+                        height,
+                        left: `calc(${(from / 7) * 100}% + 3px)`,
+                        width: `calc(${((to - from + 1) / 7) * 100}% - 6px)`,
+                      }}
+                      title={`${label} · ${formatAmount(b.amountMinor)} · ${b.startDate} ~ ${b.endDate}`}
+                      aria-label={`생활비 ${b.name} ${formatAmount(b.amountMinor)}원 열기`}
+                      onClick={(e) => { e.stopPropagation(); onPocketClick?.(b.id); }}
+                    >
+                      {showText && (
+                        <span className="cal-bar-in">
+                          <span className="cal-bar-x">{label} {formatAmount(b.amountMinor)}</span>
+                        </span>
+                      )}
+                    </button>
+                  );
+                }
+                const entry = item.entry;
                 const hex = colorHex(entry.color);
                 const money = entry.kind === 'money' ? entry.money : null;
                 const accent = money ? MONEY_TYPE_BY_ID[money.type].color : hex;

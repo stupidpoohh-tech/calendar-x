@@ -236,7 +236,7 @@ describe('예산', () => {
 
 describe('보기 전환', () => {
   it('렌즈 바로 아래 네 보기 — 고른 보기의 본문 하나만 그린다', () => {
-    const p = mount({ cashflow: <div>현금흐름 본문</div>, pockets: <div>주머니 구역</div> });
+    const p = mount({ cashflow: <div>현금흐름 본문</div> });
     expect(screen.getAllByRole('tab').map((t) => t.textContent)).toEqual(['내역', '현금흐름', '예산', '분석']);
     expect(screen.queryByText('현금흐름 본문')).toBeNull();
     fireEvent.click(screen.getByRole('tab', { name: '현금흐름' }));
@@ -249,15 +249,12 @@ describe('보기 전환', () => {
     expect(screen.queryByRole('status')).toBeNull();
   });
 
-  it('예산 보기는 카테고리 예산과 생활비 주머니 · 세이브를 다른 구역으로 나눈다', () => {
-    mount({ tab: 'budget', pockets: <div>주머니 구역</div> });
+  it('예산 보기는 카테고리 예산만 — 생활비 · 세이브는 현금흐름으로 옮겼다', () => {
+    mount({ tab: 'budget' });
     expect(screen.getByRole('heading', { name: '카테고리 예산' })).toBeInTheDocument();
-    expect(screen.getByRole('heading', { name: '생활비 주머니 · 세이브' })).toBeInTheDocument();
-    const pockets = screen.getByRole('heading', { name: '생활비 주머니 · 세이브' }).closest('section')!;
-    expect(pockets.textContent).toContain('한도에서 미리 빼 두는 돈');
-    expect(pockets.textContent).toContain('카테고리 예산과 따로 셉니다');
-    expect(pockets.textContent).toContain('주머니 구역');
-    expect(document.querySelector('.led-body')!.textContent).toContain('결산용');
+    expect(screen.queryByRole('heading', { name: /생활비 주머니/ })).toBeNull();
+    expect(screen.queryByText(/생활비 만들기|세이브 추가/)).toBeNull();
+    expect(document.querySelector('.led-body')!.textContent).not.toContain('한도');
   });
 });
 
