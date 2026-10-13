@@ -137,6 +137,21 @@ describe('기간 추이 · 월평균', () => {
     expect(food.average).toBe(150_000);
   });
 
+  it('기록이 하나도 없는 끝난 기간은 평균에 넣지 않는다 — 옮겨 온 이력이 중간에 시작해도', () => {
+    // 4~5월만 기록이 있다(다른 앱에서 옮겨 온 경우). 1~3월 · 6월은 "0원" 이 아니라 "모름" 이다.
+    const moved = [
+      tx('a4', '2026-04-10', 500_000, { categoryId: 'food' }),
+      tx('a5', '2026-05-10', 300_000, { categoryId: 'food' }),
+      tx('c5', '2026-05-11', 10_000, { categoryId: 'cafe' }),
+    ];
+    const t = categoryTrends(moved, periods, cats, 'expense', '2026-07-15');
+    const food = t.find((x) => x.categoryId === 'food')!;
+    expect(food.averagedOver).toBe(2);
+    expect(food.average).toBe(400_000);
+    // 카페는 4월에 0원이지만 그 달에는 다른 기록이 있다 — 진짜 0이다.
+    expect(t.find((x) => x.categoryId === 'cafe')!.average).toBe(5_000);
+  });
+
   it('끝난 기간이 없으면 평균을 내지 않는다', () => {
     const t = categoryTrends(list, periods, cats, 'expense', '2026-01-15');
     expect(t.find((x) => x.categoryId === 'food')!.average).toBeNull();

@@ -9,6 +9,7 @@ import { defineConfig } from 'vitest/config';
  *                                  공유 화면의 편집이 원본에 닿지 않는가
  *   ledger.emulator.test.ts        가계부 원장 — 30달 넘는 창의 분할 조회 · 확정 거래 조회
  *   backup.emulator.test.ts        백업 · 복원 왕복 — 모든 갈래 · 계산 결과 · 건수 · 예전 버전
+ *   ledgerImport.emulator.test.ts  가계부 이관 — 엑셀 → 실제 거래, 재가져오기 0건, 백업 왕복
  */
 export default defineConfig({
   test: {
@@ -21,6 +22,7 @@ export default defineConfig({
       'src/test/shared.emulator.test.ts',
       'src/test/ledger.emulator.test.ts',
       'src/test/backup.emulator.test.ts',
+      'src/test/ledgerImport.emulator.test.ts',
     ],
     testTimeout: 20_000,
     hookTimeout: 30_000,

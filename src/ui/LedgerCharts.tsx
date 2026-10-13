@@ -9,7 +9,7 @@
  * 기간과 같은 모양이면 줄어든 것처럼 읽힌다.
  */
 import { useMemo, useState } from 'react';
-import { actualsIn, categoryTrends, periodSeries, totalsOf, type PeriodSeries } from '../domain/ledgerStats';
+import { actualsIn, averagedPeriods, categoryTrends, periodSeries, totalsOf, type PeriodSeries } from '../domain/ledgerStats';
 import { compactAmount, formatAmount, formatSigned } from '../domain/money';
 import {
   periodName, periodRange, periodsBetween, periodsOfYear, shiftPeriodKey, type Period,
@@ -166,7 +166,9 @@ export function LedgerStats({ entries, settleDay, todayISO, year, onYear, catego
   );
   const financeTotal = finance.reduce((t, f) => t + f.total, 0);
   const financePer = periods.map((_, i) => finance.reduce((t, f) => t + (f.perPeriod[i] ?? 0), 0));
-  const averagedOver = trends[0]?.averagedOver ?? finance[0]?.averagedOver ?? 0;
+  // 카테고리 평균과 같은 기간으로 나눈다 — 한쪽만 다르면 두 줄의 월평균을 견줄 수 없다.
+  const counted = useMemo(() => averagedPeriods(entries, periods, todayISO), [entries, periods, todayISO]);
+  const averagedOver = counted.filter(Boolean).length;
   const peak = Math.max(1, ...trends.flatMap((t) => t.perPeriod));
 
   return (
@@ -185,7 +187,8 @@ export function LedgerStats({ entries, settleDay, todayISO, year, onYear, catego
         <div><span>금융비용</span><b className="num">{formatAmount(totals.financeCost)}</b></div>
         <div><span>수입</span><b className="num plus">{formatAmount(totals.income)}</b></div>
         <p className="led-note">
-          월평균 = 끝난 정산 기간의 합 ÷ 끝난 기간 수({averagedOver}개). 진행 중이거나 아직 오지 않은 기간은 평균에 넣지 않습니다.
+          월평균 = 거래를 적은 끝난 정산 기간의 합 ÷ 그 기간 수({averagedOver}개). 진행 중 · 아직 오지 않은 기간과
+          기록이 하나도 없는 기간(가계부를 쓰기 전 등)은 평균에 넣지 않습니다.
           대출 원금 · 이체 · 카드 대금은 소비가 아니고, 대출 이자는 금융비용으로 따로 적습니다.
         </p>
       </div>
@@ -205,7 +208,7 @@ export function LedgerStats({ entries, settleDay, todayISO, year, onYear, catego
             <StatRow
               name="금융비용 (대출 이자)" total={financeTotal} share={null}
               average={averagedOver > 0
-                ? Math.round(financePer.reduce((a, v, i) => (periods[i] && periods[i]!.end < todayISO ? a + v : a), 0) / averagedOver)
+                ? Math.round(financePer.reduce((a, v, i) => (counted[i] ? a + v : a), 0) / averagedOver)
                 : null}
               perPeriod={financePer} peak={Math.max(1, ...financePer)} periods={periods} finance
             />

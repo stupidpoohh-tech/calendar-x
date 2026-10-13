@@ -201,10 +201,11 @@ describe('통계', () => {
     const food = within(list).getByText('식비').closest('li')!;
     expect(food.textContent).toContain('600,000');
     expect(food.textContent).toContain('소비의 100%');
-    // 끝난 기간은 1~9월(9개). (100,000 + 200,000) / 9
-    expect(food.textContent).toContain('월평균 33,333');
+    // 끝난 기간은 1~9월이지만 거래를 적은 것은 1 · 2 · 3월뿐이다(3개). (100,000 + 200,000) / 3
+    // 기록이 없는 4~9월을 0원으로 세면 평균이 33,333 으로 낮아진다.
+    expect(food.textContent).toContain('월평균 100,000');
     expect(within(list).getByText('금융비용 (대출 이자)')).toBeInTheDocument();
-    expect(screen.getByText(/끝난 기간 수\(9개\)/)).toBeInTheDocument();
+    expect(screen.getByText(/그 기간 수\(3개\)/)).toBeInTheDocument();
     // 원금은 소비 합계에 없다.
     expect(document.querySelector('.led-totals')!.textContent).toContain('600,000');
   });

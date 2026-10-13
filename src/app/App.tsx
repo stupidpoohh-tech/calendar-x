@@ -7,6 +7,7 @@ import {
   describeFirestoreError, isPermissionDenied, RULES_CONSOLE_PATH, RULES_DEPLOY_COMMAND,
 } from '../data/errors';
 import { getFirebase } from '../data/firebase';
+import { planFromFiles, readImportFiles, writeLedgerImport, type ImportIO } from '../data/ledgerImportRun';
 import { convertLegacyItems, readLegacyItems, summarize } from '../data/migrate';
 import {
   createManyIfAbsent, fetchActualEntries, fetchAll, fetchLedgerSettings, markMigrated,
@@ -34,6 +35,7 @@ import type {
 } from '../domain/types';
 import { ConfirmSheet } from '../ui/ConfirmSheet';
 import { LedgerScreen } from '../ui/LedgerScreen';
+import { LedgerImportPreview, LedgerImportProblems } from '../ui/LedgerImport';
 import { monthsOfPeriods, periodByKey, periodOf, periodsBetween, periodsOfYear, shiftPeriodKey } from '../domain/period';
 import { combineFeeds, FEED_DEMO } from './useStore';
 import { useLedgerFeed } from './useLedgerFeed';
@@ -1024,6 +1026,103 @@ function Workspace({ uid, user, onSignOut }: WorkspaceProps) {
     }
   }, [db, uid, isAnon, promptLogin, dialog, store.ledger.settleDay, commit, recovery.rule]);
 
+  /**
+   * 가계부 이관 — 다른 가계부에서 내보낸 엑셀 · CSV 를 실제 거래로 더한다.
+   *
+   * 순서: 파일 읽기 · 검증(한 행이라도 못 읽으면 중단) → 지금 자료 읽기 → 미리보기에서
+   * 고르기 → 카테고리 → 거래 순서로 없는 것만 만들기 → 건수 보고. 백업 가져오기와 같은
+   * 깃발을 쓴다 — 둘이 겹쳐 돌면 서로의 중간 상태를 읽는다.
+   */
+  const handleLedgerImport = useCallback(async () => {
+    if (isAnon || !uid) { void promptLogin(); return; }
+    if (importing.current) {
+      dialog.toast('가져오기가 이미 돌고 있습니다. 끝난 뒤에 다시 시도해 주세요.', 'bad');
+      return;
+    }
+    importing.current = true;
+    try {
+      const files = await pickFiles('.xlsx,.csv,text/csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+      if (files.length === 0) return;
+      const read = await readImportFiles(await Promise.all(
+        files.map(async (f) => ({ name: f.name, bytes: new Uint8Array(await f.arrayBuffer()) })),
+      ));
+      if (read.problems.length > 0) {
+        await dialog.confirm({
+          title: `가져올 수 없습니다 — ${read.problems.length.toLocaleString('ko-KR')}곳을 읽지 못했습니다`,
+          body: <LedgerImportProblems problems={read.problems} />,
+          confirmLabel: '알겠습니다',
+          cancelLabel: '닫기',
+        });
+        return;
+      }
+
+      const io: ImportIO = {
+        fetchExisting: async () => {
+          const all = await fetchAll(db, uid);
+          return { categories: all.categories, entries: all.entries, accounts: all.accounts };
+        },
+        createIfAbsent: (payload) => createManyIfAbsent(db, uid, payload),
+      };
+      const plans = await planFromFiles(read, io);
+      if (plans.all.entries.length === 0) {
+        dialog.toast(`더할 것이 없습니다. 파일의 ${plans.all.total.toLocaleString('ko-KR')}건이 모두 이미 들어 있습니다.`);
+        return;
+      }
+
+      const overlap = plans.skip.overlaps.length;
+      const mode = await dialog.choose('가계부 내역을 가져올까요?', [
+        {
+          id: 'skip' as const,
+          label: `${plans.skip.entries.length.toLocaleString('ko-KR')}건 가져오기`,
+          hint: overlap > 0 ? `겹쳐 보이는 ${overlap.toLocaleString('ko-KR')}건은 빼고 넣습니다.` : '이미 있는 항목은 건드리지 않습니다.',
+        },
+        ...(overlap > 0 ? [{
+          id: 'all' as const,
+          label: `겹쳐 보이는 것까지 ${plans.all.entries.length.toLocaleString('ko-KR')}건 가져오기`,
+          hint: '손으로 적어 둔 것과 다른 거래라면 이쪽입니다.',
+        }] : []),
+      ], <LedgerImportPreview plan={plans.skip} ignoredColumns={read.ignoredColumns} />);
+      if (!mode) return;
+      const plan = mode === 'all' ? plans.all : plans.skip;
+      if (plan.entries.length === 0) {
+        dialog.toast('더할 것이 없습니다.');
+        return;
+      }
+
+      const out = await writeLedgerImport(plan, io);
+      const n = (v: number) => v.toLocaleString('ko-KR');
+      if (out.kind === 'ok') {
+        const kept = out.conflicts + out.skippedBefore;
+        dialog.toast(`${n(out.created)}건을 더했습니다.` + (kept > 0 ? ` ${n(kept)}건은 넣지 않았습니다(이미 있거나 뺀 것).` : ''));
+        return;
+      }
+      await dialog.confirm({
+        title: out.kind === 'partial' ? `${n(out.created)}건을 더했고 ${n(out.failed.length)}건은 저장하지 못했습니다` : '한 건도 저장하지 못했습니다',
+        body: (
+          <>
+            {out.kind === 'categories-failed' && (
+              <p>카테고리를 만들지 못해 거래를 쓰지 않았습니다 — 거래가 없는 카테고리를 가리키지 않게 하려는 것입니다.</p>
+            )}
+            <ul className="dlg-skips">
+              {[...out.categoryFailures, ...out.failed].slice(0, 6).map((f) => (
+                <li key={`${f.collection}/${f.id}`}><code>{f.collection}/{f.id}</code> — {f.reason}</li>
+              ))}
+            </ul>
+            <p className="dlg-note">
+              같은 파일로 다시 가져오면 못 들어간 것만 이어서 들어갑니다. 이미 들어간 것은 다시 쓰지 않습니다.
+            </p>
+          </>
+        ),
+        confirmLabel: '알겠습니다',
+        cancelLabel: '닫기',
+      });
+    } catch (err) {
+      dialog.toast(`가져오지 못했습니다. ${describeFirestoreError(err)} 기존 데이터는 바뀌지 않았습니다.`, 'bad');
+    } finally {
+      importing.current = false;
+    }
+  }, [db, uid, isAnon, promptLogin, dialog]);
+
   const handleMigrate = useCallback(async () => {
     if (isAnon || !uid) { void promptLogin(); return; }
     try {
@@ -1774,6 +1873,7 @@ function Workspace({ uid, user, onSignOut }: WorkspaceProps) {
           onWeekStart={(w) => set('weekStart', w)}
           onExport={handleExport}
           onImport={handleImport}
+          onImportLedger={handleLedgerImport}
           onMigrate={handleMigrate}
           onSignOut={() => { setShowSettings(false); void onSignOut(); }}
           onClose={() => setShowSettings(false)}
@@ -1788,6 +1888,18 @@ function cursorISOForCreate(today: string, cursor: Date): string {
   return today.startsWith(`${cursor.getFullYear()}-${String(cursor.getMonth() + 1).padStart(2, '0')}`)
     ? today
     : toISO(startOfMonth(cursor));
+}
+
+function pickFiles(accept: string): Promise<File[]> {
+  return new Promise((resolve) => {
+    const input = document.createElement('input');
+    input.type = 'file';
+    input.accept = accept;
+    input.multiple = true;
+    input.onchange = () => resolve(Array.from(input.files ?? []));
+    input.oncancel = () => resolve([]);
+    input.click();
+  });
 }
 
 function pickFile(accept: string): Promise<File | null> {

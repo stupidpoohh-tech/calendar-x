@@ -32,6 +32,8 @@ interface Props {
   onWeekStart: (w: WeekStart) => void;
   onExport: () => void | Promise<void>;
   onImport: () => void | Promise<void>;
+  /** 다른 가계부의 엑셀 · CSV 를 실제 거래로 더한다. */
+  onImportLedger: () => void | Promise<void>;
   onMigrate: () => void | Promise<void>;
   onSignOut: () => void;
   onClose: () => void;
@@ -47,7 +49,7 @@ const FONT_SCALES: Array<[FontScale, string]> = [
 export function SettingsSheet({
   user, theme, fontScale, weekStart, entryCount, legacyCount, migratedAt,
   recoveryRule, onRecoveryRule, ledger,
-  onTheme, onFontScale, onWeekStart, onExport, onImport, onMigrate, onSignOut, onClose,
+  onTheme, onFontScale, onWeekStart, onExport, onImport, onImportLedger, onMigrate, onSignOut, onClose,
 }: Props) {
   const [showRedo, setShowRedo] = useState(false);
   const [busy, setBusy] = useState<string | null>(null);
@@ -175,6 +177,13 @@ export function SettingsSheet({
               <span className="set-row-b">
                 <span className="set-row-t">{busy === 'import' ? '가져오는 중…' : '백업 파일 가져오기'}</span>
                 <span className="set-row-s">기존 데이터에 더합니다. 같은 항목은 지금 것을 남깁니다. 예전 형식도 받습니다.</span>
+              </span>
+            </button>
+            <button className="set-row" disabled={busy != null} onClick={() => run('ledger-import', onImportLedger)}>
+              <span className="set-ico"><Icon.Upload size={16} /></span>
+              <span className="set-row-b">
+                <span className="set-row-t">{busy === 'ledger-import' ? '가져오는 중…' : '가계부 내역 가져오기 (엑셀 · CSV)'}</span>
+                <span className="set-row-s">다른 가계부에서 내보낸 일자 · 구분 · 금액 표를 실제 거래로 더합니다. 여러 파일을 한 번에 고를 수 있습니다.</span>
               </span>
             </button>
           </div>

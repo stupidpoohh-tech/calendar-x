@@ -226,3 +226,28 @@ button.led-cat-n:hover { background: var(--accent-soft); }
   .led-stat { grid-template-columns: 1fr 84px; }
   .led-spark { width: 84px; }
 }
+
+/* ---------- 가계부 이관 미리보기 (LedgerImport) ---------- */
+.imp { display: flex; flex-direction: column; gap: 8px; margin-bottom: 4px; }
+.imp-files { margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 6px; }
+/* 파일 하나가 한 덩어리 — 이름 아래에 기간 · 건수. 이름이 길어도 다음 파일과 섞이지 않는다. */
+.imp-files li { display: flex; flex-direction: column; gap: 1px; font-size: 0.75rem; color: var(--ink-3); }
+.imp-file { overflow-wrap: anywhere; min-width: 0; color: var(--ink); font-weight: 600; }
+.imp-sum { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
+.imp-sum > div {
+  display: flex; flex-direction: column; gap: 2px; padding: 8px 10px;
+  background: var(--bg-soft); border-radius: var(--radius-sm);
+}
+.imp-sum span { font-size: 0.6875rem; color: var(--ink-3); }
+.imp-sum b { font-size: 0.8125rem; }
+.imp-cats { display: flex; flex-direction: column; gap: 4px; }
+.imp-h { font-size: 0.71875rem; font-weight: 600; color: var(--ink-2); }
+.imp-chips { display: flex; flex-wrap: wrap; gap: 4px; }
+.imp-chip {
+  font-size: 0.71875rem; color: var(--ink-2); padding: 2px 8px;
+  border: 1px solid var(--line); border-radius: 999px;
+}
+.imp-chip i { font-style: normal; color: var(--ink-4); }
+.imp .dlg-warn p { margin: 0; }
+.imp-sum b.plus { color: var(--good); }
+.imp-sum b.minus { color: var(--bad); }
