@@ -1,11 +1,11 @@
 /**
- * 가계부 상세 화면 — 내역 · 예산 · 월별 · 통계.
+ * 가계부 화면 — 내역 · 현금흐름 · 예산 · 통계.
  *
  * 숫자 계산은 `ledgerStats.test` 가 본다. 여기서는 화면이 (1) 덜 받은 자료로 합계를 내지
  * 않는지, (2) 예산을 고칠 때 기간만 / 기본을 제대로 가르는지, (3) 정산 기간 이름과 범위가
  * 함께 보이는지, (4) 월평균의 정의가 화면에 적히는지 본다.
  */
-import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { newCategory, setDefaultBudget } from '../domain/category';
 import { newEntry, newMoney } from '../domain/entry';
@@ -26,7 +26,7 @@ function mount(over: Partial<LedgerScreenProps> = {}) {
     todayISO: TODAY, settleDay: 25, tab: 'history', onTab: vi.fn(), periodKey: '2026-10', onPeriodKey: vi.fn(),
     year: 2026, onYear: vi.fn(), entries: [], feed: LIVE, categories: cats, categoryBudgets: [],
     categoriesReady: true, onSeedCategories: vi.fn(), onEntryClick: vi.fn(), onAdd: vi.fn(),
-    onSaveCategoryBudget: vi.fn(), onSearchAll: vi.fn(async () => []),
+    onSaveCategoryBudget: vi.fn(), subscribeAll: vi.fn(() => () => undefined),
     ...over,
   };
   render(<LedgerScreen {...props} />);
@@ -96,15 +96,44 @@ describe('내역', () => {
     expect(screen.queryByRole('button', { name: /보험료/ })).toBeNull();
   });
 
-  it('검색 범위를 해 · 전체로 넓힌다. 전체는 고른 순간 한 번 읽는다', async () => {
+  it('검색 범위를 정산 연도 · 전체로 넓힌다. 전체는 켜 둔 동안 구독하고, 끄면 끊는다', async () => {
     const old = tx('old', '2024-03-01', 7_000, {}, { title: '옛날 점심' });
-    const p = mount({ entries, onSearchAll: vi.fn(async () => [old]) });
+    let push: ((items: Entry[]) => void) | null = null;
+    const stop = vi.fn();
+    const p = mount({ entries, subscribeAll: vi.fn((cb) => { push = cb; return stop; }) });
     fireEvent.change(screen.getByLabelText('거래 검색'), { target: { value: '점심' } });
     fireEvent.click(screen.getByRole('radio', { name: '2026년' }));
     expect(screen.getByRole('button', { name: /점심/ })).toBeInTheDocument();
     fireEvent.click(screen.getByRole('radio', { name: '전체' }));
+    expect(p.subscribeAll).toHaveBeenCalledTimes(1);
+    act(() => push!([old]));
     await waitFor(() => expect(screen.getByRole('button', { name: /옛날 점심/ })).toBeInTheDocument());
-    expect(p.onSearchAll).toHaveBeenCalledTimes(1);
+    // 결과에서 고친 것이 곧바로 반영된다 — 다시 읽지 않아도.
+    act(() => push!([{ ...old, title: '옛날 저녁 점심' }]));
+    expect(screen.getByRole('button', { name: /옛날 저녁 점심/ })).toBeInTheDocument();
+    act(() => push!([]));
+    expect(screen.queryByRole('button', { name: /옛날/ })).toBeNull();
+    fireEvent.click(screen.getByRole('radio', { name: '이 기간' }));
+    expect(stop).toHaveBeenCalledTimes(1);
+  });
+
+  it('연초 기간의 연도 검색은 정산 연도다 — 25일 기준 2026년 1월에서 2026년을 찾는다', () => {
+    const dec = tx('dec', '2025-12-26', 5_000, {}, { title: '연말 점심' });   // 2026년 정산 연도의 첫 기간
+    const early = tx('early', '2025-12-20', 5_000, {}, { title: '이른 점심' }); // 2025년 정산 연도
+    const late = tx('late', '2026-12-24', 5_000, {}, { title: '마지막 점심' }); // 2026년의 마지막 날
+    mount({ entries: [dec, early, late], periodKey: '2026-01' });
+    expect(screen.getByRole('radio', { name: '2026년' })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('radio', { name: '2026년' }));
+    expect(screen.getByText(/2026년 정산 연도 · 2025\.12\.25 – 2026\.12\.24/)).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /연말 점심/ })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /마지막 점심/ })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /이른 점심/ })).toBeNull();
+  });
+
+  it('거래 추가는 기간 도구 옆에 있다 — 이 기간에 오늘이 있으면 오늘로', () => {
+    const p = mount({ entries });
+    fireEvent.click(screen.getByRole('button', { name: /거래 추가/ }));
+    expect(p.onAdd).toHaveBeenCalledWith(TODAY);
   });
 
   it('기간을 옮긴다. 이번 기간을 보고 있으면 "이번 기간" 버튼은 없다', () => {
@@ -168,12 +197,39 @@ describe('예산', () => {
   });
 });
 
-describe('월별', () => {
+describe('보기 전환', () => {
+  it('렌즈 바로 아래 네 보기 — 고른 보기의 본문 하나만 그린다', () => {
+    const p = mount({ cashflow: <div>현금흐름 본문</div>, pockets: <div>주머니 구역</div> });
+    expect(screen.getAllByRole('tab').map((t) => t.textContent)).toEqual(['내역', '현금흐름', '예산', '통계']);
+    expect(screen.queryByText('현금흐름 본문')).toBeNull();
+    fireEvent.click(screen.getByRole('tab', { name: '현금흐름' }));
+    expect(p.onTab).toHaveBeenCalledWith('cashflow' satisfies LedgerTabId);
+  });
+
+  it('현금흐름은 결산 구독과 무관하게 그린다 — 자기 계산 상태를 따른다', () => {
+    mount({ tab: 'cashflow', feed: { ...LIVE, status: 'loading', ready: false }, cashflow: <div>현금흐름 본문</div> });
+    expect(screen.getByText('현금흐름 본문')).toBeInTheDocument();
+    expect(screen.queryByRole('status')).toBeNull();
+  });
+
+  it('예산 보기는 카테고리 예산과 생활비 주머니 · 세이브를 다른 구역으로 나눈다', () => {
+    mount({ tab: 'budget', pockets: <div>주머니 구역</div> });
+    expect(screen.getByRole('heading', { name: '카테고리 예산' })).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: '생활비 주머니 · 세이브' })).toBeInTheDocument();
+    const pockets = screen.getByRole('heading', { name: '생활비 주머니 · 세이브' }).closest('section')!;
+    expect(pockets.textContent).toContain('한도에서 미리 빼 두는 돈');
+    expect(pockets.textContent).toContain('주머니 구역');
+    expect(document.querySelector('.led-body')!.textContent).toContain('결산용');
+  });
+});
+
+describe('통계 · 월별 추이', () => {
   it('열두 기간을 표로 적고 진행 중인 기간을 표시한다', () => {
     const p = mount({
-      tab: 'monthly', periodKey: '2026-10',
+      tab: 'stats', periodKey: '2026-10',
       entries: [tx('a', '2026-09-26', 10_000), tx('s', '2026-05-25', 2_000_000, { type: 'income' })],
     });
+    expect(screen.getByRole('radio', { name: '월별 추이' })).toHaveAttribute('aria-checked', 'true');
     const rows = screen.getAllByRole('row').slice(1);
     expect(rows).toHaveLength(12);
     expect(rows[0]!.textContent).toContain('2026년 10월');
@@ -185,10 +241,14 @@ describe('월별', () => {
   });
 });
 
-describe('통계', () => {
+describe('통계 · 카테고리', () => {
+  const open = (over: Partial<LedgerScreenProps>) => {
+    mount({ tab: 'stats', year: 2026, settleDay: 1, ...over });
+    fireEvent.click(screen.getByRole('radio', { name: '카테고리' }));
+  };
+
   it('카테고리별 연간 합계 · 비중 · 월평균, 금융비용은 따로', () => {
-    mount({
-      tab: 'stats', year: 2026, settleDay: 1,
+    open({
       entries: [
         tx('a', '2026-01-10', 100_000, { categoryId: 'food' }),
         tx('b', '2026-02-10', 200_000, { categoryId: 'food' }),
@@ -201,12 +261,16 @@ describe('통계', () => {
     const food = within(list).getByText('식비').closest('li')!;
     expect(food.textContent).toContain('600,000');
     expect(food.textContent).toContain('소비의 100%');
-    // 끝난 기간은 1~9월이지만 거래를 적은 것은 1 · 2 · 3월뿐이다(3개). (100,000 + 200,000) / 3
-    // 기록이 없는 4~9월을 0원으로 세면 평균이 33,333 으로 낮아진다.
-    expect(food.textContent).toContain('월평균 100,000');
+    // 끝난 기간은 1~9월(9개). (100,000 + 200,000) / 9 — 진행 중인 10월은 넣지 않는다.
+    expect(food.textContent).toContain('월평균 33,333');
     expect(within(list).getByText('금융비용 (대출 이자)')).toBeInTheDocument();
-    expect(screen.getByText(/그 기간 수\(3개\)/)).toBeInTheDocument();
+    expect(screen.getByText(/끝난 기간 수\(9개\)/)).toBeInTheDocument();
     // 원금은 소비 합계에 없다.
     expect(document.querySelector('.led-totals')!.textContent).toContain('600,000');
+  });
+
+  it('소비 · 금융비용 기록이 없어도 끝난 기간 수는 0이 아니다', () => {
+    open({ entries: [tx('s', '2026-02-10', 1_000_000, { type: 'income' })] });
+    expect(screen.getByText(/끝난 기간 수\(9개\)/)).toBeInTheDocument();
   });
 });

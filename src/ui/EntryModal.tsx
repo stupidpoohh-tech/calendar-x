@@ -47,9 +47,17 @@ interface Props {
   onConfirm?: (plan: Entry, occurrenceDate: string) => void;
   /** 확정을 취소한다 — 실제 거래를 지우고 예정 회차를 되살린다. */
   onUnconfirm?: (actual: Entry) => void;
-  onSave: (e: Entry) => void;
+  /**
+   * 저장. `reflected` 는 "이 잔고에 이미 반영됨" 을 이 창에서 고른 값이다 — 손대지 않았으면
+   * undefined 이고, 그때 부르는 쪽은 계좌의 반영 목록을 건드리지 않는다.
+   */
+  onSave: (e: Entry, opts?: SaveOptions) => void;
   onDelete: (e: Entry) => void;
   onClose: () => void;
+}
+
+export interface SaveOptions {
+  reflected?: boolean;
 }
 
 /**
@@ -93,6 +101,7 @@ export function EntryModal({
 }: Props) {
   const [form, setForm] = useState<Entry>(() => initial ?? newEntry('task'));
   const [amountText, setAmountText] = useState('');
+  const [reflected, setReflected] = useState<boolean | undefined>(undefined);
   const [tagInput, setTagInput] = useState('');
   const [error, setError] = useState('');
   /** 사용자가 생활비 칸을 직접 건드렸는가. 건드렸으면 날짜를 바꿔도 기본값으로 되돌리지 않는다. */
@@ -277,7 +286,7 @@ export function EntryModal({
         ...form,
         money: newMoney({ ...form.money, amountMinor: Math.abs(minor) }),
       });
-      onSave(next);
+      onSave(next, { reflected });
       return;
     }
 
@@ -416,6 +425,8 @@ export function EntryModal({
                     pockets={pockets}
                     debts={debts}
                     methods={methods}
+                    reflected={reflected}
+                    onReflected={setReflected}
                   />
                 </>
               )}

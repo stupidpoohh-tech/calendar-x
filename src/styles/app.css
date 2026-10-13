@@ -730,7 +730,7 @@
 .mod-input.time { flex: 0 0 110px; }
 .mod-input.amt { font-size: 1.125rem; font-weight: 700; font-variant-numeric: tabular-nums; }
 .mod-dt { display: flex; gap: 6px; flex: 1; min-width: 0; }
-.mod-amt { display: flex; align-items: center; gap: 6px; flex: 1; }
+.mod-amt { display: flex; align-items: center; gap: 6px; flex: 1; min-width: 0; }
 .mod-cur { font-size: 0.8125rem; color: var(--ink-3); flex-shrink: 0; }
 .mod-chips { display: flex; gap: 5px; flex-wrap: wrap; flex: 1; }
 .mod-colors { display: flex; gap: 6px; flex-wrap: wrap; flex: 1; }

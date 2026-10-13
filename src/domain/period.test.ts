@@ -5,7 +5,7 @@ import { describe, expect, it } from 'vitest';
 import { addDaysISO } from './date';
 import {
   clampSettleDay, monthsOfPeriods, periodByKey, periodName, periodOf, periodRange,
-  periodsBetween, periodsOfYear, phaseOf, shiftPeriodKey,
+  periodsBetween, periodsOfYear, phaseOf, settlementYearOf, settlementYearRange, shiftPeriodKey,
 } from './period';
 
 describe('기간 만들기', () => {
@@ -108,5 +108,34 @@ describe('기간 묶음', () => {
     expect(periodName('2026-09')).toBe('2026년 9월');
     expect(periodRange(periodByKey('2026-10', 25)!)).toBe('9.25 – 10.24');
     expect(periodRange(periodByKey('2027-01', 25)!)).toBe('2026.12.25 – 2027.1.24');
+  });
+});
+
+describe('정산 연도 — 연도 검색 · 통계 · 조회 범위가 같은 정의를 쓴다', () => {
+  it.each<[number, string, string]>([
+    [1, '2026-01-01', '2026-12-31'],
+    [25, '2025-12-25', '2026-12-24'],
+    [29, '2025-12-29', '2026-12-28'],
+    [30, '2025-12-30', '2026-12-29'],
+    [31, '2025-12-31', '2026-12-30'],
+  ])('시작일 %i일 — 2026년은 %s ~ %s', (day, start, end) => {
+    expect(settlementYearRange(2026, day)).toEqual({ start, end });
+  });
+
+  it.each([1, 25, 29, 30, 31])('시작일 %i일 — 1월 기간과 12월 기간이 같은 정산 연도에 들고, 연도끼리 이어진다', (day) => {
+    const jan = periodByKey('2026-01', day)!;
+    const dec = periodByKey('2026-12', day)!;
+    const r = settlementYearRange(2026, day);
+    expect(settlementYearOf(jan.key)).toBe(2026);
+    expect(r.start).toBe(jan.start);
+    expect(r.end).toBe(dec.end);
+    // 2025년의 끝 다음 날이 2026년의 시작이다 — 빠지는 날도 겹치는 날도 없다.
+    const prev = settlementYearRange(2025, day);
+    const next = new Date(`${prev.end}T00:00:00Z`);
+    next.setUTCDate(next.getUTCDate() + 1);
+    expect(next.toISOString().slice(0, 10)).toBe(r.start);
+    // 그 해의 어느 날이든 그 날이 든 기간의 정산 연도가 2026이다.
+    expect(settlementYearOf(periodOf(r.start, day).key)).toBe(2026);
+    expect(settlementYearOf(periodOf(r.end, day).key)).toBe(2026);
   });
 });

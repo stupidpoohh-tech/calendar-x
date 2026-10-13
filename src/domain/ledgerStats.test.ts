@@ -6,7 +6,7 @@ import { newCategory, setDefaultBudget, setPeriodBudget } from './category';
 import { confirmOccurrence } from './confirm';
 import { newEntry, newMoney } from './entry';
 import {
-  actualsIn, budgetRows, budgetSummary, byCategory, categoryTrends, groupByDay, historyItems,
+  actualsIn, averagedPeriods, budgetRows, budgetSummary, byCategory, categoryTrends, groupByDay, historyItems,
   matchesQuery, periodSeries, totalsOf, UNCATEGORIZED,
 } from './ledgerStats';
 import { periodByKey, periodsOfYear } from './period';
@@ -137,19 +137,17 @@ describe('기간 추이 · 월평균', () => {
     expect(food.average).toBe(150_000);
   });
 
-  it('기록이 하나도 없는 끝난 기간은 평균에 넣지 않는다 — 옮겨 온 이력이 중간에 시작해도', () => {
-    // 4~5월만 기록이 있다(다른 앱에서 옮겨 온 경우). 1~3월 · 6월은 "0원" 이 아니라 "모름" 이다.
+  it('끝난 기간 수는 거래가 있었는지와 무관하다 — 기록이 없는 끝난 기간은 0원으로 센다', () => {
     const moved = [
       tx('a4', '2026-04-10', 500_000, { categoryId: 'food' }),
       tx('a5', '2026-05-10', 300_000, { categoryId: 'food' }),
-      tx('c5', '2026-05-11', 10_000, { categoryId: 'cafe' }),
     ];
     const t = categoryTrends(moved, periods, cats, 'expense', '2026-07-15');
     const food = t.find((x) => x.categoryId === 'food')!;
-    expect(food.averagedOver).toBe(2);
-    expect(food.average).toBe(400_000);
-    // 카페는 4월에 0원이지만 그 달에는 다른 기록이 있다 — 진짜 0이다.
-    expect(t.find((x) => x.categoryId === 'cafe')!.average).toBe(5_000);
+    expect(food.averagedOver).toBe(6); // 1~6월
+    expect(food.average).toBe(Math.round(800_000 / 6));
+    expect(averagedPeriods(periods, '2026-07-15').filter(Boolean)).toHaveLength(6);
+    expect(averagedPeriods(periods, '2026-01-15').filter(Boolean)).toHaveLength(0);
   });
 
   it('끝난 기간이 없으면 평균을 내지 않는다', () => {

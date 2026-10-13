@@ -129,6 +129,23 @@ export function periodsOfYear(year: number, settleDay: number): Period[] {
   return periodsBetween(keyOf(year, 1), keyOf(year, 12), settleDay);
 }
 
+/**
+ * 정산 연도. 그 해 이름을 가진 열두 기간을 이은 범위다 — 25일 기준 2026년은
+ * 2025-12-25 ~ 2026-12-24. 연도 검색 · 통계 · 조회 범위가 모두 이 정의를 쓴다.
+ *
+ * 예전 내역 검색은 기간 **시작일**에서 연도를 뽑아 달력 1/1 ~ 12/31 로 찾았다. 25일 기준
+ * '2026년 1월'(2025/12/25 ~ 2026/1/24)에서 고르면 2025년을 찾았고, 표시한 연도 · 조회한
+ * 달 · 거른 날짜가 서로 달랐다.
+ */
+export function settlementYearOf(key: PeriodKey): number {
+  return Number(key.slice(0, 4));
+}
+
+export function settlementYearRange(year: number, settleDay: number): { start: DateISO; end: DateISO } {
+  const ps = periodsOfYear(year, settleDay);
+  return { start: ps[0]!.start, end: ps[ps.length - 1]!.end };
+}
+
 /** 기간의 상태. 진행 중인 기간의 합계는 확정이 아니다 — 화면이 그렇게 적는다. */
 export type PeriodPhase = 'past' | 'current' | 'future';
 

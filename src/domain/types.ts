@@ -544,12 +544,13 @@ export interface Prefs {
   todayCollapsed: boolean;
   todayMoneyCollapsed: boolean;
   moneyCardCollapsed: boolean;
-  /** 가계부 렌즈 아래 상세 보기의 마지막 탭. */
-  ledgerTab: LedgerTabId;
 }
 
-/** 가계부 상세 보기. 캘린더와 카드 아래에 붙는다 — 대체하지 않는다. */
-export type LedgerTabId = 'history' | 'budget' | 'monthly' | 'stats';
+/**
+ * 가계부 렌즈 안의 보기. 렌즈 바로 아래 한 줄이고, 고른 보기의 본문 하나만 그린다.
+ * 마지막 보기는 세션 동안만 기억한다 — 앱을 새로 열면 내역부터 시작한다.
+ */
+export type LedgerTabId = 'history' | 'cashflow' | 'budget' | 'stats';
 
 export interface Filters {
   colors: Set<ColorId>;

@@ -86,11 +86,15 @@ button.led-cat-n:hover { background: var(--accent-soft); }
   두 계열의 색. 검증기(dataviz validate_palette)로 라이트 #ffffff · 다크 #182131 표면에서
   색약 분리 · 대비를 모두 통과한 단계다. 다크는 자동 반전이 아니라 같은 색의 다크용 단계.
 */
+/*
+  가계부 렌즈의 본문. 렌즈 바로 아래 보기 전환 한 줄 → 그 보기의 기간 도구 → 본문 하나.
+  예전처럼 카드 · 달력 아래에 붙는 것이 아니라 그 자리를 차지하므로 위 여백 · 구분선이 없다.
+*/
 .led {
   --led-in: #2a78d6;
   --led-out: #eb6834;
-  margin-top: 20px; border-top: 1px solid var(--line); padding-top: 12px;
-  display: flex; flex-direction: column; gap: 10px;
+  display: flex; flex-direction: column; gap: 12px;
+  min-width: 0;
 }
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme="light"]) .led { --led-in: #3987e5; --led-out: #d95926; }
@@ -104,6 +108,20 @@ button.led-cat-n:hover { background: var(--accent-soft); }
 }
 .led-tab:hover { color: var(--ink); }
 .led-tab.on { color: var(--ink); font-weight: 700; border-bottom-color: var(--lens-money); }
+
+/* 보기의 기간 도구 + 주요 행동 한 줄. 좁으면 행동이 아래로 내려간다. */
+.led-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 8px; flex-wrap: wrap; min-width: 0; }
+.led-add { display: inline-flex; align-items: center; gap: 4px; flex: none; }
+.led-scope { margin-top: -4px; }
+.led-sec { display: flex; flex-direction: column; gap: 8px; padding-top: 12px; border-top: 1px solid var(--line); }
+.led-sec-h { margin: 0; font-size: 0.875rem; font-weight: 700; color: var(--ink); }
+.led-cashflow { display: flex; flex-direction: column; gap: 12px; min-width: 0; }
+.led-period-t.month-btn {
+  background: none; border: 0; padding: 4px 6px; border-radius: var(--radius-sm); cursor: pointer;
+  font: inherit; color: var(--ink); align-items: center;
+}
+.led-period-t.month-btn:hover { background: var(--accent-soft); }
+.bp.bare { padding: 0; }
 
 .led-period { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
 .led-period-t { display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap; min-width: 0; }
@@ -251,3 +269,11 @@ button.led-cat-n:hover { background: var(--accent-soft); }
 .imp .dlg-warn p { margin: 0; }
 .imp-sum b.plus { color: var(--good); }
 .imp-sum b.minus { color: var(--bad); }
+
+/* 거래 창의 "이 잔고에 이미 반영됨". 설명이 체크 상자 옆에서 줄바꿈된다. */
+.mod-check { display: flex; align-items: flex-start; gap: 8px; flex: 1; min-width: 0; font-size: 0.8125rem; color: var(--ink); cursor: pointer; }
+.mod-check input { width: 16px; height: 16px; margin-top: 2px; flex: none; }
+.mod-check > span { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.mod-check .mod-hint { margin: 0; }
+/* 합계 칸의 설명 줄 안 강조는 설명 글씨 크기를 따른다 — 합계 숫자(b) 규칙이 새어 들지 않게. */
+.led-totals .led-note b { font-size: inherit; color: var(--ink-2); }

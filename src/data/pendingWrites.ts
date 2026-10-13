@@ -52,6 +52,9 @@ export type PendingKind =
   | 'recoveryRule' | 'recoveryPatch' | 'recoveryCommit'
   // 가계부 결산. 카테고리 여럿(기본 카테고리 만들기 · 순서 바꾸기)은 한 배치로 쓴다.
   | 'category' | 'categories' | 'categoryBudget' | 'ledgerSettings'
+  // 가계부 원장 — 여러 문서가 함께 바뀌어야 숫자가 맞는 쓰기(예정 + 확정 거래 다시 잇기,
+  // 거래 + 잔고 반영 목록). 한 배치라 반쯤 들어간 상태가 없다.
+  | 'ledgerBatch'
   // 같이 보기. 개인 자료와 **같은 길**을 쓴다 — 거절당한 공유 편집도 목록에 남아야 한다.
   | 'sharedBoard' | 'sharedInvite' | 'sharedInviteDelete'
   | 'sharedSource' | 'sharedItem' | 'sharedItemDelete'
@@ -65,7 +68,7 @@ const KINDS: readonly PendingKind[] = [
   'entry', 'entryDelete', 'entryPrivate', 'account', 'debt', 'debtDelete',
   'pin', 'pinDelete', 'budget', 'budgetDelete', 'reserve', 'reserveDelete',
   'taskOrder', 'recoveryRule', 'recoveryPatch', 'recoveryCommit',
-  'category', 'categories', 'categoryBudget', 'ledgerSettings',
+  'category', 'categories', 'categoryBudget', 'ledgerSettings', 'ledgerBatch',
   'sharedBoard', 'sharedInvite', 'sharedInviteDelete',
   'sharedSource', 'sharedItem', 'sharedItemDelete',
   'sharedPin', 'sharedPinDelete', 'sharedDday', 'sharedDdayDelete',
@@ -79,6 +82,24 @@ export interface RecoveryCommitPayload {
   rule: RecoveryRule;
   entry?: Entry | null;
   removeEntryId?: string | null;
+}
+
+/**
+ * 원장 한 배치. 지우기 · 거래 쓰기 · 계좌 쓰기가 한 번에 들어가거나 하나도 안 들어간다.
+ * 예정을 고치며 확정 거래를 다시 잇는 경우, 예정만 들어가고 거래가 옛 회차에 남으면
+ * 같은 돈이 두 번 세어진다 — 그래서 나눠 보내지 않는다.
+ */
+export interface LedgerBatchPayload {
+  entries: Entry[];
+  deleteIds: string[];
+  accounts: Account[];
+}
+
+/** 한 배치의 상한(500)보다 여유를 둔다. 넘으면 부르는 쪽이 나눠 보내지 않고 멈춘다. */
+export const LEDGER_BATCH_MAX = 450;
+
+export function ledgerBatchSize(p: LedgerBatchPayload): number {
+  return p.entries.length + p.deleteIds.length + p.accounts.length;
 }
 
 /**
@@ -102,6 +123,7 @@ export type PendingPayload =
   | { ordered: { id: string; order: number }[] }
   | Partial<RecoveryRule>
   | RecoveryCommitPayload
+  | LedgerBatchPayload
   | SharedBoard | SharedInvite
   | SharedSourcePayload
   | { boardId: string; item: SharedTodoItem }
@@ -211,6 +233,18 @@ export function sendPending(db: Firestore, uid: string, op: CommitInput): Promis
     case 'categoryBudget': {
       const b = op.payload as CategoryBudget;
       return setDoc(docIn(db, uid, COL.categoryBudgets, b.id), categoryBudgetToDoc(b));
+    }
+    case 'ledgerBatch': {
+      const p = op.payload as LedgerBatchPayload;
+      if (ledgerBatchSize(p) > LEDGER_BATCH_MAX) {
+        return Promise.reject(new Error(`한 번에 바꿀 문서가 너무 많습니다 (${ledgerBatchSize(p)}건).`));
+      }
+      const batch = writeBatch(db);
+      // 지우기를 먼저 적는다. 같은 id 를 지우고 다시 쓰는 일은 없지만, 있더라도 쓰기가 이긴다.
+      for (const id of p.deleteIds) batch.delete(docIn(db, uid, COL.entries, id));
+      for (const e of p.entries) batch.set(docIn(db, uid, COL.entries, e.id), entryToDoc(e));
+      for (const a of p.accounts) batch.set(docIn(db, uid, COL.accounts, a.id), accountToDoc(a));
+      return batch.commit();
     }
     /* 이웃 필드(recovery · migratedAt)를 지우지 않도록 merge 로 쓴다. */
     case 'ledgerSettings':

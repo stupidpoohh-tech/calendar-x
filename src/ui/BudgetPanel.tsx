@@ -8,12 +8,13 @@
  * 돈의 **상한**인데 항목이 하나 더 늘어난 셈이었다. 지금 생활비는 주머니 하나이고,
  * 지출은 그 주머니를 **가리킨다** (`money.budgetId`).
  *
- * 카드는 렌즈마다 하나라는 규칙을 지킨다 — 이 조각은 '며칠 버티나' 카드 **안쪽**에
- * 접힌 줄로 들어간다 (`TideBar` 의 children).
+ * 가계부의 '예산' 보기에서 카테고리 예산과 **다른 구역**으로 펼쳐 둔다(`bare`). 카테고리
+ * 예산은 결산용이고 이것은 한도를 예약하는 돈이라, 한 목록에 섞으면 둘 다 한도를 줄이는
+ * 것처럼 읽힌다.
  */
 import { useState } from 'react';
 import {
-  budgetStates, newBudget, newReserve, spendingIn, unlinkedSpendingFor, type BudgetState,
+  budgetEnded, budgetStates, newBudget, newReserve, spendingIn, unlinkedSpendingFor, type BudgetState,
 } from '../domain/budget';
 import { fmtDayShort } from '../domain/date';
 import { formatAmount, minorToInput, parseAmountToMinor } from '../domain/money';
@@ -33,6 +34,10 @@ interface Props {
   entries: readonly Entry[];
   collapsed: boolean;
   onToggleCollapsed: () => void;
+  /** 접는 머리 없이 늘 펼친 구역으로 그린다. 제목은 부르는 쪽이 단다. */
+  bare?: boolean;
+  /** 오늘. 종료일이 지난 주머니에 "끝남 — 남은 돈은 예약하지 않음" 을 적는다. */
+  todayISO?: string;
   onSaveBudget: (b: Budget) => void;
   onDeleteBudget: (b: Budget) => void;
   onSaveReserve: (r: Reserve) => void;
@@ -43,7 +48,7 @@ interface Props {
 }
 
 export function BudgetPanel({
-  budgets, reserves, entries, collapsed, onToggleCollapsed,
+  budgets, reserves, entries, collapsed: collapsedPref, onToggleCollapsed, bare = false, todayISO,
   onSaveBudget, onDeleteBudget, onSaveReserve, onDeleteReserve, onEntryClick, onLinkEntry,
 }: Props) {
   const [draft, setDraft] = useState<Budget | null>(null);
@@ -52,6 +57,7 @@ export function BudgetPanel({
   const [reserveDraft, setReserveDraft] = useState<Reserve | null>(null);
   const [reserveText, setReserveText] = useState('');
 
+  const collapsed = bare ? false : collapsedPref;
   const states = budgetStates(budgets, entries);
   const reservedMinor = reserves.reduce((t, r) => t + r.amountMinor, 0);
 
@@ -96,12 +102,14 @@ export function BudgetPanel({
   ].filter(Boolean).join(' · ');
 
   return (
-    <div className="bp">
-      <button className="debt-h" onClick={onToggleCollapsed} aria-expanded={!collapsed}>
-        <Icon.Chevron size={13} dir={collapsed ? 'right' : 'down'} />
-        <span className="debt-h-t">생활비 · 세이브</span>
-        {summary && <span className="debt-h-n num">{summary}</span>}
-      </button>
+    <div className={'bp' + (bare ? ' bare' : '')}>
+      {!bare && (
+        <button className="debt-h" onClick={onToggleCollapsed} aria-expanded={!collapsed}>
+          <Icon.Chevron size={13} dir={collapsed ? 'right' : 'down'} />
+          <span className="debt-h-t">생활비 · 세이브</span>
+          {summary && <span className="debt-h-n num">{summary}</span>}
+        </button>
+      )}
 
       {collapsed && states.length > 0 && (
         <div className="bp-compact">
@@ -133,6 +141,7 @@ export function BudgetPanel({
                 onDelete={() => onDeleteBudget(s.budget)}
                 onEntryClick={onEntryClick}
                 onLinkEntry={onLinkEntry}
+                ended={todayISO !== undefined && budgetEnded(s.budget, todayISO)}
               />
             )
           ))}
@@ -193,8 +202,9 @@ export function BudgetPanel({
 }
 
 function BudgetRow({
-  state, open, entries, onToggle, onEdit, onDelete, onEntryClick, onLinkEntry,
+  state, open, entries, onToggle, onEdit, onDelete, onEntryClick, onLinkEntry, ended = false,
 }: {
+  ended?: boolean;
   state: BudgetState;
   open: boolean;
   entries: readonly Entry[];
@@ -230,6 +240,9 @@ function BudgetRow({
               : <> · 남음 {formatAmount(remainingMinor)}</>}
             {count > 0 && ` · ${count}건`}
           </span>
+          {ended && (
+            <span className="debt-d">끝남 — 남은 돈은 더 이상 한도에서 빼 두지 않습니다. 아직 잔고에 안 들어간 지출만 셉니다.</span>
+          )}
         </button>
         <button className="bp-e" onClick={onEdit} aria-label={`${budget.name} 고치기`}>
           <Icon.Settings size={12} />

@@ -30,6 +30,7 @@
  * 그 사이 다른 탭이 같은 id 를 만들었을 때 덮어쓴다. 그래서 실제 쓰기도 트랜잭션 안에서
  * 존재를 확인한다 (`createManyIfAbsent`). 이미 있는 문서는 충돌로 남기고 건드리지 않는다.
  */
+import { conflictingConfirmations } from '../domain/confirm';
 import { isValidDate, normalizeDate } from '../domain/date';
 import type {
   Account, BackupCollection, Budget, Category, CategoryBudget, Debt, Entry, Pin, RecoveryRule, Reserve,
@@ -364,7 +365,7 @@ export const REPLACE_DISABLED_REASON =
  * 파일의 몇 건이 어떻게 됐는지.
  *
  * 건수가 파일 총계와 맞아떨어져야 사용자가 읽고 다음 행동을 정할 수 있다.
- *   파일 총계 = created + skippedExisting + conflicts + failed
+ *   파일 총계 = created + skippedExisting + skippedLinks + conflicts + failed
  */
 export interface MergeCounts {
   created: CreateManyResult;
@@ -373,6 +374,11 @@ export interface MergeCounts {
    * 쓰기를 시도하지도 않았으므로 기존 내용이 그대로다.
    */
   skippedExisting: number;
+  /**
+   * 넣으면 같은 회차를 두 번 세게 되는 확정 거래 (`conflictingConfirmations`).
+   * 예정을 고치며 다시 잇거나 끊은 뒤, 그 전에 받은 백업을 가져올 때 생긴다.
+   */
+  skippedLinks: number;
 }
 
 export type RestoreOutcome =
@@ -409,15 +415,18 @@ export async function safeMerge(incoming: BackupData, io: RestoreIO): Promise<Me
   if (problems.length > 0) return { kind: 'invalid', problems };
 
   const current = await io.fetchAll();
-  const candidates = planMerge({ ...current, recovery: null, ledger: null }, incoming);
-  const skippedExisting = countDocs(incoming) - countDocs(candidates);
+  const fresh = planMerge({ ...current, recovery: null, ledger: null }, incoming);
+  const skippedExisting = countDocs(incoming) - countDocs(fresh);
+  const doubled = conflictingConfirmations(current.entries, fresh.entries);
+  const candidates = { ...fresh, entries: fresh.entries.filter((e) => !doubled.has(e.id)) };
+  const skippedLinks = doubled.size;
 
-  if (countDocs(candidates) === 0) return { kind: 'ok', created: NO_CREATES, skippedExisting };
+  if (countDocs(candidates) === 0) return { kind: 'ok', created: NO_CREATES, skippedExisting, skippedLinks };
 
   const created = await io.createIfAbsent(candidates);
-  if (created.allFailed) return { kind: 'all-failed', created, skippedExisting };
+  if (created.allFailed) return { kind: 'all-failed', created, skippedExisting, skippedLinks };
   if (created.failed.length > 0 || created.conflicts.length > 0) {
-    return { kind: 'partial', created, skippedExisting };
+    return { kind: 'partial', created, skippedExisting, skippedLinks };
   }
-  return { kind: 'ok', created, skippedExisting };
+  return { kind: 'ok', created, skippedExisting, skippedLinks };
 }

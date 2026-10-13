@@ -340,6 +340,40 @@ export async function fetchActualEntries(db: Firestore, uid: string): Promise<En
   return mapSnap(snap, entryFromDoc);
 }
 
+/**
+ * 실제 거래 전량을 구독한다 — 전체 검색이 켜져 있는 동안만.
+ *
+ * 한 번 읽어 두면 검색 결과에서 고치거나 지운 거래가 옛 모습 그대로 남는다. 구독이면
+ * 이 기기의 쓰기가 로컬 캐시를 거쳐 곧바로 결과에 반영된다.
+ */
+export function subscribeActualEntries(
+  db: Firestore, uid: string, cb: SnapSink<Entry>, onError: ErrorSink,
+): Unsubscribe {
+  return onSnapshot(
+    query(col(db, uid, COL.entries), where('money.status', '==', 'actual')), WITH_META,
+    keepingIdentity(entryFromDoc, cb),
+    (err) => onError('actuals', err),
+  );
+}
+
+/** 한 건. 화면 · 계산 · 결산 구독 어디에도 없는 원본을 열 때 쓴다. 없으면 null. */
+export async function fetchEntry(db: Firestore, uid: string, id: string): Promise<Entry | null> {
+  const snap = await getDoc(docIn(db, uid, COL.entries, id));
+  return snap.exists() ? entryFromDoc(snap.id, snap.data() as Record<string, unknown>) : null;
+}
+
+/**
+ * 이 예정을 가리키는 확정 거래 전량. 예정을 고치기 전에 연결을 잃는 것을 찾는 데 쓴다 —
+ * 화면 구독은 보고 있는 달 근처만 받으므로 지난해 확정분이 빠진다.
+ * `complete` 가 false 면 서버에 닿지 못하고 이 기기 캐시만 본 것이다.
+ */
+export async function fetchConfirmationsOf(
+  db: Firestore, uid: string, planId: string,
+): Promise<{ entries: Entry[]; complete: boolean }> {
+  const snap = await getDocs(query(col(db, uid, COL.entries), where('money.plannedRef.entryId', '==', planId)));
+  return { entries: mapSnap(snap, entryFromDoc), complete: !snap.metadata.fromCache };
+}
+
 /** migratedAt 같은 이웃 필드를 지우지 않도록 merge 로 쓴다. */
 export function saveRecoveryRule(db: Firestore, uid: string, rule: RecoveryRule): Promise<void> {
   return setDoc(userDoc(db, uid), { recovery: recoveryRuleToDoc(rule) }, { merge: true });

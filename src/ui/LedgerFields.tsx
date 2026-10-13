@@ -12,7 +12,7 @@
  */
 import { useState } from 'react';
 import { pickableCategories } from '../domain/category';
-import { balanceInclusion } from '../domain/ledger';
+import { balanceInclusion, reflectChoiceFor } from '../domain/ledger';
 import type { Account, Budget, Category, DateISO, Debt, MoneyFields } from '../domain/types';
 import { FLOW_OPTIONS, flowsFor } from './ledgerFlows';
 
@@ -37,11 +37,17 @@ interface Props {
   requireFlow?: boolean;
   /** 예정 항목에는 카테고리만 붙인다 — 확정할 때 기본값이 된다. */
   only?: 'category';
+  /**
+   * "이 잔고에 이미 반영됨" 을 고른 값. undefined 면 아직 손대지 않았다 — 지금 목록 상태를
+   * 보여 주고, 저장할 때 목록을 건드리지 않는다.
+   */
+  reflected?: boolean;
+  onReflected?: (b: boolean) => void;
 }
 
 export function LedgerFields({
   entryId, type, date, money, onMoney, categories, categoriesReady, onSeedCategories,
-  accounts, pockets, debts, methods, requireFlow = false, only,
+  accounts, pockets, debts, methods, requireFlow = false, only, reflected, onReflected,
 }: Props) {
   const flow = money.flow ?? 'normal';
   const [advanced, setAdvanced] = useState(requireFlow || flow !== 'normal' || !!money.debtId);
@@ -52,6 +58,10 @@ export function LedgerFields({
   const canPocket = isOutflow && flow !== 'cardSpend' && pockets.length > 0;
   const ambiguous = accounts.length > 1
     && balanceInclusion({ id: entryId, startDate: date, money }, accounts) === 'ambiguous';
+  const reflect = onReflected
+    ? reflectChoiceFor({ id: entryId, kind: 'money', startDate: date, money }, accounts)
+    : { kind: 'none' as const };
+  const day = (iso: string) => `${Number(iso.slice(5, 7))}월 ${Number(iso.slice(8, 10))}일`;
 
   return (
     <>
@@ -112,6 +122,26 @@ export function LedgerFields({
             {accounts.map((a) => <option key={a.id} value={a.id}>{a.name}</option>)}
           </select>
         </div>
+      )}
+      {reflect.kind === 'ok' && onReflected && (
+        <div className="mod-row">
+          <span className="mod-lbl">잔고</span>
+          <label className="mod-check">
+            <input
+              type="checkbox" checked={reflected ?? reflect.checked}
+              onChange={(e) => onReflected(e.target.checked)}
+            />
+            <span>
+              {accounts.length > 1 ? `'${reflect.account.name}' ` : ''}{day(reflect.account.asOf)} 잔고에 이미 반영됨
+              <span className="mod-hint">잔고를 적기 전에 나간 돈이면 켜세요. 켜면 한도에서 다시 빼지 않습니다.</span>
+            </span>
+          </label>
+        </div>
+      )}
+      {reflect.kind === 'needs-account' && onReflected && (
+        <p className="mod-hint" role="note">
+          잔고를 적은 날의 거래입니다. 계좌를 고르면 그 잔고에 이미 반영됐는지 고를 수 있습니다.
+        </p>
       )}
       {ambiguous && (
         <p className="mod-hint warn" role="note">

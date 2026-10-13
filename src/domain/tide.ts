@@ -505,7 +505,7 @@ export function limitOn(
     .filter((o) => !inAnyBudget(o.entry, budgets));
   total += netOf(actuals);
   // 확보해 둔 돈(생활비 예산 · 세이브)은 쓸 수 있는 한도에서 미리 빠진다.
-  return total - reservedOn(budgets, reserves, entries, date, from, accounts);
+  return total - reservedOn(budgets, reserves, entries, date, from, accounts, today);
 }
 
 /** 머리 숫자 — 다음 입금 전날(또는 30일 뒤)까지 남는 한도. */

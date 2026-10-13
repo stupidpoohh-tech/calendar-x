@@ -229,15 +229,17 @@ export interface CategoryTrend {
 }
 
 /**
- * 월평균에 넣는 기간. **끝났고, 실제 거래가 하나라도 적힌 기간**이다.
+ * 월평균에 넣는 기간 — **끝난** 정산 기간. 거래가 있었는지와 무관하다.
  *
- * 진행 중인 기간을 넣으면 덜 쓴 달이 평균을 끌어내린다. 기록이 하나도 없는 기간도
- * 마찬가지다 — 가계부를 쓰기 전이거나 옮겨 오지 않은 구간이라 "0원을 쓴 달" 이 아니라
- * "모르는 달" 이다. 이관한 기록이 4월부터면, 1~3월을 0으로 세어 평균이 절반이 됐다(실제
- * 화면에서 확인). 한 카테고리만 0인 기간은 그 기간에 다른 거래가 있으므로 진짜 0이다.
+ * 진행 중인 기간을 넣으면 덜 쓴 달이 평균을 끌어내린다. 끝난 기간은 기록이 하나도 없어도
+ * 센다 — 예전에는 소비 · 금융비용 기록이 없으면 "끝난 기간 수" 가 0으로 적혔다(카테고리가
+ * 하나도 없어 셀 줄이 없었다). 기간 수는 달력과 오늘만으로 정해지는 값이다.
+ *
+ * 그래서 다른 앱에서 옮겨 온 이력이 연중에 시작하면, 그 앞의 끝난 기간이 0원으로 평균에
+ * 들어가 평균이 낮아진다. 화면이 기간 수를 함께 적어 그 사실이 보이게 한다.
  */
-export function averagedPeriods(entries: readonly Entry[], periods: readonly Period[], today: DateISO): boolean[] {
-  return periods.map((p) => phaseOf(p, today) === 'past' && actualsIn(entries, p.start, p.end).length > 0);
+export function averagedPeriods(periods: readonly Period[], today: DateISO): boolean[] {
+  return periods.map((p) => phaseOf(p, today) === 'past');
 }
 
 export function categoryTrends(
@@ -247,7 +249,7 @@ export function categoryTrends(
   const perPeriod = periods.map((p) => byCategory(actualsIn(entries, p.start, p.end), side));
   const ids = new Set<string>();
   for (const m of perPeriod) for (const k of m.keys()) ids.add(k);
-  const done = averagedPeriods(entries, periods, today);
+  const done = averagedPeriods(periods, today);
   const averagedOver = done.filter(Boolean).length;
   const out: CategoryTrend[] = [];
   for (const id of ids) {

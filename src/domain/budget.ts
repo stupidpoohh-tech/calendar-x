@@ -32,6 +32,22 @@
  *
  * 어느 쪽이든 한도는 2,300,000 이다. 예산 안에서 쓰는 한 한도는 움직이지 않는다.
  *
+ * ── 끝난 주머니 ────────────────────────────────────────────────
+ *
+ * 주머니는 **그 기간 안에 쓸 돈**을 미리 떼어 두는 것이다. 기간이 끝나면(오늘 > 종료일)
+ * 쓰지 않은 잔액은 더 이상 떼어 둘 이유가 없다 — 예전에는 그 잔액이 끝난 뒤에도 영영
+ * 한도에서 빠져 있었다. 다만 그 주머니에 걸린 지출 중 **아직 잔고에 반영되지 않은 것**은
+ * 실제로 나갈(또는 이미 나간) 돈이라 계속 센다. 걸린 지출은 일반 지출 합계에서 빠지므로,
+ * 여기서마저 빼면 어디에서도 세어지지 않는다.
+ *
+ *   진행 중 · 앞으로     max(총 예산, 쓴 돈) − 잔고에 반영된 지출
+ *   끝남                쓴 돈 − 잔고에 반영된 지출   (남은 잔액의 예약은 풀린다)
+ *
+ *   예) 9월 생활비 700,000 · 쓴 돈 500,000(모두 잔고에 반영) · 오늘 10/13
+ *       예전: 200,000 을 계속 예약   지금: 0
+ *
+ * 종료일 당일까지는 진행 중이다 — 그날 쓸 돈이 남아 있을 수 있다.
+ *
  * ── 세이브 ────────────────────────────────────────────────────
  *
  * 잔고에는 있지만 쓰지 않기로 떼어 둔 돈이다. 날짜가 없으므로 언제나 한도에서 빠진다.
@@ -139,6 +155,11 @@ export function budgetStates(
     .sort((a, b) => a.budget.startDate.localeCompare(b.budget.startDate));
 }
 
+/** 끝났는가 — 오늘이 종료일을 지났다. 끝난 주머니는 남은 잔액을 예약하지 않는다. */
+export function budgetEnded(budget: Budget, today: DateISO): boolean {
+  return budget.endDate < today;
+}
+
 /** 기간이 `date` 를 품는가. 지금 돌고 있는 예산을 고를 때 쓴다. */
 export function budgetCovers(budget: Budget, date: DateISO): boolean {
   return budget.startDate <= date && date <= budget.endDate;
@@ -157,6 +178,8 @@ export function reservedOn(
   budgets: readonly Budget[], reserves: readonly Reserve[],
   entries: readonly Entry[], date: DateISO, unsettledAfter: DateISO,
   accounts?: readonly Account[],
+  /** 오늘. 이 날이 종료일을 지난 주머니는 남은 잔액의 예약을 푼다. 없으면 풀지 않는다. */
+  today?: DateISO,
 ): number {
   let total = 0;
   const confirmed = confirmedSetOf(entries);
@@ -175,7 +198,8 @@ export function reservedOn(
       .filter(inBalance)
       .reduce((t, e) => t + Math.abs(e.money?.amountMinor ?? 0), 0);
 
-    total += Math.max(budget.amountMinor, spent) - settled;
+    const ended = today !== undefined && budgetEnded(budget, today);
+    total += (ended ? spent : Math.max(budget.amountMinor, spent)) - settled;
   }
 
   // 세이브는 날짜가 없다. 언제 보든 같은 금액이 묶여 있다.

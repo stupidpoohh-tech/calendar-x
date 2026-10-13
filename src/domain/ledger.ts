@@ -258,3 +258,63 @@ export function reflectableOn(
     return true;
   });
 }
+
+// ---------- 거래를 적을 때 "이 잔고에 이미 반영됨" ----------
+
+/**
+ * 실제 거래를 입력 · 확정하는 창에서 "이 잔고에 이미 반영됨" 을 고를 수 있는가.
+ *
+ * 잔고를 적은 날 당일의 거래는 고른 것만 잔고 안이다 (`balanceInclusion`). 예전에는 잔고
+ * 편집의 체크리스트에서만 고를 수 있어, 잔고를 먼저 적고 그날 지출을 나중에 적으면 그 지출이
+ * 이미 통장에서 빠졌는데도 한도에서 한 번 더 빠졌다. 그래서 거래 창에서도 고르게 한다.
+ *
+ *   none           고를 일이 없다 — 예정이거나, 현금이 안 움직이거나(카드 사용),
+ *                  거래일이 그 계좌의 잔고 기준일이 아니다
+ *   needs-account  계좌가 여럿인데 어느 계좌인지 모른다 — 계좌를 먼저 고르게 한다
+ *   ok             그 계좌. `checked` 는 지금 목록에 들어 있는가(기존 상태 보존)
+ *
+ * 새 거래의 기본값은 미선택이다 — 고르지 않은 것을 "반영됐다" 고 보지 않는다.
+ */
+export type ReflectChoice =
+  | { kind: 'none' }
+  | { kind: 'needs-account' }
+  | { kind: 'ok'; account: Account; checked: boolean };
+
+export function reflectChoiceFor(
+  e: Pick<Entry, 'id' | 'kind' | 'startDate' | 'money'>, accounts: readonly Account[],
+): ReflectChoice {
+  if (accounts.length === 0 || !isActual(e) || cashSignOf(e as Entry) === 0) return { kind: 'none' };
+  const date = normalizeDate(e.startDate);
+  const assigned = e.money?.accountId ? accounts.find((a) => a.id === e.money?.accountId) : undefined;
+  const listed = accounts.find((a) => (a.reflectedEntryIds ?? []).includes(e.id));
+  const target = assigned ?? (accounts.length === 1 ? accounts[0] : listed);
+  if (!target) {
+    // 계좌를 모른다. 그 날이 어느 계좌의 기준일이기라도 하면 계좌를 고르게 한다.
+    return accounts.some((a) => normalizeDate(a.asOf) === date) ? { kind: 'needs-account' } : { kind: 'none' };
+  }
+  if (normalizeDate(target.asOf) !== date) return { kind: 'none' };
+  return { kind: 'ok', account: target, checked: (target.reflectedEntryIds ?? []).includes(e.id) };
+}
+
+/**
+ * 고른 대로 반영 목록을 고친다. 바뀐 계좌만 돌려준다(같으면 빈 목록 — 쓸 것이 없다).
+ * 다른 계좌의 목록에 남아 있던 같은 id 는 뺀다 — 한 거래가 두 잔고에 들어 있을 수 없다.
+ */
+export function applyReflectChoice(
+  accounts: readonly Account[], entryId: string, targetId: string, reflected: boolean,
+  now = new Date().toISOString(),
+): Account[] {
+  const out: Account[] = [];
+  for (const a of accounts) {
+    const ids = a.reflectedEntryIds ?? [];
+    const has = ids.includes(entryId);
+    const want = a.id === targetId ? reflected : false;
+    if (has === want) continue;
+    out.push({
+      ...a,
+      reflectedEntryIds: want ? [...ids, entryId] : ids.filter((id) => id !== entryId),
+      updatedAt: now,
+    });
+  }
+  return out;
+}

@@ -1,21 +1,29 @@
 /**
- * 가계부 상세 — 내역 · 예산 · 월별 · 통계.
+ * 가계부 렌즈 — 내역 · 현금흐름 · 예산 · 통계.
  *
- * 가계부 렌즈의 달력과 '며칠 버티나' 카드 **아래**에 붙는다. 둘을 대체하지 않는다 —
- * 위는 앞으로의 돈(한도), 아래는 이미 쓴 돈(결산)이다.
+ * 렌즈 바로 아래 한 줄이 보기를 고르고, 그 아래에는 **고른 보기의 본문 하나**만 그린다.
+ * 예전에는 '며칠 버티나' 카드 → 큰 달력 → 상세 탭이 위아래로 쌓여, 아래 탭을 바꿔도 위의
+ * 달력이 남았다. 화면의 중심이 어디인지, 위 달력의 월과 아래 결산 기간 중 무엇이 무엇을
+ * 바꾸는지가 흐렸다. 지금은 보기마다 자기 기간 도구를 하나씩 가진다.
+ *
+ *   내역      정산 기간 하나 — 수입 · 지출 · 수지와 거래 목록, 검색, 거래 추가
+ *   현금흐름  달력 월 하나 — '며칠 버티나' 카드와 날짜별 한도 달력 (App 이 그려 넘긴다)
+ *   예산      정산 기간 하나 — 카테고리 예산(결산용)과 생활비 주머니 · 세이브(한도 예약)
+ *   통계      월별 추이(기간 열둘) · 카테고리(정산 연도) 둘 중 하나
  *
  * ── 숫자를 내는 조건 ─────────────────────────────────────────
  *
  * 합계는 고른 기간의 거래를 **다 받은 뒤에만** 낸다. 아직 못 받았으면 "불러오는 중",
  * 실패했으면 그 사실을, 캐시가 비어 있으면 "확인 전" 을 적는다 — 덜 받은 목록의 합계는
- * 그럴듯하게 틀린 숫자다. 캐시에서 온 값이면 숫자는 내되 한 줄을 덧붙인다.
+ * 그럴듯하게 틀린 숫자다. 캐시에서 온 값이면 숫자는 내되 한 줄을 덧붙인다. 현금흐름은
+ * 결산 구독과 무관하다 — 자기 계산 상태(`calcState`)로 판단한다.
  *
  * ── 무엇이 소비인가 ──────────────────────────────────────────
  *
  * `ledgerStats` 가 정한다. 대출 원금 · 이체 · 카드 대금은 소비가 아니고, 대출 이자는
  * 금융비용으로 따로 적는다. 예정은 합계에 넣지 않는다.
  */
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useState, type ReactNode } from 'react';
 import { setDefaultBudget, setPeriodBudget } from '../domain/category';
 import {
   actualsIn, budgetRows, budgetSummary, flowBadge, groupByDay, historyItems, matchesQuery,
@@ -23,7 +31,8 @@ import {
 } from '../domain/ledgerStats';
 import { formatAmount, formatSigned, parseAmountToMinor } from '../domain/money';
 import {
-  periodByKey, periodName, periodOf, periodRange, phaseOf, shiftPeriodKey, type Period,
+  periodByKey, periodName, periodOf, periodRange, phaseOf, settlementYearOf, settlementYearRange,
+  shiftPeriodKey, type Period,
 } from '../domain/period';
 import type {
   Category, CategoryBudget, Entry, LedgerTabId, PeriodKey,
@@ -34,12 +43,15 @@ import { isComposingEnter } from './ime';
 import { LedgerMonthly, LedgerStats } from './LedgerCharts';
 import { dayLabel, feedVerdict } from './ledgerView';
 
-const TABS: readonly { id: LedgerTabId; label: string }[] = [
+const VIEWS: readonly { id: LedgerTabId; label: string }[] = [
   { id: 'history', label: '내역' },
+  { id: 'cashflow', label: '현금흐름' },
   { id: 'budget', label: '예산' },
-  { id: 'monthly', label: '월별' },
   { id: 'stats', label: '통계' },
 ];
+
+/** 전체 검색 — 켜 둔 동안 실제 거래를 구독한다. 끄면 구독을 끊는다. */
+export type SubscribeAll = (cb: (items: Entry[]) => void, onError: () => void) => () => void;
 
 export interface LedgerScreenProps {
   todayISO: string;
@@ -48,6 +60,7 @@ export interface LedgerScreenProps {
   onTab: (t: LedgerTabId) => void;
   periodKey: PeriodKey;
   onPeriodKey: (k: PeriodKey) => void;
+  /** 통계 · 카테고리의 정산 연도. */
   year: number;
   onYear: (y: number) => void;
   /** 고른 범위의 원본(반복 원본 포함). 화면용으로 펼친 목록이 아니다. */
@@ -61,8 +74,11 @@ export interface LedgerScreenProps {
   onEntryClick: (e: Entry) => void;
   onAdd: (dateISO: string) => void;
   onSaveCategoryBudget: (b: CategoryBudget) => void;
-  /** 전체 기록에서 실제 거래를 찾는다. 사용자가 고른 순간 한 번 읽는다. */
-  onSearchAll: () => Promise<Entry[]>;
+  subscribeAll: SubscribeAll;
+  /** 현금흐름 본문 — 카드와 한도 달력, 달력의 월 이동. App 이 그린다. */
+  cashflow?: ReactNode;
+  /** 예산 보기의 생활비 주머니 · 세이브 구역. App 이 그린다. */
+  pockets?: ReactNode;
 }
 
 export function LedgerScreen(props: LedgerScreenProps) {
@@ -70,11 +86,24 @@ export function LedgerScreen(props: LedgerScreenProps) {
   const period = periodByKey(periodKey, settleDay) ?? periodOf(todayISO, settleDay);
   const current = periodOf(todayISO, settleDay);
   const verdict = feedVerdict(feed);
+  const [statsView, setStatsView] = useState<'trend' | 'category'>('trend');
+
+  const periodNav = (
+    <PeriodNav
+      period={period} todayISO={todayISO} isCurrent={period.key === current.key}
+      onPrev={() => onPeriodKey(shiftPeriodKey(period.key, -1))}
+      onNext={() => onPeriodKey(shiftPeriodKey(period.key, 1))}
+      onNow={() => onPeriodKey(current.key)}
+    />
+  );
+  const gated = (body: ReactNode) => (!verdict.ok
+    ? <p className="led-state" role="status">{verdict.message}</p>
+    : <>{verdict.caveat && <p className="led-caveat">{verdict.caveat}</p>}{body}</>);
 
   return (
-    <section className="led" aria-label="가계부 상세">
-      <nav className="led-tabs" role="tablist" aria-label="가계부 상세 보기">
-        {TABS.map((t) => (
+    <section className="led" aria-label="가계부">
+      <nav className="led-tabs" role="tablist" aria-label="가계부 보기">
+        {VIEWS.map((t) => (
           <button
             key={t.id} role="tab" aria-selected={tab === t.id}
             className={'led-tab' + (tab === t.id ? ' on' : '')}
@@ -85,33 +114,66 @@ export function LedgerScreen(props: LedgerScreenProps) {
         ))}
       </nav>
 
-      {tab !== 'stats' && (
-        <PeriodNav
-          period={period} todayISO={todayISO} isCurrent={period.key === current.key}
-          onPrev={() => onPeriodKey(shiftPeriodKey(period.key, -1))}
-          onNext={() => onPeriodKey(shiftPeriodKey(period.key, 1))}
-          onNow={() => onPeriodKey(current.key)}
-        />
+      {tab === 'history' && (
+        <>
+          <div className="led-toolbar">
+            {periodNav}
+            <button className="btn primary led-add" onClick={() => props.onAdd(todayISO >= period.start && todayISO <= period.end ? todayISO : period.end)}>
+              <Icon.Plus size={14} />거래 추가
+            </button>
+          </div>
+          {gated(<LedgerHistory {...props} period={period} />)}
+        </>
       )}
 
-      {!verdict.ok ? (
-        <p className="led-state" role="status">{verdict.message}</p>
-      ) : (
+      {tab === 'cashflow' && props.cashflow}
+
+      {tab === 'budget' && (
         <>
-          {verdict.caveat && <p className="led-caveat">{verdict.caveat}</p>}
-          {tab === 'history' && <LedgerHistory {...props} period={period} />}
-          {tab === 'budget' && <LedgerBudget {...props} period={period} />}
-          {tab === 'monthly' && (
-            <LedgerMonthly
-              entries={props.entries} settleDay={settleDay} todayISO={todayISO} period={period}
-              onPick={(k) => { onPeriodKey(k); onTab('history'); }}
-            />
+          <div className="led-toolbar">{periodNav}</div>
+          {gated(<LedgerBudget {...props} period={period} />)}
+          {props.pockets && (
+            <section className="led-sec" aria-labelledby="led-pockets-h">
+              <h3 className="led-sec-h" id="led-pockets-h">생활비 주머니 · 세이브</h3>
+              <p className="led-note">
+                한도에서 <b>미리 빼 두는 돈</b>입니다. 위의 카테고리 예산과 달리 &lsquo;며칠 버티나&rsquo; 한도를 줄입니다.
+                기간과 무관하게 지금 살아 있는 주머니를 모두 보여 줍니다.
+              </p>
+              {props.pockets}
+            </section>
           )}
-          {tab === 'stats' && (
+        </>
+      )}
+
+      {tab === 'stats' && (
+        <>
+          <div className="led-toolbar">
+            <div className="seg" role="radiogroup" aria-label="통계 보기">
+              {([['trend', '월별 추이'], ['category', '카테고리']] as const).map(([id, label]) => (
+                <button key={id} role="radio" aria-checked={statsView === id}
+                  className={'seg-btn' + (statsView === id ? ' on' : '')} onClick={() => setStatsView(id)}>
+                  {label}
+                </button>
+              ))}
+            </div>
+          </div>
+          {statsView === 'trend' && (
+            <>
+              <div className="led-toolbar">{periodNav}</div>
+              <p className="led-note led-scope">고른 기간까지 열두 정산 기간을 봅니다.</p>
+              {gated(
+                <LedgerMonthly
+                  entries={props.entries} settleDay={settleDay} todayISO={todayISO} period={period}
+                  onPick={(k) => { onPeriodKey(k); onTab('history'); }}
+                />,
+              )}
+            </>
+          )}
+          {statsView === 'category' && gated(
             <LedgerStats
               entries={props.entries} settleDay={settleDay} todayISO={todayISO}
               year={props.year} onYear={props.onYear} categories={props.categories}
-            />
+            />,
           )}
         </>
       )}
@@ -161,23 +223,29 @@ function TotalsRow({ t, phase }: { t: LedgerTotals; phase: 'past' | 'current' | 
 type Scope = 'period' | 'year' | 'all';
 
 function LedgerHistory({
-  entries, period, todayISO, categories, onEntryClick, onAdd, onSearchAll,
+  entries, period, todayISO, settleDay, categories, onEntryClick, subscribeAll,
 }: LedgerScreenProps & { period: Period }) {
   const [q, setQ] = useState('');
   const [scope, setScope] = useState<Scope>('period');
-  const [all, setAll] = useState<{ state: 'idle' | 'loading' | 'ready' | 'error'; items: Entry[] }>({ state: 'idle', items: [] });
+  const [all, setAll] = useState<{ state: 'loading' | 'ready' | 'error'; items: Entry[] }>({ state: 'loading', items: [] });
+  const [retry, setRetry] = useState(0);
 
+  /*
+    전체 검색은 켜 둔 동안 **구독**한다. 한 번 읽어 두면 결과에서 고치거나 지운 거래가
+    옛 모습으로 남는다. 끄면 구독을 끊는다 — 내역을 보는 내내 전량을 붙들지 않는다.
+  */
   useEffect(() => {
-    if (scope !== 'all' || all.state !== 'idle') return;
+    if (scope !== 'all') return;
     setAll({ state: 'loading', items: [] });
-    onSearchAll().then(
+    return subscribeAll(
       (items) => setAll({ state: 'ready', items }),
       () => setAll({ state: 'error', items: [] }),
     );
-  }, [scope, all.state, onSearchAll]);
+  }, [scope, subscribeAll, retry]);
 
-  const yearStart = `${period.start.slice(0, 4)}-01-01`;
-  const yearEnd = `${period.start.slice(0, 4)}-12-31`;
+  // 정산 연도. 25일 기준 '2026년 1월'(2025/12/25 ~ 2026/1/24) 은 2026년 정산 연도다.
+  const year = settlementYearOf(period.key);
+  const yearRange = useMemo(() => settlementYearRange(year, settleDay), [year, settleDay]);
   const totals = useMemo(() => totalsOf(actualsIn(entries, period.start, period.end)), [entries, period]);
 
   const items: HistoryItem[] = useMemo(() => {
@@ -187,9 +255,9 @@ function LedgerHistory({
         .map((e) => ({ key: e.id, entry: e, date: e.startDate, planned: false, amount: Math.abs(e.money?.amountMinor ?? 0), sign: e.money?.type === 'income' ? 1 as const : -1 as const }))
         .sort((a, b) => b.date.localeCompare(a.date));
     }
-    const [from, to] = scope === 'year' ? [yearStart, yearEnd] : [period.start, period.end];
+    const [from, to] = scope === 'year' ? [yearRange.start, yearRange.end] : [period.start, period.end];
     return historyItems(entries, from, to).filter((i) => matchesQuery(i.entry, q, categories));
-  }, [scope, all.items, entries, period, q, categories, yearStart, yearEnd]);
+  }, [scope, all.items, entries, period, q, categories, yearRange]);
 
   const groups = useMemo(() => groupByDay(items), [items]);
   const catName = (id: string | null | undefined) => (id ? categories.find((c) => c.id === id)?.name ?? '알 수 없는 카테고리' : null);
@@ -206,23 +274,26 @@ function LedgerHistory({
           onKeyDown={(e) => { if (isComposingEnter(e)) e.preventDefault(); }}
         />
         <div className="seg" role="radiogroup" aria-label="검색 범위">
-          {([['period', '이 기간'], ['year', `${period.start.slice(0, 4)}년`], ['all', '전체']] as const).map(([id, label]) => (
+          {([['period', '이 기간'], ['year', `${year}년`], ['all', '전체']] as const).map(([id, label]) => (
             <button
               key={id} role="radio" aria-checked={scope === id}
               className={'seg-btn' + (scope === id ? ' on' : '')}
-              onClick={() => { setScope(id); if (id === 'all') setAll({ state: 'idle', items: [] }); }}
+              onClick={() => setScope(id)}
             >
               {label}
             </button>
           ))}
         </div>
       </div>
+      {scope === 'year' && (
+        <p className="led-note led-scope">{year}년 정산 연도 · {periodRange({ key: period.key, start: yearRange.start, end: yearRange.end })}</p>
+      )}
       {scope === 'all' && <p className="led-note">전체 검색은 실제 거래만 찾습니다. 예정은 기간 · 연도 범위에서 보입니다.</p>}
 
       {scope === 'all' && all.state === 'loading' && <p className="led-state" role="status">전체 기록을 찾는 중입니다.</p>}
       {scope === 'all' && all.state === 'error' && (
         <p className="led-state" role="alert">
-          전체 기록을 불러오지 못했습니다. 연결을 확인한 뒤 <button className="set-redo" onClick={() => setAll({ state: 'idle', items: [] })}>다시 찾기</button>
+          전체 기록을 불러오지 못했습니다. 연결을 확인한 뒤 <button className="set-redo" onClick={() => setRetry((n) => n + 1)}>다시 찾기</button>
         </p>
       )}
 
@@ -272,9 +343,6 @@ function LedgerHistory({
         </ol>
       ))}
 
-      <button className="debt-add" onClick={() => onAdd(todayISO >= period.start && todayISO <= period.end ? todayISO : period.end)}>
-        + 거래 추가
-      </button>
     </div>
   );
 }
@@ -309,6 +377,7 @@ function LedgerBudget({
 
   return (
     <div className="led-body">
+      <h3 className="led-sec-h">카테고리 예산</h3>
       <div className="led-totals">
         <div><span>예산</span><b className="num">{formatAmount(sum.budgeted)}</b></div>
         <div><span>예산 안 지출</span><b className="num">{formatAmount(sum.actualInBudgeted)}</b></div>
@@ -321,7 +390,7 @@ function LedgerBudget({
         <p className="led-note">
           전체 지출 {formatAmount(sum.actual)}
           {sum.overCount > 0 && <> · <b className="minus">초과 {sum.overCount}개</b></>}
-          {' '}· 카테고리 예산은 결산용입니다. 생활비 주머니와 달리 한도에서 미리 빼지 않습니다
+          {' '}· 카테고리 예산은 <b>결산용</b>입니다. 쓴 돈과 견주기만 하고, 아래 생활비 주머니와 달리 한도에서 미리 빼지 않습니다
           {phase === 'current' && ' · 진행 중인 기간입니다'}
         </p>
       </div>

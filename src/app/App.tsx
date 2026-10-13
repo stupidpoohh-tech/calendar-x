@@ -7,10 +7,12 @@ import {
   describeFirestoreError, isPermissionDenied, RULES_CONSOLE_PATH, RULES_DEPLOY_COMMAND,
 } from '../data/errors';
 import { getFirebase } from '../data/firebase';
+import { LEDGER_BATCH_MAX, ledgerBatchSize } from '../data/pendingWrites';
 import { planFromFiles, readImportFiles, writeLedgerImport, type ImportIO } from '../data/ledgerImportRun';
 import { convertLegacyItems, readLegacyItems, summarize } from '../data/migrate';
 import {
-  createManyIfAbsent, fetchActualEntries, fetchAll, fetchLedgerSettings, markMigrated,
+  createManyIfAbsent, fetchAll, fetchConfirmationsOf, fetchEntry, fetchLedgerSettings, markMigrated,
+  subscribeActualEntries,
   readMigrationMark, writeMany,
 } from '../data/repo';
 import {
@@ -24,17 +26,19 @@ import {
 } from '../domain/shared';
 import { formatAmount } from '../domain/money';
 import { applyFilters, collectTags, emptyFilters, hasActiveFilter } from '../domain/filters';
-import { baseIdOf, materialize, occurrenceDateOf } from '../domain/recurrence';
+import { baseIdOf, isVirtualEntry, materialize, occurrenceDateOf } from '../domain/recurrence';
 import { defaultCategories } from '../domain/category';
-import { confirmationOf } from '../domain/confirm';
-import { isActual } from '../domain/ledger';
+import {
+  confirmationOf, confirmationsOfPlan, lostConfirmations, planScheduleChanged, reflectedAfterRename, repairLink,
+} from '../domain/confirm';
+import { applyReflectChoice, isActual, reflectChoiceFor } from '../domain/ledger';
 import { isRecoveryEntry } from '../domain/recovery';
 import type {
-  Account, Budget, Category, CategoryBudget, Entry, Filters, LensId, SharedInvite, SharedNote, SharedTodoItem,
+  Account, Budget, Category, CategoryBudget, Entry, Filters, LedgerTabId, LensId, SharedInvite, SharedNote, SharedTodoItem,
   TaskStatus, ViewId, YearMonth,
 } from '../domain/types';
 import { ConfirmSheet } from '../ui/ConfirmSheet';
-import { LedgerScreen } from '../ui/LedgerScreen';
+import { LedgerScreen, type SubscribeAll } from '../ui/LedgerScreen';
 import { LedgerImportPreview, LedgerImportProblems } from '../ui/LedgerImport';
 import { monthsOfPeriods, periodByKey, periodOf, periodsBetween, periodsOfYear, shiftPeriodKey } from '../domain/period';
 import { combineFeeds, FEED_DEMO } from './useStore';
@@ -44,7 +48,7 @@ import { BrandFooter } from '../ui/BrandFooter';
 import { DaySheet } from '../ui/DaySheet';
 import { calcStateOf, type CalcState } from '../ui/calcState';
 import { TideBar } from '../ui/TideBar';
-import { EntryModal } from '../ui/EntryModal';
+import { EntryModal, type SaveOptions } from '../ui/EntryModal';
 import { FilterPanel } from '../ui/FilterPanel';
 import { Icon } from '../ui/Icon';
 import { ListView } from '../ui/ListView';
@@ -406,9 +410,21 @@ function Workspace({ uid, user, onSignOut }: WorkspaceProps) {
    * **올라간 적 없는 것은 지우지 않는다** (`sharedChange`). 무엇을 보낼지는 저장 전
    * 값과 함께 봐야 정해진다 — 그 판정은 도메인에 있다.
    */
-  const persist = useCallback((e: Entry) => {
+  const persist = useCallback((e: Entry, accounts: readonly Account[] = []) => {
     if (isAnon || !uid) { void promptLogin(); return; }
-    commit({ kind: 'entry', label: '항목', summary: displayTitle(e), payload: e });
+    /*
+      계좌의 반영 목록이 함께 바뀌면 한 배치로 보낸다. 거래만 들어가고 목록이 실패하면(또는
+      그 반대) 같은 돈이 한도에서 두 번 빠지거나 한 번도 안 빠진다. 배치는 오프라인 큐에서도
+      한 덩어리로 나가고, 거절되면 통째로 "저장하지 못한 것" 에 남아 다시 보낼 수 있다.
+    */
+    if (accounts.length > 0) {
+      commit({
+        kind: 'ledgerBatch', label: '거래 · 잔고 반영', summary: displayTitle(e),
+        payload: { entries: [e], deleteIds: [], accounts: [...accounts] },
+      });
+    } else {
+      commit({ kind: 'entry', label: '항목', summary: displayTitle(e), payload: e });
+    }
     // 저장 전 값. 새 항목이면 없고, 없으면 보드에도 없다.
     const before = store.entries.find((x) => x.id === baseIdOf(e.id)) ?? null;
     const change = sharedChange(before, e, today);
@@ -416,10 +432,115 @@ function Workspace({ uid, user, onSignOut }: WorkspaceProps) {
     else if (change === 'remove') shared.removeEntry(e.id);
   }, [uid, isAnon, promptLogin, commit, shared, today, store.entries]);
 
-  const handleSave = useCallback((e: Entry) => {
-    persist(e);
+  /**
+   * 예정의 날짜 · 반복을 고치면 확정해 둔 실제 거래가 없는 회차를 가리키게 된다.
+   * 저장 **전에** 서버에서 그 예정의 확정 거래를 모두 찾아(화면 구독은 보고 있는 달 근처뿐이다)
+   * 연결을 잃는 것을 보여 주고, 다시 이을지 끊을지 고르게 한다. 예정 · 확정 거래 · 계좌 반영
+   * 목록은 한 배치로 나간다 — 예정만 들어가면 같은 돈이 두 번 세어진다.
+   *
+   * true 면 저장했다(또는 고칠 연결이 없었다). false 면 사용자가 취소했다 — 편집 창을 닫지 않는다.
+   */
+  const saveWithLinks = useCallback(async (after: Entry): Promise<boolean> => {
+    if (isAnon || !uid) { void promptLogin(); return false; }
+    let found: Entry[] = [];
+    let complete = true;
+    try {
+      const r = await fetchConfirmationsOf(db, uid, after.id);
+      found = r.entries;
+      complete = r.complete;
+    } catch {
+      complete = false;
+    }
+    // 이 기기에서 방금 적어 아직 서버에 닿지 않은 확정도 함께 본다.
+    const known = new Map<string, Entry>();
+    for (const x of [...found, ...confirmationsOfPlan([...store.entries, ...store.tideEntries], after.id)]) known.set(x.id, x);
+    const lost = lostConfirmations(after, [...known.values()]);
+    if (lost.length === 0) {
+      persist(after);
+      return true;
+    }
+
+    const n = (v: number) => v.toLocaleString('ko-KR');
+    const day = (d: string) => d.slice(5).replace('-', '.');
+    const relinkable = lost.filter((l) => l.candidate).length;
+    const choice = await dialog.choose(`확정한 거래 ${n(lost.length)}건이 예정과의 연결을 잃습니다`, [
+      ...(relinkable > 0 ? [{
+        id: 'relink' as const,
+        label: relinkable === lost.length ? '새 회차에 다시 잇고 저장' : `${n(relinkable)}건은 새 회차에 다시 잇고, 나머지는 끊고 저장`,
+        hint: '이은 회차는 예정에서 빠져 두 번 세지 않습니다. 실제 날짜 · 금액 · 분류는 그대로입니다.',
+      }] : []),
+      {
+        id: 'unlink' as const,
+        label: '연결을 끊고 저장',
+        hint: '실제 거래는 그대로 남습니다. 새 회차는 확정 전 예정으로 다시 계산됩니다.',
+      },
+    ], (
+      <>
+        <p>예정의 날짜나 반복을 바꾸면, 이미 확정한 회차가 새 규칙에 없게 됩니다. 그대로 두면 실제 거래와 새 회차의 예정이 함께 계산됩니다.</p>
+        <ul className="dlg-skips">
+          {lost.slice(0, 8).map((l) => (
+            <li key={l.actual.id}>
+              <span className="num">{day(l.from)} 회차 · {formatAmount(l.actual.money!.amountMinor)}</span> {l.actual.title.trim() || '(제목 없음)'}
+              {' → '}{l.candidate ? <b>{day(l.candidate)} 회차에 이을 수 있음</b> : '이을 새 회차 없음 (끊습니다)'}
+            </li>
+          ))}
+          {lost.length > 8 && <li>그 외 {n(lost.length - 8)}건</li>}
+        </ul>
+        {!complete && (
+          <p className="dlg-warn">서버에 닿지 못해 이 기기에 있는 확정만 확인했습니다. 다른 기기에서 확정한 회차가 더 있을 수 있습니다.</p>
+        )}
+      </>
+    ));
+    if (!choice) return false;
+
+    const repairs = lost.map((l) => repairLink(l, choice === 'relink' && l.candidate ? 'relink' : 'unlink', after.id, newId));
+    const renamed = new Map(repairs.map((r) => [r.removeId, r.entry.id] as const));
+    const payload = {
+      entries: [after, ...repairs.map((r) => r.entry)],
+      deleteIds: repairs.map((r) => r.removeId),
+      accounts: reflectedAfterRename(store.accounts, renamed),
+    };
+    if (ledgerBatchSize(payload) > LEDGER_BATCH_MAX) {
+      dialog.toast(`한 번에 고칠 거래가 너무 많습니다(${n(ledgerBatchSize(payload))}건). 반복을 나눠 고쳐 주세요.`, 'bad');
+      return false;
+    }
+    commit({ kind: 'ledgerBatch', label: '예정 · 확정 거래', summary: `${displayTitle(after)} · 확정 ${n(lost.length)}건`, payload });
+    return true;
+  }, [isAnon, uid, promptLogin, db, store.entries, store.tideEntries, store.accounts, persist, dialog, commit]);
+
+  /** "이 잔고에 이미 반영됨" 을 고른 대로 바뀌는 계좌. 손대지 않았거나 고를 일이 없으면 빈 목록. */
+  const reflectChanges = useCallback((e: Entry, reflected: boolean | undefined): Account[] => {
+    if (reflected === undefined) return [];
+    const choice = reflectChoiceFor(e, store.accounts);
+    if (choice.kind !== 'ok') return [];
+    return applyReflectChoice(store.accounts, e.id, choice.account.id, reflected);
+  }, [store.accounts]);
+
+  const handleSave = useCallback(async (e: Entry, opts?: SaveOptions) => {
+    const before = findBase(e.id);
+    if (before && planScheduleChanged(before, e)) {
+      if (await saveWithLinks(e)) closeModal();
+      return;
+    }
+    persist(e, reflectChanges(e, opts?.reflected));
     closeModal();
-  }, [persist, closeModal]);
+  }, [findBase, saveWithLinks, persist, closeModal, reflectChanges]);
+
+  /**
+   * 실제 거래를 지운다. 계좌의 반영 목록에 그 id 가 남아 있으면 함께 뺀다 — 확정 거래 · 이관
+   * 거래는 id 가 정해져 있어, 같은 회차를 다시 확정하거나 같은 파일을 다시 가져오면 같은 id 가
+   * 옛 목록에 걸려 고르지도 않았는데 "반영됨" 이 된다.
+   */
+  const deleteActual = useCallback((id: string, label: string, summary: string) => {
+    const accounts = store.accounts
+      .filter((a) => (a.reflectedEntryIds ?? []).includes(id))
+      .map((a) => ({ ...a, reflectedEntryIds: (a.reflectedEntryIds ?? []).filter((x) => x !== id), updatedAt: new Date().toISOString() }));
+    if (accounts.length > 0) {
+      commit({ kind: 'ledgerBatch', label, summary, payload: { entries: [], deleteIds: [id], accounts } });
+    } else {
+      commit({ kind: 'entryDelete', label, summary, payload: { id } });
+    }
+  }, [store.accounts, commit]);
 
   /**
    * 예정 회차를 확정하러 간다. 이미 확정된 회차면 새로 만들지 않고 그 실제 거래를 연다 —
@@ -447,9 +568,9 @@ function Workspace({ uid, user, onSignOut }: WorkspaceProps) {
     });
     if (!ok) return;
     closeModal();
-    commit({ kind: 'entryDelete', label: '확정 취소', summary: displayTitle(actual), payload: { id: actual.id } });
+    deleteActual(actual.id, '확정 취소', displayTitle(actual));
     dialog.toast('확정을 취소했습니다. 예정이 다시 보입니다.');
-  }, [isAnon, uid, promptLogin, dialog, closeModal, commit]);
+  }, [isAnon, uid, promptLogin, dialog, closeModal, deleteActual]);
 
   /**
    * 기본 카테고리 만들기. id 가 정해져 있어 두 기기에서 동시에 눌러도 같은 문서로 모인다.
@@ -528,6 +649,10 @@ function Workspace({ uid, user, onSignOut }: WorkspaceProps) {
     return monthsOfPeriods(p ? [...ps, p] : ps);
   }, [ledgerPeriod, ledgerYear, settleDay]);
   const ledgerOn = lens === 'money' && !sharedOpen;
+  // 필터는 달력 · 리스트에 그리는 항목을 거른다. 가계부에서는 그 달력이 있는 현금흐름에서만 뜻이 있다.
+  // 마지막 보기는 세션 동안만 기억한다. 앱을 새로 열면 내역부터 — 가계부의 기본 화면이다.
+  const [ledgerTab, setLedgerTab] = useState<LedgerTabId>('history');
+  const filterUsable = !ledgerOn || ledgerTab === 'cashflow';
   const ledgerRange = useLedgerFeed(uid, ledgerMonths, ledgerOn && !isAnon);
   const ledgerEntries = useMemo(() => {
     if (isAnon) return store.entries;
@@ -546,16 +671,27 @@ function Workspace({ uid, user, onSignOut }: WorkspaceProps) {
    * 찾는다. 원본을 못 찾으면 열지 않는다 — 펼친 발생분(`원본id@날짜`)을 편집해 저장하면
    * 그 id 로 새 문서가 생긴다.
    */
-  const openLedgerEntry = useCallback((e: Entry) => {
-    const base = findBase(e.id) ?? ledgerEntries.find((x) => x.id === baseIdOf(e.id));
-    if (!base) { dialog.toast('이 항목의 원본을 아직 받지 못했습니다. 잠시 뒤 다시 눌러 주세요.', 'bad'); return; }
+  const openLedgerEntry = useCallback(async (e: Entry) => {
+    /*
+      원본 찾기 순서: 화면 · 계산 목록 → 결산 목록 → (펼친 발생분이 아니면) 받은 항목 그 자체
+      → 서버에서 한 건. 전체 검색 결과는 구독 창 밖의 지난 거래라 앞의 둘에 없다 — 예전에는
+      거기서 멈춰 열리지 않았다. 펼친 발생분(`원본id@날짜`)은 그대로 열지 않는다. 그 id 로
+      저장하면 새 문서가 생긴다.
+    */
+    let base = findBase(e.id) ?? ledgerEntries.find((x) => x.id === baseIdOf(e.id))
+      ?? (isVirtualEntry(e) || e.id !== baseIdOf(e.id) ? undefined : e);
+    if (!base && !isAnon && uid) {
+      try { base = (await fetchEntry(db, uid, baseIdOf(e.id))) ?? undefined; } catch { /* 아래에서 알린다 */ }
+    }
+    if (!base) { dialog.toast('이 항목의 원본을 찾지 못했습니다. 연결을 확인한 뒤 다시 눌러 주세요.', 'bad'); return; }
     if (isRecoveryEntry(base)) { setRecoveryId(base.id); return; }
     setModal({ open: true, mode: 'edit', entry: base, occurrence: occurrenceDateOf(e.id) ?? base.startDate });
-  }, [findBase, ledgerEntries, dialog]);
+  }, [findBase, ledgerEntries, dialog, isAnon, uid, db]);
 
-  const searchAllActuals = useCallback(async (): Promise<Entry[]> => {
-    if (isAnon || !uid) return store.entries.filter(isActual);
-    return fetchActualEntries(db, uid);
+  /** 전체 검색. 켜 둔 동안 실제 거래를 구독해, 결과에서 고치거나 지운 것이 곧바로 반영된다. */
+  const subscribeAllActuals = useCallback<SubscribeAll>((cb, onError) => {
+    if (isAnon || !uid) { cb(store.entries.filter(isActual)); return () => undefined; }
+    return subscribeActualEntries(db, uid, (items) => cb(items), () => onError());
   }, [isAnon, uid, db, store.entries]);
 
   /** 카테고리가 "없음" 을 확정할 수 있는가. 캐시가 비어 있으면 아직 모른다. */
@@ -709,14 +845,17 @@ function Workspace({ uid, user, onSignOut }: WorkspaceProps) {
       아래 토스트는 **이 기기에 반영됐다**는 뜻이다. 서버 확정은 다른 사건이라,
       거절당하면 그 목록이 뜬다.
     */
-    commit({
-      kind: 'entryDelete', label: '항목 삭제',
-      summary: displayTitle(e), payload: { id: baseIdOf(e.id) },
-    });
+    if (isActual(e)) deleteActual(baseIdOf(e.id), '항목 삭제', displayTitle(e));
+    else {
+      commit({
+        kind: 'entryDelete', label: '항목 삭제',
+        summary: displayTitle(e), payload: { id: baseIdOf(e.id) },
+      });
+    }
     // 올라간 적 없는 항목은 지울 것도 없다 — 보내 봐야 규칙이 거절한다.
     if (isShareableTask(e, today)) shared.removeEntry(baseIdOf(e.id));
     dialog.toast('삭제했습니다.');
-  }, [uid, isAnon, promptLogin, dialog, closeModal, recovery, commit, shared, today]);
+  }, [uid, isAnon, promptLogin, dialog, closeModal, recovery, commit, shared, today, deleteActual]);
 
   const handleStatus = useCallback((e: Entry, status: TaskStatus) => {
     const base = store.entries.find((x) => x.id === baseIdOf(e.id)) ?? e;
@@ -986,6 +1125,12 @@ function Workspace({ uid, user, onSignOut }: WorkspaceProps) {
                   {' '}지금 내용을 그대로 두었습니다.
                 </p>
               )}
+              {outcome.skippedLinks > 0 && (
+                <p>
+                  같은 회차를 두 번 세게 될 확정 거래 <b>{outcome.skippedLinks.toLocaleString('ko-KR')}건</b>은 넣지 않았습니다 —
+                  {' '}예정을 고치며 다시 잇거나 끊은 거래의 옛 사본입니다.
+                </p>
+              )}
               {failed.length > 0 && (
                 <>
                   <p><b>{failed.length.toLocaleString('ko-KR')}건</b>은 저장하지 못했습니다.</p>
@@ -1008,13 +1153,16 @@ function Workspace({ uid, user, onSignOut }: WorkspaceProps) {
         return;
       }
 
+      const linkNote = outcome.skippedLinks > 0
+        ? ` 같은 회차를 두 번 세게 될 확정 거래 ${outcome.skippedLinks.toLocaleString('ko-KR')}건은 넣지 않았습니다(예정을 고치며 다시 잇거나 끊은 거래의 옛 사본).`
+        : '';
       dialog.toast(
-        outcome.created.created > 0
+        (outcome.created.created > 0
           ? `${outcome.created.created.toLocaleString('ko-KR')}건을 더했습니다.`
             + (outcome.skippedExisting > 0
               ? ` 이미 있는 ${outcome.skippedExisting.toLocaleString('ko-KR')}건은 그대로 두었습니다.`
               : '')
-          : '더할 것이 없습니다. 파일의 항목이 모두 이미 있습니다.',
+          : '더할 것이 없습니다. 파일의 항목이 모두 이미 있습니다.') + linkNote,
       );
     } catch (err) {
       dialog.toast(
@@ -1284,7 +1432,8 @@ function Workspace({ uid, user, onSignOut }: WorkspaceProps) {
           /></div>
         )}
 
-          {!sharedOpen && (
+          {/* 가계부는 보기마다 자기 기간 도구를 가진다 — 위에 달력 월을 하나 더 두면 무엇이 무엇을 바꾸는지 흐려진다. */}
+          {!sharedOpen && !ledgerOn && (
         <div className="tool-l">
           <button className="ico-btn sm" aria-label="이전 달"
             onClick={() => setCursor((d) => new Date(d.getFullYear(), d.getMonth() - 1, 1))}>
@@ -1349,11 +1498,13 @@ function Workspace({ uid, user, onSignOut }: WorkspaceProps) {
             <div className="mobile-more-panel" onClick={(e) => {
               if ((e.target as HTMLElement).closest('button')) e.currentTarget.closest('details')?.removeAttribute('open');
             }}>
-              {!sharedOpen && <>
+              {!sharedOpen && !ledgerOn && <>
                 <button onClick={() => set('view', 'calendar')} aria-pressed={view === 'calendar'}><Icon.Calendar size={16} />월간 보기</button>
                 <button onClick={() => set('view', 'list')} aria-pressed={view === 'list'}><Icon.List size={16} />리스트 보기</button>
-                <button onClick={() => setShowFilters((x) => !x)} aria-expanded={showFilters}><Icon.Filter size={16} />필터{hasActiveFilter(filters) ? ' · 적용 중' : ''}</button>
               </>}
+              {!sharedOpen && filterUsable && (
+                <button onClick={() => setShowFilters((x) => !x)} aria-expanded={showFilters}><Icon.Filter size={16} />필터{hasActiveFilter(filters) ? ' · 적용 중' : ''}</button>
+              )}
               {isAnon
                 ? <button onClick={() => setShowAuth(true)}>로그인 · 가입</button>
                 : <button onClick={() => setShowSettings(true)}><Icon.Settings size={16} />설정</button>}
@@ -1363,6 +1514,7 @@ function Workspace({ uid, user, onSignOut }: WorkspaceProps) {
         <div className="header-right">
           {!sharedOpen && (
         <div className="tool-r">
+          {!ledgerOn && (
           <div className="seg">
             {(['calendar', 'list'] as ViewId[]).map((v) => (
               <button key={v} className={'seg-btn' + (view === v ? ' on' : '')} aria-label={v === 'calendar' ? '캘린더 보기' : '리스트 보기'} aria-pressed={view === v} onClick={() => set('view', v)}>
@@ -1371,6 +1523,8 @@ function Workspace({ uid, user, onSignOut }: WorkspaceProps) {
               </button>
             ))}
           </div>
+          )}
+          {filterUsable && (
           <button
             className={'ico-btn' + (showFilters || hasActiveFilter(filters) ? ' on' : '')}
             onClick={() => setShowFilters((x) => !x)}
@@ -1379,6 +1533,7 @@ function Workspace({ uid, user, onSignOut }: WorkspaceProps) {
             <Icon.Filter size={15} />
             {hasActiveFilter(filters) && <span className="badge" />}
           </button>
+          )}
           <button className="add-btn" aria-label="일정 추가" onClick={() => openCreate()}>
             <Icon.Plus size={16} /><span className="lbl">추가</span>
           </button>
@@ -1464,7 +1619,7 @@ function Workspace({ uid, user, onSignOut }: WorkspaceProps) {
       <>
 
 
-      {showFilters && (
+      {showFilters && filterUsable && (
         <FilterPanel
           filters={filters}
           onChange={setFilters}
@@ -1554,8 +1709,50 @@ function Workspace({ uid, user, onSignOut }: WorkspaceProps) {
           />
         )}
 
-        {/* 가계부 렌즈도 카드 하나다. 대출과 고정 메모는 며칠 버티나 카드 안쪽에 접힌다. */}
-        {lens === 'money' && (
+
+
+      </div>
+
+      <main className="main">
+        {ledgerOn ? (
+          <LedgerScreen
+            todayISO={today}
+            settleDay={settleDay}
+            tab={ledgerTab}
+            onTab={setLedgerTab}
+            periodKey={ledgerPeriod}
+            onPeriodKey={(k) => { setLedgerPeriod(k); setLedgerYear(null); }}
+            year={ledgerYear}
+            onYear={setLedgerYear}
+            entries={ledgerEntries}
+            feed={ledgerFeed}
+            categories={store.categories}
+            categoryBudgets={store.categoryBudgets}
+            categoriesReady={categoriesReady}
+            onSeedCategories={seedCategories}
+            onEntryClick={openLedgerEntry}
+            onAdd={(iso) => openCreate({ startDate: iso })}
+            onSaveCategoryBudget={saveCategoryBudget}
+            subscribeAll={subscribeAllActuals}
+            cashflow={(
+              <div className="led-cashflow">
+                {/* 현금흐름의 기간 도구는 달력 월 하나다. 한도 자체는 오늘의 함수라 월을 넘겨도 카드 숫자는 그대로다. */}
+                <div className="led-toolbar">
+                  <div className="led-period">
+                    <button className="ico-btn sm" aria-label="이전 달"
+                      onClick={() => setCursor((d) => new Date(d.getFullYear(), d.getMonth() - 1, 1))}>
+                      <Icon.Chevron size={15} dir="left" />
+                    </button>
+                    <button className="led-period-t month-btn" onClick={() => setShowPicker(true)}>
+                      <strong>{monthLabel}</strong><Icon.Chevron size={12} dir="down" />
+                    </button>
+                    <button className="ico-btn sm" aria-label="다음 달"
+                      onClick={() => setCursor((d) => new Date(d.getFullYear(), d.getMonth() + 1, 1))}>
+                      <Icon.Chevron size={15} />
+                    </button>
+                    <button className="today-btn" onClick={() => setCursor(new Date())}>오늘</button>
+                  </div>
+                </div>
           <TideBar
             todayISO={today}
             accounts={store.accounts}
@@ -1570,12 +1767,50 @@ function Workspace({ uid, user, onSignOut }: WorkspaceProps) {
             collapsed={prefs.moneyCardCollapsed}
             onToggleCollapsed={() => set('moneyCardCollapsed', !prefs.moneyCardCollapsed)}
           >
+            <MoneyPanel
+              debts={store.debts}
+              collapsed={prefs.debtsCollapsed}
+              onToggleCollapsed={() => set('debtsCollapsed', !prefs.debtsCollapsed)}
+              onSaveDebt={(d) => {
+                if (isAnon || !uid) { void promptLogin(); return; }
+                commit({ kind: 'debt', label: '대출', summary: d.name, payload: d });
+              }}
+              onDeleteDebt={async (d) => {
+                if (isAnon || !uid) { void promptLogin(); return; }
+                const ok = await dialog.confirm({ title: `'${d.name}'을(를) 삭제할까요?`, danger: true, confirmLabel: '삭제' });
+                if (ok) commit({ kind: 'debtDelete', label: '대출 삭제', summary: d.name, payload: { id: d.id } });
+              }}
+            />
+          </TideBar>
+          <MonthCalendar
+            cursor={cursor}
+            onCursorChange={setCursor}
+            entries={visible}
+            tideEntries={store.tideEntries}
+            budgets={store.budgets}
+            reserves={store.reserves}
+            // 계산 자료를 못 받았으면 덮는 달이 없는 것과 같다 — 셀에 숫자를 적지 않는다.
+            tideMonths={calcState.kind === 'ready' ? store.tideMonths : EMPTY_MONTHS}
+            accounts={store.accounts}
+            hasBalance={hasBalance}
+            lens={lens}
+            weekStart={prefs.weekStart}
+            todayISO={today}
+            onEntryClick={openEdit}
+            onDayOpen={setDaySheet}
+            onDayCreate={(iso) => openCreate({ startDate: iso })}
+          />
+              </div>
+            )}
+            pockets={(
             <BudgetPanel
               budgets={store.budgets}
               reserves={store.reserves}
               entries={store.tideEntries}
-              collapsed={prefs.budgetsCollapsed}
-              onToggleCollapsed={() => set('budgetsCollapsed', !prefs.budgetsCollapsed)}
+              collapsed={false}
+              onToggleCollapsed={() => undefined}
+              bare
+              todayISO={today}
               onSaveBudget={(b) => {
                 if (isAnon || !uid) { void promptLogin(); return; }
                 commit({ kind: 'budget', label: '생활비', summary: b.name, payload: b });
@@ -1603,28 +1838,9 @@ function Workspace({ uid, user, onSignOut }: WorkspaceProps) {
               onEntryClick={openEdit}
               onLinkEntry={linkToPocket}
             />
-            <MoneyPanel
-              debts={store.debts}
-              collapsed={prefs.debtsCollapsed}
-              onToggleCollapsed={() => set('debtsCollapsed', !prefs.debtsCollapsed)}
-              onSaveDebt={(d) => {
-                if (isAnon || !uid) { void promptLogin(); return; }
-                commit({ kind: 'debt', label: '대출', summary: d.name, payload: d });
-              }}
-              onDeleteDebt={async (d) => {
-                if (isAnon || !uid) { void promptLogin(); return; }
-                const ok = await dialog.confirm({ title: `'${d.name}'을(를) 삭제할까요?`, danger: true, confirmLabel: '삭제' });
-                if (ok) commit({ kind: 'debtDelete', label: '대출 삭제', summary: d.name, payload: { id: d.id } });
-              }}
-            />
-          </TideBar>
-        )}
-
-
-      </div>
-
-      <main className="main">
-        {view === 'calendar' ? (
+            )}
+          />
+        ) : view === 'calendar' ? (
           <MonthCalendar
             cursor={cursor}
             onCursorChange={setCursor}
@@ -1651,28 +1867,6 @@ function Workspace({ uid, user, onSignOut }: WorkspaceProps) {
             todayISO={today}
             onEntryClick={openEdit}
             onReorder={handleReorder}
-          />
-        )}
-        {ledgerOn && (
-          <LedgerScreen
-            todayISO={today}
-            settleDay={settleDay}
-            tab={prefs.ledgerTab}
-            onTab={(t) => set('ledgerTab', t)}
-            periodKey={ledgerPeriod}
-            onPeriodKey={(k) => { setLedgerPeriod(k); setLedgerYear(null); }}
-            year={ledgerYear}
-            onYear={setLedgerYear}
-            entries={ledgerEntries}
-            feed={ledgerFeed}
-            categories={store.categories}
-            categoryBudgets={store.categoryBudgets}
-            categoriesReady={categoriesReady}
-            onSeedCategories={seedCategories}
-            onEntryClick={openLedgerEntry}
-            onAdd={(iso) => openCreate({ startDate: iso })}
-            onSaveCategoryBudget={saveCategoryBudget}
-            onSearchAll={searchAllActuals}
           />
         )}
       </main>
@@ -1762,9 +1956,9 @@ function Workspace({ uid, user, onSignOut }: WorkspaceProps) {
           budgets={store.budgets}
           debts={store.debts}
           methods={methods}
-          onSave={(actual) => {
+          onSave={(actual, opts) => {
             setConfirming(null);
-            persist(actual);
+            persist(actual, reflectChanges(actual, opts?.reflected));
             dialog.toast('실제 거래로 확정했습니다. 예정은 그대로 남고 이 회차만 빠집니다.');
           }}
           onClose={() => setConfirming(null)}

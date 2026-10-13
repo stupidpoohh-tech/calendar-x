@@ -27,7 +27,7 @@ import {
   confirmedEntryId, confirmedKey, confirmedSetOf, isActual, moneyFlowOf, OUTFLOW_ONLY_FLOWS,
 } from './ledger';
 import { expandEntry, isVirtualEntry } from './recurrence';
-import type { Budget, DateISO, Entry, MoneyFlow, MoneyType } from './types';
+import type { Account, Budget, DateISO, Entry, MoneyFlow, MoneyType } from './types';
 
 export type ConfirmRefusal =
   | 'not-money'
@@ -194,4 +194,190 @@ export function pocketChoiceFor(date: DateISO, budgets: readonly Budget[]): Pock
     .filter((b) => b.startDate <= d && d <= b.endDate)
     .sort((a, b) => a.startDate.localeCompare(b.startDate) || a.name.localeCompare(b.name));
   return { selected: candidates.length === 1 ? candidates[0]! : null, candidates };
+}
+
+// ---------- 예정을 고치면 연결을 잃는 확정 거래 ----------
+
+/**
+ * 예정의 날짜 · 반복을 고치면 확정해 둔 실제 거래가 "없는 회차" 를 가리키게 된다.
+ *
+ * 매월 25일 월세의 10/25 회차를 510,000원으로 확정한 뒤 반복 시작일을 26일로 바꾸면,
+ * 실제 거래는 여전히 10/25 회차를 가리키고 10/26 은 확정된 적 없는 새 회차가 된다.
+ * 계산은 둘 다 센다 — 실제 510,000원과 예정 500,000원. 잔고 200만원 기준 한도가
+ * 149만원에서 99만원으로 떨어졌다(실제로 재현됨).
+ *
+ * 그래서 예정을 저장하기 **전에** 연결을 잃는 확정 거래를 찾아 보여 주고, 무엇을 할지
+ * 사용자가 고르게 한다. 조용히 지우지도, 넘겨짚어 잇지도 않는다.
+ *
+ *   relink   새 규칙의 회차 하나에 다시 잇는다. 이을 회차는 화면에 날짜로 적어 보여 준다
+ *   unlink   예정과의 연결을 끊고 실제 거래로만 남긴다 — 새 회차는 예정으로 다시 센다
+ *
+ * 어느 쪽이든 실제 거래의 날짜 · 금액 · 분류는 그대로다.
+ */
+export interface LostConfirmation {
+  actual: Entry;
+  /** 지금 가리키는 회차 (새 규칙에는 없다). */
+  from: DateISO;
+  /** 다시 이을 수 있는 새 회차. 없으면 null — 그때는 끊는 것만 고를 수 있다. */
+  candidate: DateISO | null;
+}
+
+/** 이 예정을 가리키는 확정 거래. */
+export function confirmationsOfPlan(entries: readonly Entry[], planId: string): Entry[] {
+  return entries.filter((e) => isActual(e) && e.money?.plannedRef?.entryId === planId);
+}
+
+/** 그 날짜가 고친 뒤의 예정에서도 확정할 수 있는 회차인가. */
+function stillOccurrence(plan: Entry, date: DateISO): boolean {
+  return confirmBlockOf(plan) === null && isOccurrenceOf(plan, date);
+}
+
+/**
+ * 반복 한 칸(일). 옛 회차에서 **반 칸보다 확실히 가까운** 새 회차만 "같은 회차를 옮긴 것" 으로
+ * 제안한다. 25일 → 10일처럼 앞뒤 어느 쪽 회차인지 애매하면(15일 대 16일) 제안하지 않는다.
+ */
+function stepDays(plan: Entry): number {
+  const r = plan.recurrence;
+  if (!r) return Infinity;
+  const days = r.freq === 'daily' ? 1 : r.freq === 'weekly' ? 7 : 30;
+  return days * Math.max(1, r.interval);
+}
+
+const dayDiff = (a: DateISO, b: DateISO) =>
+  Math.round((Date.parse(`${a}T00:00:00Z`) - Date.parse(`${b}T00:00:00Z`)) / 86_400_000);
+
+/**
+ * 고친 뒤의 예정(`after`)에서 연결을 잃는 확정 거래.
+ *
+ * 다시 이을 후보는 반 칸보다 가까운 새 회차다(반복이 아니면 새 날짜).
+ * 이미 다른 실제 거래가 확정한 회차나, 앞의 거래에 먼저 돌아간 회차는 후보가 되지 않는다 —
+ * 한 회차를 두 거래가 가리키면 같은 돈을 두 번 센다.
+ */
+export function lostConfirmations(after: Entry, confirmations: readonly Entry[]): LostConfirmation[] {
+  const mine = confirmations.filter((e) => e.money?.plannedRef?.entryId === after.id);
+  const taken = new Set<string>();
+  const lost: Entry[] = [];
+  for (const e of mine) {
+    const from = normalizeDate(e.money!.plannedRef!.date);
+    if (from && stillOccurrence(after, from)) taken.add(from);
+    else lost.push(e);
+  }
+  lost.sort((a, b) => a.money!.plannedRef!.date.localeCompare(b.money!.plannedRef!.date));
+
+  return lost.map((actual) => {
+    const from = normalizeDate(actual.money!.plannedRef!.date);
+    let candidate: DateISO | null = null;
+    if (confirmBlockOf(after) === null) {
+      if (!after.recurrence) {
+        const d = normalizeDate(after.startDate);
+        candidate = d && !taken.has(d) ? d : null;
+      } else {
+        const step = stepDays(after);
+        const near = expandEntry(after, addDaysOf(from, -step), addDaysOf(from, step))
+          .map((o) => o.startDate)
+          .filter((d) => !taken.has(d) && Math.abs(dayDiff(d, from)) * 2 < step)
+          .sort((a, b) => Math.abs(dayDiff(a, from)) - Math.abs(dayDiff(b, from)) || b.localeCompare(a));
+        candidate = near[0] ?? null;
+      }
+    }
+    if (candidate) taken.add(candidate);
+    return { actual, from, candidate };
+  });
+}
+
+function addDaysOf(iso: DateISO, n: number): DateISO {
+  const d = new Date(`${iso}T00:00:00Z`);
+  d.setUTCDate(d.getUTCDate() + n);
+  return d.toISOString().slice(0, 10);
+}
+
+export interface LinkRepair {
+  /** 지울 옛 문서 id. */
+  removeId: string;
+  /** 새로 쓸 실제 거래 — 날짜 · 금액 · 분류는 그대로, id 와 연결만 바뀐다. */
+  entry: Entry;
+}
+
+/**
+ * 고르신 대로 실제 거래를 고친다.
+ *
+ * 어느 쪽이든 **id 가 바뀐다.** 확정 거래의 id 는 회차로 정해져 있어야(`예정id~날짜`)
+ * 두 기기에서 같은 회차를 확정해도 문서가 하나로 모인다. 다시 이으면 새 회차의 id 로,
+ * 끊으면 회차와 무관한 새 id 로 옮긴다 — 옛 id 를 그대로 두면 나중에 그 날짜를 다시
+ * 확정할 때 같은 문서를 덮어써 이 거래를 잃는다. 그래서 옛 문서 삭제와 새 문서 쓰기는
+ * 예정 저장과 **한 배치**로 나가야 한다(부르는 쪽 몫).
+ */
+export function repairLink(
+  lost: LostConfirmation, choice: 'relink' | 'unlink', planId: string, newId: () => string,
+  now = new Date().toISOString(),
+): LinkRepair {
+  const a = lost.actual;
+  const relink = choice === 'relink' && lost.candidate !== null;
+  const entry: Entry = {
+    ...a,
+    id: relink ? confirmedEntryId(planId, lost.candidate!) : newId(),
+    money: { ...a.money!, plannedRef: relink ? { entryId: planId, date: lost.candidate! } : null },
+    updatedAt: now,
+  };
+  return { removeId: a.id, entry: withDerived(entry, now) };
+}
+
+/**
+ * 백업 병합에서 같은 회차를 두 번 세게 될 확정 거래.
+ *
+ * 다시 잇거나 끊으면 옛 id 가 사라진다. 그 전에 받아 둔 백업을 다시 가져오면 옛 id 는
+ * "없는 문서" 라 새로 만들어지고, 같은 돈이 두 번 세어진다. 그래서 들어올 확정 거래 중
+ *   - 이미 같은 회차를 확정한 다른 문서가 있거나
+ *   - 가리키는 예정은 있는데 그 날짜가 더 이상 회차가 아닌 것
+ * 은 넣지 않고 따로 센다. 예정 자체가 없으면(지운 예정) 그대로 넣는다 — 그때는 겹칠
+ * 예정 회차가 없다.
+ */
+export function conflictingConfirmations(current: readonly Entry[], incoming: readonly Entry[]): Set<string> {
+  const have = new Set(current.map((e) => e.id));
+  const plans = new Map<string, Entry>();
+  for (const e of incoming) if (e.kind === 'money' && !isActual(e)) plans.set(e.id, e);
+  for (const e of current) if (e.kind === 'money' && !isActual(e)) plans.set(e.id, e); // 지금 것이 이긴다
+  const keys = new Set(confirmedSetOf(current));
+  const out = new Set<string>();
+  for (const e of incoming) {
+    if (have.has(e.id) || !isActual(e)) continue;
+    const ref = e.money?.plannedRef;
+    const date = normalizeDate(ref?.date);
+    if (!ref || !date) continue;
+    const key = confirmedKey(ref.entryId, date);
+    const plan = plans.get(ref.entryId);
+    if (keys.has(key) || (plan && !stillOccurrence(plan, date))) { out.add(e.id); continue; }
+    keys.add(key);
+  }
+  return out;
+}
+
+/**
+ * id 가 바뀐 거래를 계좌의 반영 목록에서도 바꾼다.
+ *
+ * 잔고를 적은 날 당일의 거래는 반영 목록(`reflectedEntryIds`)에 든 것만 잔고 안이다.
+ * id 를 옮기고 목록을 그대로 두면 그 거래가 잔고 밖으로 떨어져 한도에서 한 번 더 빠진다.
+ * 바뀐 계좌만 돌려준다.
+ */
+export function reflectedAfterRename(
+  accounts: readonly Account[], renamed: ReadonlyMap<string, string>, now = new Date().toISOString(),
+): Account[] {
+  const out: Account[] = [];
+  for (const a of accounts) {
+    const ids = a.reflectedEntryIds ?? [];
+    if (!ids.some((id) => renamed.has(id))) continue;
+    out.push({ ...a, reflectedEntryIds: ids.map((id) => renamed.get(id) ?? id), updatedAt: now });
+  }
+  return out;
+}
+
+/** 이 편집이 예정의 회차를 바꿀 수 있는가 — 날짜 · 기간 · 반복 · 종류 · 상태. 금액 · 제목만 고치면 아니다. */
+export function planScheduleChanged(before: Entry, after: Entry): boolean {
+  if (before.kind !== 'money' || !before.money || isActual(before)) return false;
+  return before.startDate !== after.startDate
+    || (before.endDate ?? null) !== (after.endDate ?? null)
+    || JSON.stringify(before.recurrence ?? null) !== JSON.stringify(after.recurrence ?? null)
+    || after.kind !== 'money'
+    || isActual(after)
+    || before.money.type !== after.money?.type;
 }

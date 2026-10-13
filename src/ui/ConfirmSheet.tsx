@@ -10,6 +10,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { budgetCovers } from '../domain/budget';
 import { confirmOccurrence, needsTypeChoice, pocketChoiceFor, type ConfirmRefusal } from '../domain/confirm';
+import { confirmedEntryId } from '../domain/ledger';
 import { fmtDayShort } from '../domain/date';
 import { formatAmount, minorToInput, parseAmountToMinor } from '../domain/money';
 import type { Account, Budget, Category, Debt, Entry, MoneyFields } from '../domain/types';
@@ -28,7 +29,8 @@ interface Props {
   budgets: readonly Budget[];
   debts: readonly Debt[];
   methods: readonly string[];
-  onSave: (actual: Entry) => void;
+  /** `reflected` — "이 잔고에 이미 반영됨" 을 고른 값. 손대지 않았으면 undefined. */
+  onSave: (actual: Entry, opts?: { reflected?: boolean }) => void;
   onClose: () => void;
 }
 
@@ -54,6 +56,9 @@ export function ConfirmSheet({
   const [amountText, setAmountText] = useState(() => minorToInput(planMoney.amountMinor, planMoney.currency));
   const [date, setDate] = useState(occurrenceDate);
   const [pocketTouched, setPocketTouched] = useState(!!planMoney.budgetId);
+  // 새로 만드는 거래라 기본은 미선택이다. 손대지 않아도 false 로 보낸다 — 같은 회차를 확정
+  // 취소했다 다시 확정하면 같은 id 라, 옛 반영 목록에 남은 값이 저절로 살아나면 안 된다.
+  const [reflected, setReflected] = useState(false);
   const [money, setMoney] = useState<MoneyFields>(() => {
     const type = legacy ? undefined : planMoney.type === 'income' ? 'income' : 'expense';
     const base: MoneyFields = {
@@ -121,7 +126,7 @@ export function ConfirmSheet({
       debtId: money.debtId ?? null,
     });
     if (!r.ok) { setError(REASONS[r.reason]); return; }
-    onSave(r.entry);
+    onSave(r.entry, { reflected });
   };
 
   const label = plan.title.trim() || (planMoney.type === 'income' ? '입금 예정' : '지출 예정');
@@ -189,7 +194,7 @@ export function ConfirmSheet({
           )}
 
           <LedgerFields
-            entryId={`${plan.id}-confirm`}
+            entryId={confirmedEntryId(plan.id, occurrenceDate)}
             type={type}
             date={date}
             money={money}
@@ -202,6 +207,8 @@ export function ConfirmSheet({
             debts={debts}
             methods={methods}
             requireFlow={legacy}
+            reflected={reflected}
+            onReflected={setReflected}
           />
 
           {error && <p className="mod-err" role="alert">{error}</p>}

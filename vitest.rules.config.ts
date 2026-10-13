@@ -10,6 +10,7 @@ import { defineConfig } from 'vitest/config';
  *   ledger.emulator.test.ts        가계부 원장 — 30달 넘는 창의 분할 조회 · 확정 거래 조회
  *   backup.emulator.test.ts        백업 · 복원 왕복 — 모든 갈래 · 계산 결과 · 건수 · 예전 버전
  *   ledgerImport.emulator.test.ts  가계부 이관 — 엑셀 → 실제 거래, 재가져오기 0건, 백업 왕복
+ *   relink.emulator.test.ts        예정 수정 시 확정 거래 다시 잇기 — 한 배치 · 옛 백업 무중복
  */
 export default defineConfig({
   test: {
@@ -23,6 +24,7 @@ export default defineConfig({
       'src/test/ledger.emulator.test.ts',
       'src/test/backup.emulator.test.ts',
       'src/test/ledgerImport.emulator.test.ts',
+      'src/test/relink.emulator.test.ts',
     ],
     testTimeout: 20_000,
     hookTimeout: 30_000,

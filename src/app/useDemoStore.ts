@@ -7,10 +7,20 @@
  */
 import { useMemo } from 'react';
 import { tideWindow } from '../data/repo';
-import { defaultCategories } from '../domain/category';
+import { defaultCategories, setDefaultBudget } from '../domain/category';
 import { addDaysISO, todayISO } from '../domain/date';
 import { newEntry, newMoney, setRecurrence } from '../domain/entry';
+import { periodOf } from '../domain/period';
+import type { Entry, MoneyFields } from '../domain/types';
 import { FEED_DEMO, type StoreState } from './useStore';
+
+/** 실제 거래 한 건. 데모는 메모리에만 있다 — 저장하려 하면 로그인을 묻는다. */
+function actual(id: string, title: string, date: string, amount: number, m: Partial<MoneyFields> = {}): Entry {
+  return newEntry('money', {
+    id, title, startDate: date,
+    money: newMoney({ status: 'actual', type: 'expense', amountMinor: amount, ...m }),
+  });
+}
 
 export function useDemoStore(): StoreState {
   return useMemo(() => {
@@ -65,19 +75,33 @@ export function useDemoStore(): StoreState {
       newEntry('money', {
         id: 'demo-money-1', title: '급여',
         startDate: salary,
-        money: newMoney({ type: 'income', amountMinor: 3_000_000 }),
+        money: newMoney({ type: 'income', amountMinor: 3_000_000, categoryId: 'default-salary' }),
       }),
       newEntry('money', {
         id: 'demo-money-2', title: '전기요금',
         startDate: soon,
-        money: newMoney({ type: 'expense', amountMinor: 65_000 }),
+        money: newMoney({ type: 'expense', amountMinor: 65_000, categoryId: 'default-housing' }),
       }),
-      // 생활비에서 나간 지출. 예산 안이라 한도를 더 깎지 않는다 — 예산이 이미 잡아 뒀다.
-      newEntry('money', {
-        id: 'demo-money-3', title: '점심',
-        startDate: today,
-        money: newMoney({ type: 'expense', amountMinor: 12_000, budgetId: 'demo-budget-1' }),
-      }),
+      // 오늘 생활비에서 쓴 점심. 잔고를 오늘 적었고 반영 목록에 없으니 아직 잔고 밖이다 —
+      // 그래도 주머니 안이라 한도는 더 깎이지 않는다(주머니가 이미 잡아 뒀다).
+      actual('demo-money-3', '점심', today, 12_000, { categoryId: 'default-food', budgetId: 'demo-budget-1' }),
+
+      /*
+        지난 실제 거래 — 내역 · 예산 · 통계를 만져 볼 수 있게. 모두 잔고 기준일(오늘) 앞이라
+        이미 잔고 안이고 한도를 움직이지 않는다. 생활비에 걸린 셋은 주머니에서 "반영된 몫" 으로
+        빠진다. 카드 사용은 현금이 안 움직이고(대금에서 나간다), 대출 이자는 금융비용이다.
+      */
+      actual('demo-act-1', '점심', addDaysISO(today, -1), 9_000, { categoryId: 'default-food', budgetId: 'demo-budget-1' }),
+      actual('demo-act-2', '커피', addDaysISO(today, -2), 4_500, { categoryId: 'default-cafe', budgetId: 'demo-budget-1', method: '체크카드' }),
+      actual('demo-act-3', '장보기', addDaysISO(today, -3), 54_000, { categoryId: 'default-food', budgetId: 'demo-budget-1' }),
+      actual('demo-act-4', '카드 대금', addDaysISO(today, -4), 120_000, { flow: 'cardPayment', method: '신한카드' }),
+      actual('demo-act-5', '교통카드 충전', addDaysISO(today, -5), 30_000, { categoryId: 'default-transport' }),
+      actual('demo-act-6', '온라인 쇼핑', addDaysISO(today, -6), 39_000, { categoryId: 'default-shopping', flow: 'cardSpend', method: '신한카드' }),
+      actual('demo-act-7', '대출 이자', addDaysISO(today, -7), 45_000, { categoryId: 'default-finance', flow: 'loanInterest' }),
+      actual('demo-act-8', '관리비', addDaysISO(today, -20), 150_000, { categoryId: 'default-housing' }),
+      actual('demo-act-9', '지난달 급여', addDaysISO(today, -25), 3_000_000, { type: 'income', categoryId: 'default-salary' }),
+      actual('demo-act-10', '장보기', addDaysISO(today, -35), 61_000, { categoryId: 'default-food' }),
+      actual('demo-act-11', '외식', addDaysISO(today, -40), 28_000, { categoryId: 'default-food' }),
     ];
 
     return {
@@ -111,7 +135,11 @@ export function useDemoStore(): StoreState {
       }],
       // 미리보기에는 기본 카테고리를 보여 준다. 저장하는 순간 로그인을 묻는다.
       categories: defaultCategories(''),
-      categoryBudgets: [],
+      // 식비 · 카페는 이번 기간부터 기본 예산. 결산용이라 한도에서 빼지 않는다.
+      categoryBudgets: [
+        setDefaultBudget('default-food', periodOf(today, 1).key, 400_000, ''),
+        setDefaultBudget('default-cafe', periodOf(today, 1).key, 50_000, ''),
+      ],
       ledger: { settleDay: 1 },
       ledgerMeta: FEED_DEMO,
       // 메모리에서 만든 값이라 기다릴 것이 없다. 두 갈래 모두 받아 둔 상태다.
