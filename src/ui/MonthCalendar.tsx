@@ -7,6 +7,10 @@ import { calcScopeOf, limitOn } from '../domain/tide';
 import type { Account, Budget, Entry, LensId, Reserve, WeekStart, YearMonth } from '../domain/types';
 import { Icon } from './Icon';
 import { isRecoveryEntry } from '../domain/recovery';
+import { daySummary, type DaySummary } from '../domain/daySummary';
+import { isActual } from '../domain/ledger';
+import { CalendarDaySummary } from './CalendarDaySummary';
+import { SUMMARY_HEIGHT } from './ledgerView';
 
 interface Props {
   cursor: Date;
@@ -36,6 +40,15 @@ interface Props {
   onEntryClick: (e: Entry) => void;
   onDayOpen: (iso: string) => void;
   onDayCreate: (iso: string) => void;
+  /**
+   * 가계부 달력의 지난 날 요약. 주면 오늘 이전(오늘 포함)의 **실제 거래**를 막대로 늘어놓지
+   * 않고 셀마다 요약 한 칸으로 적는다 — 현금흐름 보기에서만 준다. 다른 렌즈 · 같이 보기 달력은
+   * 이 값을 받지 않아 지금 그대로다.
+   *
+   * `entries` 는 저장된 원본(반복을 펼치지 않은 목록, 필터 이전)이다. 합계는 필터와 무관하다.
+   * `ready` 가 아니면 셀에 아무 숫자도 적지 않는다 — 덜 받은 목록의 합을 0원처럼 내지 않는다.
+   */
+  ledgerSummary?: { entries: readonly Entry[]; ready: boolean };
 }
 
 interface Placed {
@@ -47,13 +60,24 @@ interface Placed {
   continuesRight: boolean;
 }
 
-/** 겹치지 않는 가장 위쪽 레인에 배치한다. */
-function placeWeek(entries: readonly Entry[], weekISO: readonly string[]): { placed: Placed[]; laneCount: number } {
+/**
+ * 겹치지 않는 가장 위쪽 레인에 배치한다.
+ *
+ * `floor` 를 주면 그 날 앞으로는 막대를 그리지 않는다(가계부 요약 모드 — 지난 날은 요약 칸이
+ * 차지한다). 그 날에 걸친 기간 항목은 그 날부터 그린다.
+ */
+function placeWeek(
+  entries: readonly Entry[], weekISO: readonly string[], floor?: string,
+): { placed: Placed[]; laneCount: number } {
   const first = weekISO[0] ?? '';
   const last = weekISO[6] ?? '';
+  const startOf = (e: Entry) => {
+    const start = normalizeDate(e.startDate);
+    return floor && start < floor ? floor : start;
+  };
 
   const visible = entries.filter((e) => {
-    const start = normalizeDate(e.startDate);
+    const start = startOf(e);
     return start <= last && effectiveEndDate(e) >= first;
   });
 
@@ -71,7 +95,7 @@ function placeWeek(entries: readonly Entry[], weekISO: readonly string[]): { pla
 
   const lanes: { from: number; to: number }[][] = [];
   const placed: Placed[] = visible.map((entry) => {
-    const start = normalizeDate(entry.startDate);
+    const start = startOf(entry);
     const end = effectiveEndDate(entry);
     const rawFrom = weekISO.indexOf(start);
     const rawTo = weekISO.indexOf(end);
@@ -104,7 +128,7 @@ function barMetrics(laneCount: number) {
 export function MonthCalendar({
   cursor, onCursorChange, entries, tideEntries, budgets = NO_BUDGETS, reserves = NO_RESERVES,
   tideMonths, accounts, hasBalance, lens, weekStart, todayISO,
-  onEntryClick, onDayOpen, onDayCreate,
+  onEntryClick, onDayOpen, onDayCreate, ledgerSummary,
 }: Props) {
   const grid = useMemo(() => monthGrid(cursor, weekStart), [cursor, weekStart]);
   const weeks = useMemo(
@@ -144,6 +168,33 @@ export function MonthCalendar({
     return map;
   }, [showLimits, grid, accounts, tideEntries, tideMonths, todayISO, res]);
 
+  /*
+    가계부 요약 모드. 지난 날 · 오늘의 실제 거래와 지난 날의 예정은 막대가 아니라 요약 칸이다.
+    막대로 남는 것은 오늘 · 앞날의 예정뿐이고, 오늘에 걸친 기간 예정은 오늘부터 그린다.
+  */
+  const summaryMode = ledgerSummary !== undefined;
+  const barEntries = useMemo(() => (summaryMode
+    ? entries.filter((e) => {
+      if (e.kind !== 'money') return true;
+      if (isActual(e)) return normalizeDate(e.startDate) > todayISO;
+      return effectiveEndDate(e) >= todayISO;
+    })
+    : entries), [summaryMode, entries, todayISO]);
+  const summaries = useMemo(() => {
+    if (!ledgerSummary?.ready) return null;
+    const map = new Map<string, DaySummary>();
+    for (const d of grid) {
+      const iso = toISO(d);
+      if (iso > todayISO) continue;
+      const s = daySummary(ledgerSummary.entries, iso);
+      // 오늘은 실제 거래만 요약한다 — 남은 예정은 막대로 그리므로 요약에서 또 세지 않는다.
+      const day = iso === todayISO ? { ...s, unconfirmed: 0 } : s;
+      if (day.actuals.length === 0 && day.unconfirmed === 0) continue;
+      map.set(iso, day);
+    }
+    return map;
+  }, [ledgerSummary, grid, todayISO]);
+
   const touch = useRef({ x: 0, y: 0 });
   const onTouchStart = (e: React.TouchEvent) => {
     const t = e.touches[0];
@@ -169,7 +220,7 @@ export function MonthCalendar({
 
       {weeks.map((week, wi) => {
         const weekISO = week.map(toISO);
-        const { placed, laneCount } = placeWeek(entries, weekISO);
+        const { placed, laneCount } = placeWeek(barEntries, weekISO, summaryMode ? todayISO : undefined);
         const { height, gap, showText } = barMetrics(laneCount);
         // Recovery remains readable even when ordinary events compress to strips.
         const laneHeights = Array.from({ length: laneCount }, (_, lane) =>
@@ -184,7 +235,24 @@ export function MonthCalendar({
         // 한도 숫자는 바 아래 한 줄을 차지한다. 한도가 뜨는 주에만 그만큼을 더한다 —
         // 오늘 이전 주까지 키워 두면 지나간 자리에 빈 줄만 남는다.
         const weekHasLimit = limits !== null && weekISO.some((iso) => limits.has(iso));
-        const minHeight = topOffset + contentHeight + 8 + (weekHasLimit ? 15 : 0);
+        /*
+          요약 칸의 자리. 지난 날 칸에는 막대가 없으므로 날짜 바로 아래(topOffset)에 서고,
+          오늘 칸은 남은 예정 막대 아래에 선다. 요약 칸의 높이는 거래 수와 무관하게 늘 같다.
+        */
+        const summaryTop = (col: number) => {
+          const used = placed.filter((p) => p.from <= col && p.to >= col).map((p) => p.lane);
+          if (used.length === 0) return topOffset;
+          const lane = Math.max(...used);
+          return topOffset + (laneOffsets[lane] ?? 0) + (laneHeights[lane] ?? height) + 4;
+        };
+        // 지난 날이 하나라도 있는 주는 요약 한 칸만큼을 늘 잡아 둔다 — 거래가 없거나 아직 받는
+        // 중이어도 높이가 같아, 자료가 도착할 때 달력이 위아래로 튀지 않는다.
+        const pastWeek = summaryMode && (weekISO[0] ?? '') < todayISO;
+        const summaryBottom = Math.max(
+          pastWeek ? topOffset + SUMMARY_HEIGHT : 0,
+          ...weekISO.map((iso, col) => (summaries?.has(iso) ? summaryTop(col) + SUMMARY_HEIGHT : 0)),
+        );
+        const minHeight = Math.max(topOffset + contentHeight + 8, summaryBottom + 4) + (weekHasLimit ? 15 : 0);
 
         return (
           <div className="cal-week" key={weekISO[0] ?? wi} style={{ minHeight }}>
@@ -207,6 +275,13 @@ export function MonthCalendar({
                       {d.getDate()}
                     </button>
                     {inMonth && d.getDate() === 1 && <span className="cal-mtag">{d.getMonth() + 1}월</span>}
+                    {summaries?.has(iso) && (
+                      <CalendarDaySummary
+                        summary={summaries.get(iso)!}
+                        top={summaryTop(week.indexOf(d))}
+                        onOpen={() => onDayOpen(iso)}
+                      />
+                    )}
                     {limits?.has(iso) && (
                       <span
                         className={'cal-limit num' + ((limits.get(iso) ?? 0) < 0 ? ' bad' : '')}

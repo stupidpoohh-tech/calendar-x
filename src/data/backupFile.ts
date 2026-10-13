@@ -329,6 +329,9 @@ function checkLedgerRaw(c: Collector, where: string, e: Raw, m: Raw): void {
   optStr(c, `${at}.categoryId`, m.categoryId, LIMITS.categoryId);
   optStr(c, `${at}.method`, m.method, LIMITS.method);
   optStr(c, `${at}.accountId`, m.accountId, LIMITS.accountId);
+  if (m.highlight !== undefined && m.highlight !== null && typeof m.highlight !== 'boolean') {
+    c.add(`${at}.highlight`, `참·거짓이 아닙니다: ${describe(m.highlight)}`);
+  }
 
   const actual = m.status === 'actual';
   const ref = m.plannedRef;

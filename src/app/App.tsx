@@ -20,7 +20,7 @@ import {
 } from '../data/restore';
 import { LENSES, LENS_BY_ID, SHARED_TABS } from '../domain/constants';
 import { endOfMonth, fmtMonthTitle, startOfMonth, toISO } from '../domain/date';
-import { convertKind, displayTitle, newEntry, uid as newId, withDerived } from '../domain/entry';
+import { convertKind, displayTitle, effectiveEndDate, newEntry, uid as newId, withDerived } from '../domain/entry';
 import {
   INVITE_PARAM, isShareableTask, newNote, repinNotes, sharedChange, sharedTitle,
 } from '../domain/shared';
@@ -32,6 +32,7 @@ import {
   confirmationOf, confirmationsOfPlan, lostConfirmations, planScheduleChanged, reflectedAfterRename, repairLink,
 } from '../domain/confirm';
 import { applyReflectChoice, isActual, reflectChoiceFor } from '../domain/ledger';
+import { daySummary } from '../domain/daySummary';
 import { isRecoveryEntry } from '../domain/recovery';
 import type {
   Account, Budget, Category, CategoryBudget, Entry, Filters, LedgerNote, LedgerTabId, LensId, SharedInvite, SharedNote, SharedTodoItem,
@@ -606,6 +607,28 @@ function Workspace({ uid, user, onSignOut }: WorkspaceProps) {
     if (isAnon || !uid) { void promptLogin(); return; }
     commit({ kind: 'categoryBudget', label: '카테고리 예산', summary: b.period, payload: b });
   }, [isAnon, uid, promptLogin, commit]);
+
+  /*
+    '달력에 표시' — 그 날 셀에 띄울 주요 거래를 직접 고른다. 하루에 한 건만 뜨므로, 켤 때는
+    같은 날 켜 둔 다른 거래를 함께 끈다. 여러 문서가 함께 바뀌어야 뜻이 맞는 쓰기라 한 배치다.
+  */
+  const toggleHighlight = useCallback((e: Entry) => {
+    if (isAnon || !uid) { void promptLogin(); return; }
+    const base = store.entries.find((x) => x.id === e.id);
+    if (!base?.money || !isActual(base)) return;
+    const on = base.money.highlight !== true;
+    const now = new Date().toISOString();
+    const others = on
+      ? store.entries.filter((x) => x.id !== base.id && isActual(x) && x.startDate === base.startDate && x.money?.highlight === true)
+      : [];
+    const changed = [base, ...others].map((x) => ({
+      ...x, updatedAt: now, money: { ...x.money!, highlight: x.id === base.id ? on : false },
+    }));
+    commit({
+      kind: 'ledgerBatch', label: on ? '달력에 표시' : '달력 표시 해제', summary: displayTitle(base),
+      payload: { entries: changed, deleteIds: [], accounts: [] },
+    });
+  }, [isAnon, uid, promptLogin, store.entries, commit]);
 
   const saveLedgerNote = useCallback((n: LedgerNote) => {
     if (isAnon || !uid) { void promptLogin(); return; }
@@ -1380,6 +1403,19 @@ function Workspace({ uid, user, onSignOut }: WorkspaceProps) {
   const daySheetEntries = daySheet
     ? visible.filter((e) => e.startDate <= daySheet && (e.endDate ?? e.startDate) >= daySheet)
     : [];
+  /*
+    가계부 달력의 날짜 요약. 화면용 자료를 "다 받았다" 고 말할 수 있을 때만 숫자를 낸다 — 캐시가
+    비어 있어 없음을 확정할 수 없거나 아직 받는 중이면 셀 · 상세 모두 합계를 적지 않는다.
+  */
+  const ledgerDayReady = store.display.ready && !(store.display.empty && store.display.fromCache);
+  const ledgerSummary = useMemo(
+    () => ({ entries: store.entries, ready: ledgerDayReady }),
+    [store.entries, ledgerDayReady],
+  );
+  // 가계부 날짜 상세는 필터와 무관하게 그 날의 가계부 항목을 빠짐없이 보여 준다(소액 포함).
+  const ledgerDayEntries = daySheet && ledgerOn
+    ? materialized.filter((e) => e.kind === 'money' && e.startDate <= daySheet && effectiveEndDate(e) >= daySheet)
+    : [];
 
   // 렌즈에 따라 단독 카드가 되기도 하고, 며칠 버티나 카드 안에 접힌 줄로 들어가기도 한다.
   const pinnedSection = (
@@ -1802,6 +1838,7 @@ function Workspace({ uid, user, onSignOut }: WorkspaceProps) {
             onEntryClick={openEdit}
             onDayOpen={setDaySheet}
             onDayCreate={(iso) => openCreate({ startDate: iso })}
+            ledgerSummary={ledgerSummary}
           />
               </div>
             )}
@@ -1890,8 +1927,13 @@ function Workspace({ uid, user, onSignOut }: WorkspaceProps) {
         <DaySheet
           dateISO={daySheet}
           todayISO={today}
-          entries={daySheetEntries}
+          entries={ledgerOn ? ledgerDayEntries : daySheetEntries}
           moneyEntries={store.entries}
+          ledger={ledgerOn ? {
+            summary: ledgerDayReady ? daySummary(store.entries, daySheet) : null,
+            categories: store.categories,
+            onToggleHighlight: toggleHighlight,
+          } : undefined}
           onClose={() => setDaySheet(null)}
           onEntryClick={(e) => { setDaySheet(null); openEdit(e); }}
           onAdd={() => { const iso = daySheet; setDaySheet(null); openCreate({ startDate: iso }); }}

@@ -138,3 +138,19 @@ it('newMoney 로 만든 실제 거래도 저장 형태가 온전하다', () => {
   const e = newEntry('money', { money: newMoney({ status: 'actual', amountMinor: 1 }) });
   expect(entryToDoc(e).money).toMatchObject({ status: 'actual', plannedRef: null });
 });
+
+describe('entry — 달력에 표시(highlight)', () => {
+  it('없던 문서는 false 로 읽고, 켠 값은 그대로 오간다', () => {
+    expect(entryFromDoc('rent', legacyMoneyDoc()).money?.highlight).toBe(false);
+    const on = entryFromDoc('rent', legacyMoneyDoc({ money: { type: 'expense', amountMinor: 1, currency: 'KRW', linkedEntryId: null, highlight: true } }));
+    expect(on.money?.highlight).toBe(true);
+    expect((entryToDoc(on).money as Record<string, unknown>).highlight).toBe(true);
+  });
+
+  it('참·거짓이 아닌 값은 꺼진 것으로 읽는다 · 메모리에 없어도 undefined 를 쓰지 않는다', () => {
+    expect(entryFromDoc('x', legacyMoneyDoc({ money: { type: 'expense', amountMinor: 1, currency: 'KRW', linkedEntryId: null, highlight: 'yes' } })).money?.highlight).toBe(false);
+    const e = newEntry('money');
+    const bare = { ...e, money: { type: 'expense', amountMinor: 1, currency: 'KRW', linkedEntryId: null } } as typeof e;
+    expect((entryToDoc(bare).money as Record<string, unknown>).highlight).toBe(false);
+  });
+});

@@ -144,6 +144,11 @@ export interface MoneyFields {
    * 화면은 이 값을 보고 그 회차를 건너뛴다. 확정 취소는 이 문서 하나를 지우는 것이다.
    */
   plannedRef?: PlannedRef | null;
+  /**
+   * 가계부 달력에 그 날의 주요 거래로 띄운다(사용자가 고른 것). 자동 기준(10만 원)보다
+   * 앞서고, 하루에 한 건만 뜬다(`daySummary.pickMajor`). 계산에 쓰지 않는 표시값이다.
+   */
+  highlight?: boolean;
 }
 
 /** 예정 · 실제. */

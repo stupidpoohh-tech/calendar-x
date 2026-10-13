@@ -334,6 +334,13 @@ describe('가계부 원장', () => {
     }
   });
 
+  it('달력에 표시(highlight)는 규칙을 바꾸지 않고 쓸 수 있다 — 지금 배포된 규칙 그대로', async () => {
+    await assertSucceeds(setDoc(doc(db(ME), path('h1')), actual({ highlight: true })));
+    await assertSucceeds(setDoc(doc(db(ME), path('h1')), actual({ highlight: false })));
+    // 남은 여전히 못 쓴다.
+    await assertFails(setDoc(doc(db(OTHER), path('h2')), actual({ highlight: true })));
+  });
+
   it('schema 는 정수다', async () => {
     await assertFails(setDoc(doc(db(ME), path('x1')), { ...actual(), schema: '2' }));
   });

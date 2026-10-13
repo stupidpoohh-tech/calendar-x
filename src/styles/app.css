@@ -261,7 +261,7 @@
 .cal-week { position: relative; border-bottom: 1px solid var(--line); }
 .cal-week:last-child { border-bottom: none; }
 .cal-cells { display: grid; grid-template-columns: repeat(7, 1fr); height: 100%; position: absolute; inset: 0; }
-.cal-cell { position: relative; border-right: 1px solid var(--line-soft, var(--line)); cursor: pointer; transition: background .1s; }
+.cal-cell { position: relative; overflow: hidden; border-right: 1px solid var(--line-soft, var(--line)); cursor: pointer; transition: background .1s; }
 .cal-cell:last-child { border-right: none; }
 .cal-cell:hover { background: var(--bg-soft); }
 .cal-cell.out { background: color-mix(in oklab, var(--bg-soft) 60%, var(--bg)); }
@@ -275,7 +275,9 @@
 }
 .cal-num:hover { background: var(--accent-soft); color: var(--ink); }
 .cal-num.is-today { background: var(--lens, var(--ink)); color: var(--on-lens); font-weight: 700; }
-.cal-mtag { font-size: 0.625rem; color: var(--ink-4); margin-left: 2px; }
+.cal-mtag { font-size: 0.625rem; color: var(--ink-4); margin-left: 2px; white-space: nowrap; }
+/* 칸이 이 폭보다 좁으면 '10월' 이 날짜 아래 줄로 내려가 막대 · 요약 위에 겹친다. 날짜 '1' 이 이미 달의 시작을 말한다. */
+@media (max-width: 360px) { .cal-mtag { display: none; } }
 
 /*
   날짜별 한도 — "이 날까지 쓸 수 있는 돈". 잔고캘린더가 셀마다 적어 주던 숫자다.
@@ -317,6 +319,43 @@
 @media (max-width: 760px) {
   .cal-bar { font-size: 0.65625rem; padding: 0 3px; border-left-width: 2px; }
   .cal-num { margin: 3px 0 0 3px; font-size: 0.71875rem; }
+}
+
+/*
+  가계부 달력의 지난 날 요약 (CalendarDaySummary). 네 줄 고정 — 수입 · 지출 · 주요 거래 · 건수.
+  높이는 거래 수와 무관하다. 한 줄도 셀 밖으로 넘치지 않게 줄마다 말줄임.
+*/
+.cal-sum {
+  position: absolute; left: 3px; right: 3px; height: 56px; z-index: 1;
+  appearance: none; border: none; background: transparent; padding: 0 2px; margin: 0;
+  display: flex; flex-direction: column; justify-content: flex-start; gap: 1px;
+  text-align: left; font: inherit; cursor: pointer; border-radius: 4px; overflow: hidden;
+}
+.cal-sum:hover { background: var(--accent-soft); }
+.cal-sum-l {
+  display: flex; align-items: baseline; gap: 3px; min-width: 0; height: 13px; line-height: 13px;
+  font-size: 0.6875rem; white-space: nowrap; overflow: hidden;
+}
+.cal-sum-l.in { color: var(--good); font-weight: 600; }
+.cal-sum-l.out { color: var(--bad); font-weight: 600; }
+.cal-sum-l.major { color: var(--ink); }
+.cal-sum-l.major.pinned .cal-sum-n { font-weight: 600; }
+.cal-sum-l.more { color: var(--ink-3); }
+.cal-sum-n { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.cal-sum-a { flex: none; color: var(--ink-2); }
+.cal-sum-tag, .cal-sum-plan {
+  flex: none; font-style: normal; font-size: 0.5625rem; line-height: 11px; padding: 0 2px;
+  border-radius: 3px; color: var(--ink-3); border: 1px solid var(--line-strong);
+}
+/* 확정하지 않은 예정 — 실제 거래와 다르게 점선. */
+.cal-sum-plan { border-style: dashed; }
+.cal-cell.out .cal-sum { opacity: .55; }
+@media (max-width: 560px) {
+  /* 좁은 칸에서는 이름 · 금액이 먼저다. 카드 표식은 날짜 상세와 읽기 도구 이름표에 남는다. */
+  .cal-sum-tag { display: none; }
+  .cal-sum { left: 1px; right: 1px; padding: 0 1px; }
+  .cal-sum-l { font-size: 0.59375rem; gap: 2px; }
+  .cal-sum-tag, .cal-sum-plan { font-size: 0.5rem; padding: 0 1px; }
 }
 
 /* ============ 리스트 ============ */
@@ -792,6 +831,30 @@
 .sheet-cf strong { font-size: 0.9375rem; color: var(--ink); }
 .sheet-cf.bad { background: color-mix(in oklab, var(--bad) 10%, var(--bg-soft)); }
 .sheet-cf.bad strong { color: var(--bad); }
+
+/* 가계부 날짜 상세 — 실제 현금흐름 세 칸 + 거래마다 금액 · 실제/예정 · 달력 표시 */
+.sheet-sum {
+  margin: 0 18px 10px; padding: 10px 12px; border-radius: var(--radius-sm); background: var(--bg-soft);
+  display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px;
+}
+.sheet-sum > div { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.sheet-sum span { font-size: 0.6875rem; color: var(--ink-3); }
+.sheet-sum b { font-size: 0.9375rem; color: var(--ink); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sheet-sum b.plus { color: var(--good); }
+.sheet-sum b.minus { color: var(--bad); }
+.sheet-sum-n { grid-column: 1 / -1; margin: 0; font-size: 0.6875rem; color: var(--ink-3); line-height: 1.5; }
+.sheet-sum-n.pad { margin: 0 18px 10px; }
+.sheet-li { display: flex; align-items: center; gap: 4px; }
+.sheet-li .sheet-row { flex: 1; min-width: 0; }
+.sheet-row.planned { border-style: dashed; }
+.sheet-amt { flex: none; font-size: 0.875rem; color: var(--ink-2); }
+.sheet-amt.plus { color: var(--good); }
+.sheet-amt.minus { color: var(--ink); }
+.sheet-st { padding: 0 4px; border-radius: 3px; border: 1px solid var(--line-strong); }
+.sheet-st.plan { border-style: dashed; }
+.sheet-shown { color: var(--accent); font-weight: 600; }
+.sheet-pin { flex: none; color: var(--ink-4); }
+.sheet-pin.on { color: var(--accent); }
 
 /* ============ 년월 선택 ============ */
 

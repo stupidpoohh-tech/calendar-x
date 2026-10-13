@@ -224,6 +224,7 @@ export function entryFromDoc(id: string, raw: Raw): Entry {
           method: optStr(moneyRaw?.method),
           accountId: optStr(moneyRaw?.accountId),
           plannedRef,
+          highlight: moneyRaw?.highlight === true,
         }
       : null,
     // 회복 표식은 할 일 위에만 얹힌다.
@@ -290,6 +291,7 @@ function moneyToDoc(m: MoneyFields): Raw {
     plannedRef: m.plannedRef && moneyStatusOf(m) === 'actual'
       ? { entryId: m.plannedRef.entryId, date: m.plannedRef.date }
       : null,
+    highlight: m.highlight === true,
   };
 }
 

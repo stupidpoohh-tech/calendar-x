@@ -688,3 +688,15 @@ describe('v7 — 정산 기간 메모', () => {
     expect(problemsOf(read(v7({ ledgerNotes: [note({ text: 3 })] }))).length).toBeGreaterThan(0);
   });
 });
+
+describe('달력에 표시(highlight)', () => {
+  const m = (highlight: unknown) => ({ type: 'expense', amountMinor: 65_000, currency: 'KRW', linkedEntryId: null, highlight });
+  it('켜 둔 값은 그대로 읽는다', () => {
+    const r = read(v3({ entries: [moneyEntry({ money: m(true) })] }));
+    expect(r.ok).toBe(true);
+    if (r.ok) expect(r.file.data.entries[0]?.money?.highlight).toBe(true);
+  });
+  it('참·거짓이 아니면 거절한다', () => {
+    expect(problemsOf(read(v3({ entries: [moneyEntry({ money: m('yes') })] })))[0]).toContain('highlight');
+  });
+});
