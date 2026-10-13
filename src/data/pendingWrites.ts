@@ -27,13 +27,13 @@ import {
   deleteDoc, doc, getDoc, setDoc, writeBatch, type Firestore,
 } from 'firebase/firestore';
 import type {
-  Account, Budget, Category, CategoryBudget, Debt, Entry, LedgerSettings, Pin, RecoveryRule, Reserve,
+  Account, Budget, Category, CategoryBudget, Debt, Entry, LedgerNote, LedgerSettings, Pin, RecoveryRule, Reserve,
   SharedBoard, SharedCollection, SharedCollectionItem, SharedDday, SharedInvite,
   SharedNote, SharedPin, SharedSource, SharedTodoItem,
 } from '../domain/types';
 import {
   accountToDoc, budgetToDoc, categoryBudgetToDoc, categoryToDoc, debtToDoc, entryToDoc,
-  ledgerSettingsToDoc, pinToDoc, recoveryRuleToDoc, reserveToDoc,
+  ledgerNoteToDoc, ledgerSettingsToDoc, pinToDoc, recoveryRuleToDoc, reserveToDoc,
 } from './converters';
 import {
   sharedBoardToDoc, sharedCollectionItemToDoc, sharedCollectionToDoc, sharedDdayToDoc,
@@ -51,7 +51,7 @@ export type PendingKind =
   | 'taskOrder'
   | 'recoveryRule' | 'recoveryPatch' | 'recoveryCommit'
   // 가계부 결산. 카테고리 여럿(기본 카테고리 만들기 · 순서 바꾸기)은 한 배치로 쓴다.
-  | 'category' | 'categories' | 'categoryBudget' | 'ledgerSettings'
+  | 'category' | 'categories' | 'categoryBudget' | 'ledgerSettings' | 'ledgerNote'
   // 가계부 원장 — 여러 문서가 함께 바뀌어야 숫자가 맞는 쓰기(예정 + 확정 거래 다시 잇기,
   // 거래 + 잔고 반영 목록). 한 배치라 반쯤 들어간 상태가 없다.
   | 'ledgerBatch'
@@ -68,7 +68,7 @@ const KINDS: readonly PendingKind[] = [
   'entry', 'entryDelete', 'entryPrivate', 'account', 'debt', 'debtDelete',
   'pin', 'pinDelete', 'budget', 'budgetDelete', 'reserve', 'reserveDelete',
   'taskOrder', 'recoveryRule', 'recoveryPatch', 'recoveryCommit',
-  'category', 'categories', 'categoryBudget', 'ledgerSettings', 'ledgerBatch',
+  'category', 'categories', 'categoryBudget', 'ledgerSettings', 'ledgerNote', 'ledgerBatch',
   'sharedBoard', 'sharedInvite', 'sharedInviteDelete',
   'sharedSource', 'sharedItem', 'sharedItemDelete',
   'sharedPin', 'sharedPinDelete', 'sharedDday', 'sharedDdayDelete',
@@ -117,7 +117,7 @@ export interface SharedSourcePayload {
 
 export type PendingPayload =
   | Entry | Account | Debt | Pin | Budget | Reserve | RecoveryRule
-  | Category | { items: Category[] } | CategoryBudget | LedgerSettings
+  | Category | { items: Category[] } | CategoryBudget | LedgerSettings | LedgerNote
   | { id: string }
   | { id: string; keepPrivate: boolean }
   | { ordered: { id: string; order: number }[] }
@@ -233,6 +233,10 @@ export function sendPending(db: Firestore, uid: string, op: CommitInput): Promis
     case 'categoryBudget': {
       const b = op.payload as CategoryBudget;
       return setDoc(docIn(db, uid, COL.categoryBudgets, b.id), categoryBudgetToDoc(b));
+    }
+    case 'ledgerNote': {
+      const n = op.payload as LedgerNote;
+      return setDoc(docIn(db, uid, COL.ledgerNotes, n.id), ledgerNoteToDoc(n));
     }
     case 'ledgerBatch': {
       const p = op.payload as LedgerBatchPayload;
@@ -421,6 +425,10 @@ function targetOf(op: PendingOp, uid: string): { path: string[]; base: string } 
     case 'categoryBudget': {
       const b = op.payload as CategoryBudget;
       return mine(COL.categoryBudgets, b.id, b.updatedAt);
+    }
+    case 'ledgerNote': {
+      const n = op.payload as LedgerNote;
+      return mine(COL.ledgerNotes, n.id, n.updatedAt);
     }
     case 'reserveDelete': return mine(COL.reserves, asId(op.payload), op.at);
 

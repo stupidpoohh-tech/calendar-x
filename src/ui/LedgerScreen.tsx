@@ -35,8 +35,9 @@ import {
   shiftPeriodKey, type Period,
 } from '../domain/period';
 import type {
-  Category, CategoryBudget, Entry, LedgerTabId, PeriodKey,
+  Category, CategoryBudget, Entry, LedgerNote, LedgerTabId, PeriodKey,
 } from '../domain/types';
+import { LEDGER_NOTE_MAX } from '../data/converters';
 import type { FeedState } from '../app/useStore';
 import { Icon } from './Icon';
 import { isComposingEnter } from './ime';
@@ -46,7 +47,7 @@ import { dayLabel, feedVerdict } from './ledgerView';
 const VIEWS: readonly { id: LedgerTabId; label: string }[] = [
   { id: 'history', label: '내역' },
   { id: 'cashflow', label: '현금흐름' },
-  { id: 'budget', label: '예산' },
+  { id: 'budget', label: '예결산' },
   { id: 'stats', label: '통계' },
 ];
 
@@ -60,9 +61,6 @@ export interface LedgerScreenProps {
   onTab: (t: LedgerTabId) => void;
   periodKey: PeriodKey;
   onPeriodKey: (k: PeriodKey) => void;
-  /** 통계 · 카테고리의 정산 연도. */
-  year: number;
-  onYear: (y: number) => void;
   /** 고른 범위의 원본(반복 원본 포함). 화면용으로 펼친 목록이 아니다. */
   entries: readonly Entry[];
   /** 그 범위 · 카테고리 · 설정을 받았는가. */
@@ -74,6 +72,10 @@ export interface LedgerScreenProps {
   onEntryClick: (e: Entry) => void;
   onAdd: (dateISO: string) => void;
   onSaveCategoryBudget: (b: CategoryBudget) => void;
+  /** 정산 기간 메모(돌아보기). 기간 하나에 한 장. */
+  ledgerNotes: readonly LedgerNote[];
+  notesFeed: FeedState;
+  onSaveLedgerNote: (n: LedgerNote) => void;
   subscribeAll: SubscribeAll;
   /** 현금흐름 본문 — 카드와 한도 달력, 달력의 월 이동. App 이 그린다. */
   cashflow?: ReactNode;
@@ -131,6 +133,11 @@ export function LedgerScreen(props: LedgerScreenProps) {
       {tab === 'budget' && (
         <>
           <div className="led-toolbar">{periodNav}</div>
+          <PeriodNote
+            key={period.key} period={period}
+            note={props.ledgerNotes.find((n) => n.id === period.key) ?? null}
+            feed={props.notesFeed} onSave={props.onSaveLedgerNote}
+          />
           {gated(<LedgerBudget {...props} period={period} />)}
           {props.pockets && (
             <section className="led-sec" aria-labelledby="led-pockets-h">
@@ -169,11 +176,16 @@ export function LedgerScreen(props: LedgerScreenProps) {
               )}
             </>
           )}
-          {statsView === 'category' && gated(
-            <LedgerStats
-              entries={props.entries} settleDay={settleDay} todayISO={todayISO}
-              year={props.year} onYear={props.onYear} categories={props.categories}
-            />,
+          {statsView === 'category' && (
+            <>
+              <div className="led-toolbar">{periodNav}</div>
+              {gated(
+                <LedgerStats
+                  entries={props.entries} settleDay={settleDay} todayISO={todayISO}
+                  period={period} categories={props.categories}
+                />,
+              )}
+            </>
           )}
         </>
       )}
@@ -349,7 +361,66 @@ function LedgerHistory({
   );
 }
 
-// ---------- 예산 ----------
+// ---------- 기간 메모 ----------
+
+/**
+ * 그 기간을 돌아보는 글 한 장 — 반성 · 다짐. 예결산 숫자 위에 둔다.
+ *
+ * 메모 구독이 아직 오지 않았거나 캐시가 비어 "없음" 을 확정할 수 없으면 고치지 못하게 둔다.
+ * 그 사이 빈 칸으로 열어 저장하면 서버에 있는 글을 빈 글로 덮는다.
+ */
+function PeriodNote({ period, note, feed, onSave }: {
+  period: Period; note: LedgerNote | null; feed: FeedState; onSave: (n: LedgerNote) => void;
+}) {
+  const [editing, setEditing] = useState(false);
+  const [text, setText] = useState('');
+  const known = feed.ready && !(feed.empty && feed.fromCache);
+  const saved = note?.text ?? '';
+  const open = () => { setText(saved); setEditing(true); };
+  const save = () => {
+    const next = text.replace(/\s+$/, '');
+    setEditing(false);
+    if (next === saved) return;
+    const now = new Date().toISOString();
+    onSave({ id: period.key, period: period.key, text: next, createdAt: note?.createdAt || now, updatedAt: now });
+  };
+
+  return (
+    <section className="led-memo" aria-labelledby="led-memo-h">
+      <div className="led-memo-h">
+        <h3 className="led-sec-h" id="led-memo-h">{periodName(period.key)} 돌아보기</h3>
+        {!editing && known && (
+          <button className="btn sm" onClick={open}>{saved ? '고치기' : '적기'}</button>
+        )}
+      </div>
+      {editing ? (
+        <>
+          <textarea
+            className="mod-input led-memo-in" rows={4} autoFocus maxLength={LEDGER_NOTE_MAX}
+            aria-label={`${periodName(period.key)} 메모`}
+            placeholder="이 기간에 무엇을 잘했고 무엇을 바꿀지 — 반성 · 다짐"
+            value={text} onChange={(e) => setText(e.target.value)}
+          />
+          <div className="led-memo-a">
+            {text.length > LEDGER_NOTE_MAX - 500 && <span className="led-note num">{text.length} / {LEDGER_NOTE_MAX}</span>}
+            <button className="btn" onClick={() => setEditing(false)}>취소</button>
+            <button className="btn primary" onClick={save}>저장</button>
+          </div>
+        </>
+      ) : !known ? (
+        <p className="led-note" role="status">
+          {feed.status === 'error' ? '메모를 불러오지 못했습니다. 연결을 확인한 뒤 다시 열어 주세요.' : '메모를 불러오는 중입니다.'}
+        </p>
+      ) : saved ? (
+        <p className="led-memo-t">{saved}</p>
+      ) : (
+        <p className="led-note">아직 적은 글이 없습니다. 이 기간을 돌아보며 반성 · 다짐을 적어 두세요.</p>
+      )}
+    </section>
+  );
+}
+
+// ---------- 예결산 ----------
 
 function LedgerBudget({
   entries, period, todayISO, settleDay, categories, categoryBudgets, categoriesReady,
@@ -379,7 +450,7 @@ function LedgerBudget({
 
   return (
     <div className="led-body">
-      <h3 className="led-sec-h">카테고리 예산</h3>
+      <h3 className="led-sec-h">카테고리 예결산</h3>
       <div className="led-totals">
         <div><span>예산</span><b className="num">{formatAmount(sum.budgeted)}</b></div>
         <div><span>결산</span><b className="num minus">{formatAmount(sum.actual)}</b></div>

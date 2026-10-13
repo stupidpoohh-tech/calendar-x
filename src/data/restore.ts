@@ -33,9 +33,10 @@
 import { conflictingConfirmations } from '../domain/confirm';
 import { isValidDate, normalizeDate } from '../domain/date';
 import type {
-  Account, BackupCollection, Budget, Category, CategoryBudget, Debt, Entry, Pin, RecoveryRule, Reserve,
+  Account, BackupCollection, Budget, Category, CategoryBudget, Debt, Entry, LedgerNote, Pin, RecoveryRule, Reserve,
 } from '../domain/types';
 import type { BackupData } from './backup';
+import { LEDGER_NOTE_MAX } from './converters';
 import type { CreateManyResult } from './repo';
 
 /** 파일 한 건이 왜 들어갈 수 없는지. */
@@ -207,6 +208,13 @@ function checkCategoryBudget(b: CategoryBudget): string | null {
   return null;
 }
 
+function checkLedgerNote(n: LedgerNote): string | null {
+  if (!/^\d{4}-(0[1-9]|1[0-2])$/.test(n.period)) return `기간이 YYYY-MM 이 아닙니다: ${n.period}`;
+  if (n.id !== n.period) return `id 가 기간(${n.period})과 같지 않습니다.`;
+  if (n.text.length > LEDGER_NOTE_MAX) return `메모가 ${LEDGER_NOTE_MAX}자를 넘습니다.`;
+  return null;
+}
+
 function scan<T extends { id: string }>(
   collection: BackupCollection, list: readonly T[],
   check: (v: T) => string | null, out: BackupProblem[],
@@ -243,6 +251,7 @@ export function validateBackup(data: BackupData): BackupProblem[] {
   scan('reserves', data.reserves, checkReserve, out);
   scan('categories', data.categories, checkCategory, out);
   scan('categoryBudgets', data.categoryBudgets, checkCategoryBudget, out);
+  scan('ledgerNotes', data.ledgerNotes, checkLedgerNote, out);
   return out;
 }
 
@@ -271,6 +280,8 @@ export function planMerge(current: BackupData, incoming: BackupData): BackupData
     reserves: only(current.reserves, incoming.reserves),
     categories: only(current.categories, incoming.categories),
     categoryBudgets: only(current.categoryBudgets, incoming.categoryBudgets),
+    // 같은 기간의 메모가 이미 있으면 지금 글을 남긴다 — 다른 계정의 옛 글로 덮지 않는다.
+    ledgerNotes: only(current.ledgerNotes, incoming.ledgerNotes),
     // 정산 시작일도 설정이다. 회복 규칙과 같은 이유로 병합이 적용하지 않는다.
     ledger: current.ledger ?? incoming.ledger,
     /*
@@ -327,7 +338,8 @@ export function mergeSkipsLedger(fileDay: number, currentDay: number): string {
 
 export function countDocs(d: Omit<BackupData, 'recovery' | 'ledger'>): number {
   return d.entries.length + d.accounts.length + d.debts.length + d.pins.length
-    + d.budgets.length + d.reserves.length + d.categories.length + d.categoryBudgets.length;
+    + d.budgets.length + d.reserves.length + d.categories.length + d.categoryBudgets.length
+    + d.ledgerNotes.length;
 }
 
 // ---------- 실행 순서 ----------

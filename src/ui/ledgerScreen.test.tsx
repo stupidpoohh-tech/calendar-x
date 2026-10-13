@@ -11,6 +11,7 @@ import { newCategory, setDefaultBudget } from '../domain/category';
 import { newEntry, newMoney } from '../domain/entry';
 import type { CategoryBudget, Entry, LedgerTabId, MoneyFields } from '../domain/types';
 import type { FeedState } from '../app/useStore';
+import { pieSlices } from '../domain/ledgerStats';
 import { LedgerScreen, type LedgerScreenProps } from './LedgerScreen';
 
 afterEach(cleanup);
@@ -24,7 +25,8 @@ const tx = (id: string, date: string, amount: number, m: Partial<MoneyFields> = 
 function mount(over: Partial<LedgerScreenProps> = {}) {
   const props: LedgerScreenProps = {
     todayISO: TODAY, settleDay: 25, tab: 'history', onTab: vi.fn(), periodKey: '2026-10', onPeriodKey: vi.fn(),
-    year: 2026, onYear: vi.fn(), entries: [], feed: LIVE, categories: cats, categoryBudgets: [],
+    entries: [], feed: LIVE, categories: cats, categoryBudgets: [],
+    ledgerNotes: [], notesFeed: LIVE, onSaveLedgerNote: vi.fn(),
     categoriesReady: true, onSeedCategories: vi.fn(), onEntryClick: vi.fn(), onAdd: vi.fn(),
     onSaveCategoryBudget: vi.fn(), subscribeAll: vi.fn(() => () => undefined),
     ...over,
@@ -203,7 +205,7 @@ describe('예산', () => {
 describe('보기 전환', () => {
   it('렌즈 바로 아래 네 보기 — 고른 보기의 본문 하나만 그린다', () => {
     const p = mount({ cashflow: <div>현금흐름 본문</div>, pockets: <div>주머니 구역</div> });
-    expect(screen.getAllByRole('tab').map((t) => t.textContent)).toEqual(['내역', '현금흐름', '예산', '통계']);
+    expect(screen.getAllByRole('tab').map((t) => t.textContent)).toEqual(['내역', '현금흐름', '예결산', '통계']);
     expect(screen.queryByText('현금흐름 본문')).toBeNull();
     fireEvent.click(screen.getByRole('tab', { name: '현금흐름' }));
     expect(p.onTab).toHaveBeenCalledWith('cashflow' satisfies LedgerTabId);
@@ -217,7 +219,7 @@ describe('보기 전환', () => {
 
   it('예산 보기는 카테고리 예산과 생활비 주머니 · 세이브를 다른 구역으로 나눈다', () => {
     mount({ tab: 'budget', pockets: <div>주머니 구역</div> });
-    expect(screen.getByRole('heading', { name: '카테고리 예산' })).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: '카테고리 예결산' })).toBeInTheDocument();
     expect(screen.getByRole('heading', { name: '생활비 주머니 · 세이브' })).toBeInTheDocument();
     const pockets = screen.getByRole('heading', { name: '생활비 주머니 · 세이브' }).closest('section')!;
     expect(pockets.textContent).toContain('한도에서 미리 빼 두는 돈');
@@ -237,44 +239,100 @@ describe('통계 · 월별 추이', () => {
     expect(rows).toHaveLength(12);
     expect(rows[0]!.textContent).toContain('2026년 10월');
     expect(rows[0]!.textContent).toContain('진행 중');
-    expect(screen.getByRole('img', { name: '정산 기간별 수입과 지출' })).toBeInTheDocument();
+    expect(screen.getByRole('img', { name: '정산 기간별 수입, 지출과 대금' })).toBeInTheDocument();
     fireEvent.click(within(rows[4]!).getByRole('button', { name: '2026년 6월' }));
     expect(p.onPeriodKey).toHaveBeenCalledWith('2026-06');
     expect(p.onTab).toHaveBeenCalledWith('history' satisfies LedgerTabId);
   });
 });
 
-describe('통계 · 카테고리', () => {
+describe('통계 · 카테고리 — 정산 기간 하나', () => {
   const open = (over: Partial<LedgerScreenProps>) => {
-    mount({ tab: 'stats', year: 2026, settleDay: 1, ...over });
+    mount({ tab: 'stats', settleDay: 1, ...over });
     fireEvent.click(screen.getByRole('radio', { name: '카테고리' }));
   };
 
-  it('카테고리별 연간 합계 · 비중 · 월평균, 금융비용은 따로', () => {
+  it('고른 기간의 카테고리 금액 · 비중, 월평균은 열두 기간 중 끝난 기간으로', () => {
     open({
       entries: [
         tx('a', '2026-01-10', 100_000, { categoryId: 'food' }),
         tx('b', '2026-02-10', 200_000, { categoryId: 'food' }),
         tx('c', '2026-10-05', 300_000, { categoryId: 'food' }),
+        tx('d', '2026-10-06', 100_000, { categoryId: 'cafe' }),
         tx('i', '2026-03-01', 20_000, { flow: 'loanInterest' }),
-        tx('p', '2026-03-01', 500_000, { flow: 'loanPrincipal' }),
+        tx('p', '2026-10-01', 500_000, { flow: 'loanPrincipal' }),
       ],
     });
-    const list = screen.getByRole('list', { name: '카테고리별 연간 소비' });
+    expect(screen.getByText('2026년 10월')).toBeInTheDocument();
+    const list = screen.getByRole('list', { name: '카테고리별 소비' });
     const food = within(list).getByText('식비').closest('li')!;
-    expect(food.textContent).toContain('합계 600,000');
-    expect(food.textContent).toContain('소비의 100%');
-    // 끝난 기간은 1~9월(9개). (100,000 + 200,000) / 9 — 진행 중인 10월은 넣지 않는다.
-    // 오른쪽 큰 숫자가 월평균이다.
-    expect(food.querySelector('.led-stat-h .num')!.textContent).toBe('월평균33,333');
-    expect(within(list).getByText('금융비용 (대출 이자)')).toBeInTheDocument();
-    expect(screen.getByText(/끝난 기간 수\(9개\)/)).toBeInTheDocument();
-    // 원금은 소비 합계에 없다.
-    expect(document.querySelector('.led-totals')!.textContent).toContain('600,000');
+    // 큰 숫자는 이 기간 금액.
+    expect(food.querySelector('.led-stat-h > .num')!.textContent).toBe('300,000');
+    expect(food.textContent).toContain('소비의 75%');
+    // 2025-11 ~ 2026-09 끝난 기간 11개. (100,000 + 200,000) / 11
+    expect(food.textContent).toContain('월평균 27,273');
+    expect(screen.getByText(/끝난\s*기간 수\(11개\)/)).toBeInTheDocument();
+    // 이자는 3월이라 이 기간 금융비용 줄이 없다. 원금은 소비가 아니다.
+    expect(within(list).queryByText('금융비용 (대출 이자)')).toBeNull();
+    expect(document.querySelector('.led-totals')!.textContent).toContain('400,000');
+    // 원형 차트와 범례.
+    expect(screen.getByRole('img', { name: '카테고리별 소비 비중' })).toBeInTheDocument();
+    const legend = screen.getByRole('list', { name: '소비 비중' });
+    expect(legend.textContent).toContain('식비75%');
+    expect(legend.textContent).toContain('카페25%');
   });
 
-  it('소비 · 금융비용 기록이 없어도 끝난 기간 수는 0이 아니다', () => {
-    open({ entries: [tx('s', '2026-02-10', 1_000_000, { type: 'income' })] });
-    expect(screen.getByText(/끝난 기간 수\(9개\)/)).toBeInTheDocument();
+  it('기간을 옮기면 그 기간을 본다', () => {
+    const p = mount({ tab: 'stats', settleDay: 1 });
+    fireEvent.click(screen.getByRole('radio', { name: '카테고리' }));
+    fireEvent.click(screen.getByRole('button', { name: '이전 기간' }));
+    expect(p.onPeriodKey).toHaveBeenCalledWith('2026-09');
+  });
+
+  it('소비 기록이 없으면 그렇다고 적는다', () => {
+    open({ entries: [tx('s', '2026-10-02', 1_000_000, { type: 'income' })] });
+    expect(screen.getByText('2026년 10월에 기록한 소비가 없습니다.')).toBeInTheDocument();
+  });
+});
+
+describe('원형 차트 조각', () => {
+  it('큰 순서로 여섯까지 제 색, 나머지는 하나로 접는다. 0원은 조각이 없다', () => {
+    const items = [10, 80, 30, 70, 0, 50, 60, 20, 40].map((v, i) => ({ key: `k${i}`, name: `c${i}`, value: v }));
+    const out = pieSlices(items);
+    expect(out.map((x) => x.value)).toEqual([80, 70, 60, 50, 40, 30, 30]);
+    expect(out.map((x) => x.slot)).toEqual([1, 2, 3, 4, 5, 6, null]);
+    expect(out[6]!.name).toBe('그 밖 2개');
+    expect(pieSlices(items.slice(0, 3)).every((x) => x.slot !== null)).toBe(true);
+  });
+});
+
+describe('예결산 · 기간 메모', () => {
+  it('적은 글을 보여 주고, 고쳐 저장하면 그 기간 열쇠로 한 장을 쓴다', () => {
+    const note = { id: '2026-10', period: '2026-10', text: '배달 줄이기', createdAt: 'c', updatedAt: 'u' };
+    const p = mount({ tab: 'budget', ledgerNotes: [note] });
+    expect(screen.getByRole('heading', { name: '2026년 10월 돌아보기' })).toBeInTheDocument();
+    expect(screen.getByText('배달 줄이기')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: '고치기' }));
+    fireEvent.change(screen.getByLabelText('2026년 10월 메모'), { target: { value: '배달 줄이기\n외식 주 1회  ' } });
+    fireEvent.click(screen.getByRole('button', { name: '저장' }));
+    expect(p.onSaveLedgerNote).toHaveBeenCalledWith(expect.objectContaining({
+      id: '2026-10', period: '2026-10', text: '배달 줄이기\n외식 주 1회', createdAt: 'c',
+    }));
+  });
+
+  it('바꾸지 않고 저장하면 쓰지 않는다', () => {
+    const p = mount({ tab: 'budget' });
+    fireEvent.click(screen.getByRole('button', { name: '적기' }));
+    fireEvent.click(screen.getByRole('button', { name: '저장' }));
+    expect(p.onSaveLedgerNote).not.toHaveBeenCalled();
+  });
+
+  it('메모를 아직 못 받았으면 고칠 수 없다 — 빈 칸으로 저장해 서버의 글을 덮지 않는다', () => {
+    mount({ tab: 'budget', notesFeed: { ...LIVE, status: 'loading', ready: false } });
+    expect(screen.queryByRole('button', { name: '적기' })).toBeNull();
+    expect(screen.getByText('메모를 불러오는 중입니다.')).toBeInTheDocument();
+    cleanup();
+    mount({ tab: 'budget', notesFeed: { ...LIVE, status: 'cache', empty: true, fromCache: true } });
+    expect(screen.queryByRole('button', { name: '적기' })).toBeNull();
   });
 });

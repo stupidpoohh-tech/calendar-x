@@ -34,7 +34,7 @@ import {
 import { applyReflectChoice, isActual, reflectChoiceFor } from '../domain/ledger';
 import { isRecoveryEntry } from '../domain/recovery';
 import type {
-  Account, Budget, Category, CategoryBudget, Entry, Filters, LedgerTabId, LensId, SharedInvite, SharedNote, SharedTodoItem,
+  Account, Budget, Category, CategoryBudget, Entry, Filters, LedgerNote, LedgerTabId, LensId, SharedInvite, SharedNote, SharedTodoItem,
   TaskStatus, ViewId, YearMonth,
 } from '../domain/types';
 import { ConfirmSheet } from '../ui/ConfirmSheet';
@@ -607,6 +607,11 @@ function Workspace({ uid, user, onSignOut }: WorkspaceProps) {
     commit({ kind: 'categoryBudget', label: '카테고리 예산', summary: b.period, payload: b });
   }, [isAnon, uid, promptLogin, commit]);
 
+  const saveLedgerNote = useCallback((n: LedgerNote) => {
+    if (isAnon || !uid) { void promptLogin(); return; }
+    commit({ kind: 'ledgerNote', label: '기간 메모', summary: n.period, payload: n });
+  }, [isAnon, uid, promptLogin, commit]);
+
   /** 생활비에 연결되지 않은 실제 지출을 그 주머니에 건다. 사용처는 하나만 — 대출 연결은 푼다. */
   const linkToPocket = useCallback((e: Entry, b: Budget) => {
     const base = findBase(e.id) ?? e;
@@ -636,18 +641,15 @@ function Workspace({ uid, user, onSignOut }: WorkspaceProps) {
   const settleDay = store.ledger.settleDay;
   const currentPeriod = periodOf(today, settleDay).key;
   const [ledgerPeriodPick, setLedgerPeriod] = useState<string | null>(null);
-  const [ledgerYearPick, setLedgerYear] = useState<number | null>(null);
   const ledgerPeriod = ledgerPeriodPick ?? currentPeriod;
-  const ledgerYear = ledgerYearPick ?? Number(ledgerPeriod.slice(0, 4));
   const ledgerMonths = useMemo(() => {
     const ps = [
       ...periodsBetween(shiftPeriodKey(ledgerPeriod, -11), ledgerPeriod, settleDay),
-      ...periodsOfYear(ledgerYear, settleDay),
       ...periodsOfYear(Number(ledgerPeriod.slice(0, 4)), settleDay),
     ];
     const p = periodByKey(ledgerPeriod, settleDay);
     return monthsOfPeriods(p ? [...ps, p] : ps);
-  }, [ledgerPeriod, ledgerYear, settleDay]);
+  }, [ledgerPeriod, settleDay]);
   const ledgerOn = lens === 'money' && !sharedOpen;
   // 필터는 달력 · 리스트에 그리는 항목을 거른다. 가계부에서는 그 달력이 있는 현금흐름에서만 뜻이 있다.
   // 마지막 보기는 세션 동안만 기억한다. 앱을 새로 열면 현금흐름부터 — 가계부의 기본 화면이다.
@@ -1721,9 +1723,7 @@ function Workspace({ uid, user, onSignOut }: WorkspaceProps) {
             tab={ledgerTab}
             onTab={setLedgerTab}
             periodKey={ledgerPeriod}
-            onPeriodKey={(k) => { setLedgerPeriod(k); setLedgerYear(null); }}
-            year={ledgerYear}
-            onYear={setLedgerYear}
+            onPeriodKey={setLedgerPeriod}
             entries={ledgerEntries}
             feed={ledgerFeed}
             categories={store.categories}
@@ -1733,6 +1733,9 @@ function Workspace({ uid, user, onSignOut }: WorkspaceProps) {
             onEntryClick={openLedgerEntry}
             onAdd={(iso) => openCreate({ startDate: iso })}
             onSaveCategoryBudget={saveCategoryBudget}
+            ledgerNotes={store.ledgerNotes}
+            notesFeed={store.ledgerNotesFeed}
+            onSaveLedgerNote={saveLedgerNote}
             subscribeAll={subscribeAllActuals}
             cashflow={(
               <div className="led-cashflow">

@@ -277,6 +277,26 @@ export function categoryTrends(
   return out.sort((a, b) => b.total - a.total);
 }
 
+// ---------- 원형 차트 ----------
+
+/** 원형 차트에 제 색으로 그리는 조각 수. 나머지는 '그 밖' 한 조각으로 접는다 — 색을 돌려 쓰지 않는다. */
+export const PIE_SLOTS = 6;
+
+/** 조각 하나. `slot` 은 색 자리(1~6), 접은 '그 밖' 은 null. */
+export interface PieSlice { key: string; name: string; value: number; slot: number | null }
+
+/**
+ * 원형 차트 조각. 큰 순서로 여섯까지 제 색, 나머지는 하나로 접는다.
+ * 0원 카테고리는 조각을 만들지 않는다.
+ */
+export function pieSlices(items: readonly { key: string; name: string; value: number }[]): PieSlice[] {
+  const sorted = items.filter((x) => x.value > 0).sort((a, b) => b.value - a.value);
+  const head = sorted.slice(0, PIE_SLOTS).map((x, i) => ({ ...x, slot: i + 1 }));
+  const rest = sorted.slice(PIE_SLOTS);
+  if (rest.length === 0) return head;
+  return [...head, { key: '__rest', name: `그 밖 ${rest.length}개`, value: rest.reduce((a, x) => a + x.value, 0), slot: null }];
+}
+
 // ---------- 내역 ----------
 
 export interface HistoryItem {

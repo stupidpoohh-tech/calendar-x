@@ -487,6 +487,20 @@ export interface CategoryBudget {
   updatedAt: string;
 }
 
+/**
+ * 정산 기간 메모 — 예결산 화면 위에 그 기간을 돌아보며 적는 글(반성 · 다짐).
+ * 기간 하나에 한 장이고 문서 id 가 곧 기간 열쇠다 — 같은 기간에 두 장이 생기면 어느 쪽이
+ * 그 달의 글인지 알 수 없다. 규칙이 `id == period` 를 강제한다.
+ * 정산 시작일을 바꾸면 기간 경계는 움직이지만 이름(열쇠)은 그대로라 글은 같은 이름의 기간에 남는다.
+ */
+export interface LedgerNote {
+  id: PeriodKey;
+  period: PeriodKey;
+  text: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
 /** 가계부 설정. `users/{uid}` 문서의 `ledger` 필드에 산다. */
 export interface LedgerSettings {
   /** 매월 정산 시작일 1~31. 그 달에 없는 날이면 말일로 당긴다. */
@@ -496,7 +510,7 @@ export interface LedgerSettings {
 /** 백업이 담는 컬렉션. */
 export type BackupCollection =
   | 'entries' | 'accounts' | 'debts' | 'pins' | 'budgets' | 'reserves'
-  | 'categories' | 'categoryBudgets';
+  | 'categories' | 'categoryBudgets' | 'ledgerNotes';
 
 export type ThemePref = 'system' | 'light' | 'dark';
 /** 글씨 크기. 'auto' 는 브라우저·OS 설정을 따른다는 뜻이다. */

@@ -10,6 +10,7 @@
  *
  * 10월 결산: 소비 = 9,000 + 4,500 + 54,000 + 30,000 + 39,000(카드 사용) + 12,000 = 148,500
  *            금융비용 45,000 · 지출 193,500 · 카드 대금 120,000 은 지출 아님 · 수입 0
+ *            대금(대출 원금) 200,000 · 수지 0 − 193,500 − 200,000 = −393,500
  * 9월 결산:  수입 3,000,000 · 지출 150,000 + 61,000 + 28,000 = 239,000
  */
 import { renderHook } from '@testing-library/react';
@@ -34,7 +35,10 @@ describe('데모 숫자', () => {
     const oct = periodByKey('2026-10', 1)!;
     const sep = periodByKey('2026-09', 1)!;
     const o = totalsOf(actualsIn(result.current.entries, oct.start, oct.end));
-    expect(o).toMatchObject({ consumption: 148_500, financeCost: 45_000, spending: 193_500, cardPayment: 120_000, income: 0 });
+    expect(o).toMatchObject({
+      consumption: 148_500, financeCost: 45_000, spending: 193_500, cardPayment: 120_000, income: 0,
+      repayment: 200_000, net: -393_500,
+    });
     const p = totalsOf(actualsIn(result.current.entries, sep.start, sep.end));
     expect(p).toMatchObject({ income: 3_000_000, spending: 239_000 });
   });

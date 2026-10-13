@@ -459,6 +459,24 @@ describe('가계부 결산 — 카테고리 · 카테고리 예산 · 정산 시
     await assertFails(setDoc(doc(db(OTHER), `users/${ME}/categoryBudgets/food~default~2026-09`), cb()));
   });
 
+  it('정산 기간 메모 — id 가 곧 기간이고, 글은 5000자까지. 남은 읽지도 쓰지도 못한다', async () => {
+    const note = (p: Record<string, unknown> = {}) => ({
+      period: '2026-09', text: '배달 줄이기', createdAt: 't', updatedAt: 't', ...p,
+    });
+    const at = (id: string, who = ME) => doc(db(who), `users/${ME}/ledgerNotes/${id}`);
+    await assertSucceeds(setDoc(at('2026-09'), note()));
+    await assertSucceeds(getDoc(at('2026-09')));
+    await assertSucceeds(setDoc(at('2026-09'), note({ text: '' })));
+    await assertSucceeds(setDoc(at('2026-09'), note({ text: 'x'.repeat(5000) })));
+    await assertFails(setDoc(at('2026-09'), note({ text: 'x'.repeat(5001) })));
+    await assertFails(setDoc(at('2026-10'), note()));
+    await assertFails(setDoc(at('2026-13'), note({ period: '2026-13' })));
+    await assertFails(setDoc(at('memo'), note({ period: 'memo' })));
+    await assertFails(setDoc(at('2026-09'), note({ text: 3 })));
+    await assertFails(getDoc(at('2026-09', OTHER)));
+    await assertFails(setDoc(at('2026-11', OTHER), note({ period: '2026-11' })));
+  });
+
   it('정산 시작일은 1~31 정수다. 이웃 필드(회복 규칙)는 그대로 쓴다', async () => {
     const me = doc(db(ME), `users/${ME}`);
     await assertSucceeds(setDoc(me, { ledger: { settleDay: 25 } }, { merge: true }));

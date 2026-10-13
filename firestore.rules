@@ -256,6 +256,21 @@ service cloud.firestore {
           && budgetId == data().categoryId + '~' + data().scope + '~' + data().period;
       }
 
+      /*
+        정산 기간 메모 — 예결산 화면 위의 돌아보기 글. 기간 하나에 한 장이라 문서 id 가 곧
+        기간 열쇠(YYYY-MM)다. 같은 기간에 두 장이 생기면 어느 쪽이 그 달의 글인지 알 수 없다.
+      */
+      match /ledgerNotes/{period} {
+        allow read, delete: if isOwner(uid);
+        allow create, update: if isOwner(uid)
+          && withinSize()
+          && period.matches('^\\d{4}-(0[1-9]|1[0-2])$')
+          && data().period == period
+          && data().text is string && data().text.size() <= 5000
+          && data().createdAt is string
+          && data().updatedAt is string;
+      }
+
       match /pins/{pinId} {
         allow read, delete: if isOwner(uid);
         allow create, update: if isOwner(uid)

@@ -9,7 +9,7 @@ import { normalizeDate, todayISO, ymOf, ymRange } from '../domain/date';
 import { MONEY_FLOWS, moneyFlowOf, moneyStatusOf } from '../domain/ledger';
 import { clampSettleDay } from '../domain/period';
 import type {
-  Account, Budget, Category, CategoryBudget, ColorId, Debt, Entry, EntryKind, LedgerSettings,
+  Account, Budget, Category, CategoryBudget, ColorId, Debt, Entry, EntryKind, LedgerNote, LedgerSettings,
   MoneyFields, MoneyFlow, MoneyType, Pin, PlannedRef, Reserve,
   RecoveryFields, RecoveryOption, RecoveryRule, RecoveryWindowId,
   Recurrence, RepeatFreq, TaskStatus,
@@ -465,6 +465,24 @@ export function categoryBudgetToDoc(b: CategoryBudget): Raw {
     amountMinor: b.amountMinor, currency: b.currency,
     createdAt: b.createdAt, updatedAt: b.updatedAt,
   };
+}
+
+/** 메모 글자 수 상한. 규칙과 같은 값이다. */
+export const LEDGER_NOTE_MAX = 5000;
+
+/** 기간 열쇠는 문서 id 를 믿는다 — 규칙이 `id == period` 를 강제하므로 둘은 같다. */
+export function ledgerNoteFromDoc(id: string, raw: Raw): LedgerNote {
+  const period = isPeriodKey(id) ? id : isPeriodKey(raw.period) ? raw.period : '9999-12';
+  return {
+    id, period,
+    text: str(raw.text).slice(0, LEDGER_NOTE_MAX),
+    createdAt: str(raw.createdAt),
+    updatedAt: str(raw.updatedAt),
+  };
+}
+
+export function ledgerNoteToDoc(n: LedgerNote): Raw {
+  return { period: n.period, text: n.text, createdAt: n.createdAt, updatedAt: n.updatedAt };
 }
 
 /** `users/{uid}` 문서의 `ledger` 필드. 없으면 1일 정산이다. */

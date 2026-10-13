@@ -16,11 +16,11 @@ import {
 import { normalizeDate, ymOf } from '../domain/date';
 import { describeFirestoreError } from './errors';
 import type {
-  Account, Budget, Category, CategoryBudget, Debt, Entry, LedgerSettings, Pin, RecoveryRule, Reserve, YearMonth,
+  Account, Budget, Category, CategoryBudget, Debt, Entry, LedgerNote, LedgerSettings, Pin, RecoveryRule, Reserve, YearMonth,
 } from '../domain/types';
 import {
   accountFromDoc, accountToDoc, budgetFromDoc, budgetToDoc,
-  categoryBudgetFromDoc, categoryBudgetToDoc, categoryFromDoc, categoryToDoc,
+  categoryBudgetFromDoc, categoryBudgetToDoc, categoryFromDoc, categoryToDoc, ledgerNoteFromDoc, ledgerNoteToDoc,
   debtFromDoc, debtToDoc, entryFromDoc, entryToDoc, ledgerSettingsFromDoc, ledgerSettingsToDoc,
   pinFromDoc, pinToDoc, recoveryRuleFromDoc, recoveryRuleToDoc, reserveFromDoc, reserveToDoc,
 } from './converters';
@@ -316,6 +316,17 @@ export function subscribeCategoryBudgets(
   );
 }
 
+/** 정산 기간 메모. 한 달에 한 장이라 작고 기간과 무관하게 전량 받는다. */
+export function subscribeLedgerNotes(
+  db: Firestore, uid: string, cb: SnapSink<LedgerNote>, onError: ErrorSink,
+): Unsubscribe {
+  return onSnapshot(
+    col(db, uid, COL.ledgerNotes), WITH_META,
+    keepingIdentity(ledgerNoteFromDoc, cb),
+    (err) => onError('ledgerNotes', err),
+  );
+}
+
 /** 가계부 설정(정산 시작일). 회복 규칙과 같은 사용자 문서의 다른 필드다. */
 export function subscribeLedgerSettings(
   db: Firestore, uid: string, cb: (s: LedgerSettings, meta: SnapMeta) => void, onError: ErrorSink,
@@ -487,9 +498,9 @@ export async function saveTaskOrder(
 export async function fetchAll(db: Firestore, uid: string): Promise<{
   entries: Entry[]; accounts: Account[]; debts: Debt[]; pins: Pin[];
   budgets: Budget[]; reserves: Reserve[];
-  categories: Category[]; categoryBudgets: CategoryBudget[];
+  categories: Category[]; categoryBudgets: CategoryBudget[]; ledgerNotes: LedgerNote[];
 }> {
-  const [e, a, d, p, b, r, c, cb] = await Promise.all([
+  const [e, a, d, p, b, r, c, cb, ln] = await Promise.all([
     getDocs(col(db, uid, COL.entries)),
     getDocs(col(db, uid, COL.accounts)),
     getDocs(col(db, uid, COL.debts)),
@@ -498,6 +509,7 @@ export async function fetchAll(db: Firestore, uid: string): Promise<{
     getDocs(col(db, uid, COL.reserves)),
     getDocs(col(db, uid, COL.categories)),
     getDocs(col(db, uid, COL.categoryBudgets)),
+    getDocs(col(db, uid, COL.ledgerNotes)),
   ]);
   return {
     entries: mapSnap(e, entryFromDoc),
@@ -508,6 +520,7 @@ export async function fetchAll(db: Firestore, uid: string): Promise<{
     reserves: mapSnap(r, reserveFromDoc),
     categories: mapSnap(c, categoryFromDoc),
     categoryBudgets: mapSnap(cb, categoryBudgetFromDoc),
+    ledgerNotes: mapSnap(ln, ledgerNoteFromDoc),
   };
 }
 
@@ -542,7 +555,7 @@ export async function writeMany(
   payload: {
     entries?: Entry[]; accounts?: Account[]; debts?: Debt[]; pins?: Pin[];
     budgets?: Budget[]; reserves?: Reserve[];
-    categories?: Category[]; categoryBudgets?: CategoryBudget[];
+    categories?: Category[]; categoryBudgets?: CategoryBudget[]; ledgerNotes?: LedgerNote[];
   },
   onProgress?: (done: number, total: number) => void,
 ): Promise<WriteManyResult> {
@@ -558,6 +571,7 @@ export async function writeMany(
     ...(payload.categoryBudgets ?? []).map((x) => ({
       name: COL.categoryBudgets, id: x.id, data: categoryBudgetToDoc(x),
     })),
+    ...(payload.ledgerNotes ?? []).map((x) => ({ name: COL.ledgerNotes, id: x.id, data: ledgerNoteToDoc(x) })),
   ];
 
   const result: WriteManyResult = { written: 0, failed: [], allFailed: false };
@@ -615,7 +629,7 @@ export async function createManyIfAbsent(
   payload: {
     entries?: Entry[]; accounts?: Account[]; debts?: Debt[]; pins?: Pin[];
     budgets?: Budget[]; reserves?: Reserve[];
-    categories?: Category[]; categoryBudgets?: CategoryBudget[];
+    categories?: Category[]; categoryBudgets?: CategoryBudget[]; ledgerNotes?: LedgerNote[];
   },
   onProgress?: (done: number, total: number) => void,
 ): Promise<CreateManyResult> {
@@ -631,6 +645,7 @@ export async function createManyIfAbsent(
     ...(payload.categoryBudgets ?? []).map((x) => ({
       name: COL.categoryBudgets, id: x.id, data: categoryBudgetToDoc(x),
     })),
+    ...(payload.ledgerNotes ?? []).map((x) => ({ name: COL.ledgerNotes, id: x.id, data: ledgerNoteToDoc(x) })),
   ];
 
   const result: CreateManyResult = { created: 0, conflicts: [], failed: [], allFailed: false };

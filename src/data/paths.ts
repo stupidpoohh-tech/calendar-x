@@ -19,6 +19,8 @@ export const COL = {
   categories: 'categories',
   /** 카테고리 예산 — 기본(그 기간부터) · 기간 하나. 결산용이고 한도에 들어가지 않는다. */
   categoryBudgets: 'categoryBudgets',
+  /** 정산 기간 메모. 문서 id = 기간 열쇠(YYYY-MM). */
+  ledgerNotes: 'ledgerNotes',
   /** 이관 전 구조. 읽기 전용으로만 접근한다. */
   legacyItems: 'items',
 } as const;

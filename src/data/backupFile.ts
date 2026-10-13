@@ -24,6 +24,7 @@
  * | v4 | `version: 4` | v3 + `budgets` · `reserves` **두 배열 모두 필수** |
  * | v5 | `version: 5` | v4 와 같은 구조. 가계부 원장 필드(실제 거래 · 흐름 · 확정한 회차)가 실릴 수 있다 |
  * | v6 | `version: 6` | v5 + `categories` · `categoryBudgets` **두 배열 모두 필수** + `ledger`(정산 시작일, null 허용) |
+ * | v7 | `version: 7` | v6 + `ledgerNotes`(정산 기간 메모) **필수** |
  *
  * 없는 컬렉션을 빈 배열로 넘겨 짚지 않는다. v2·v3 파일에 `debts` 가 없다면 그건
  * 빈 백업이 아니라 깨진 파일이다.
@@ -39,14 +40,14 @@ import type { BackupCollection } from '../domain/types';
 import type { BackupData } from './backup';
 import {
   accountFromDoc, budgetFromDoc, categoryBudgetFromDoc, categoryFromDoc, debtFromDoc,
-  entryFromDoc, ledgerSettingsFromDoc, pinFromDoc, recoveryRuleFromDoc, reserveFromDoc,
+  entryFromDoc, LEDGER_NOTE_MAX, ledgerNoteFromDoc, ledgerSettingsFromDoc, pinFromDoc, recoveryRuleFromDoc, reserveFromDoc,
 } from './converters';
 import { convertLegacyItems } from './migrate';
 
-export const SUPPORTED_VERSIONS = [1, 2, 3, 4, 5, 6] as const;
-export const LATEST_VERSION = 6;
+export const SUPPORTED_VERSIONS = [1, 2, 3, 4, 5, 6, 7] as const;
+export const LATEST_VERSION = 7;
 
-export type BackupFormat = 'legacy' | 'v2' | 'v3' | 'v4' | 'v5' | 'v6';
+export type BackupFormat = 'legacy' | 'v2' | 'v3' | 'v4' | 'v5' | 'v6' | 'v7';
 
 /** 파일 한 곳이 왜 들어갈 수 없는지. */
 export interface FileProblem {
@@ -457,6 +458,19 @@ function checkCategoryBudgetRaw(c: Collector, where: string, r: Raw): void {
   }
 }
 
+function checkLedgerNoteRaw(c: Collector, where: string, r: Raw): void {
+  if (typeof r.period !== 'string' || !/^\d{4}-(0[1-9]|1[0-2])$/.test(r.period)) {
+    c.add(`${where}.period`, `기간(YYYY-MM)이 아닙니다: ${describe(r.period)}`);
+  }
+  reqStr(c, `${where}.text`, r.text, LEDGER_NOTE_MAX);
+  optStr(c, `${where}.createdAt`, r.createdAt, LIMITS.checkedAt);
+  optStr(c, `${where}.updatedAt`, r.updatedAt, LIMITS.checkedAt);
+  // 문서 id 가 곧 기간이다. 규칙이 그 모양만 받으므로 쓰기 전에 말한다.
+  if (typeof r.id === 'string' && r.id !== r.period) {
+    c.add(`${where}.id`, `기간 메모의 id 는 기간(${String(r.period)})과 같아야 합니다: ${r.id}`);
+  }
+}
+
 const CHECKERS: Record<BackupCollection, (c: Collector, where: string, v: Raw) => void> = {
   entries: checkEntryRaw,
   accounts: checkAccountRaw,
@@ -466,6 +480,7 @@ const CHECKERS: Record<BackupCollection, (c: Collector, where: string, v: Raw) =
   reserves: checkReserveRaw,
   categories: checkCategoryRaw,
   categoryBudgets: checkCategoryBudgetRaw,
+  ledgerNotes: checkLedgerNoteRaw,
 };
 
 /** 컬렉션 하나를 통째로 본다. 없으면 그 자체가 문제다 (v2·v3 명세). */
@@ -574,10 +589,11 @@ export function readBackupFile(text: string): ReadResult {
     return { ok: false, problems: [{ where: 'version', reason: '버전이 없습니다. 백업 파일이 맞는지 확인해 주세요.' }] };
   }
 
-  const format: BackupFormat = version >= 6 ? 'v6' : version === 5 ? 'v5' : version === 4 ? 'v4'
-    : version === 3 ? 'v3' : 'v2';
-  const hasPockets = format === 'v4' || format === 'v5' || format === 'v6';
-  const hasCategories = format === 'v6';
+  const format: BackupFormat = version >= 7 ? 'v7' : version === 6 ? 'v6' : version === 5 ? 'v5'
+    : version === 4 ? 'v4' : version === 3 ? 'v3' : 'v2';
+  const hasPockets = version >= 4;
+  const hasCategories = version >= 6;
+  const hasNotes = version >= 7;
 
   // ---- 컬렉션 ----
   const entries = checkCollection(c, 'entries', obj.entries);
@@ -597,6 +613,10 @@ export function readBackupFile(text: string): ReadResult {
   const categoryBudgets = hasCategories
     ? checkCollection(c, 'categoryBudgets', obj.categoryBudgets)
     : checkOptionalCollection(c, 'categoryBudgets', obj.categoryBudgets);
+  // v7 부터 필수다. v6 까지는 그 구조가 없던 시절이라 없는 것이 정상이다.
+  const ledgerNotes = hasNotes
+    ? checkCollection(c, 'ledgerNotes', obj.ledgerNotes)
+    : checkOptionalCollection(c, 'ledgerNotes', obj.ledgerNotes);
   if (obj.ledger !== undefined && obj.ledger !== null) {
     if (!isObj(obj.ledger)) {
       c.add('ledger', `객체가 아닙니다: ${describe(obj.ledger)}`);
@@ -632,6 +652,7 @@ export function readBackupFile(text: string): ReadResult {
         reserves: reserves.map((r) => reserveFromDoc(r.id as string, r)),
         categories: categories.map((r) => categoryFromDoc(r.id as string, r)),
         categoryBudgets: categoryBudgets.map((r) => categoryBudgetFromDoc(r.id as string, r)),
+        ledgerNotes: ledgerNotes.map((r) => ledgerNoteFromDoc(r.id as string, r)),
         ledger: isObj(obj.ledger) ? ledgerSettingsFromDoc(obj.ledger) : null,
         recovery: isObj(obj.recovery) ? recoveryRuleFromDoc(obj.recovery) : null,
       },
@@ -673,6 +694,7 @@ function readLegacy(c: Collector, items: unknown[]): ReadResult {
         reserves: [],
         categories: [],
         categoryBudgets: [],
+        ledgerNotes: [],
         ledger: null,
         recovery: null,
       },

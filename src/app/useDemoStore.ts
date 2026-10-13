@@ -98,6 +98,7 @@ export function useDemoStore(): StoreState {
       actual('demo-act-5', '교통카드 충전', addDaysISO(today, -5), 30_000, { categoryId: 'default-transport' }),
       actual('demo-act-6', '온라인 쇼핑', addDaysISO(today, -6), 39_000, { categoryId: 'default-shopping', flow: 'cardSpend', method: '신한카드' }),
       actual('demo-act-7', '대출 이자', addDaysISO(today, -7), 45_000, { categoryId: 'default-finance', flow: 'loanInterest' }),
+      actual('demo-act-7b', '대출 원금', addDaysISO(today, -7), 200_000, { flow: 'loanPrincipal' }),
       actual('demo-act-8', '관리비', addDaysISO(today, -20), 150_000, { categoryId: 'default-housing' }),
       actual('demo-act-9', '지난달 급여', addDaysISO(today, -25), 3_000_000, { type: 'income', categoryId: 'default-salary' }),
       actual('demo-act-10', '장보기', addDaysISO(today, -35), 61_000, { categoryId: 'default-food' }),
@@ -142,6 +143,13 @@ export function useDemoStore(): StoreState {
       ],
       ledger: { settleDay: 1 },
       ledgerMeta: FEED_DEMO,
+      // 지난 기간의 돌아보기 한 장. 예결산 위에 어떻게 보이는지 미리 보여 준다.
+      ledgerNotes: [{
+        id: periodOf(addDaysISO(periodOf(today, 1).start, -1), 1).key,
+        period: periodOf(addDaysISO(periodOf(today, 1).start, -1), 1).key,
+        text: '배달이 예산을 넘었다. 이번 달은 장 보기로 돌린다.', createdAt: '', updatedAt: '',
+      }],
+      ledgerNotesFeed: FEED_DEMO,
       // 메모리에서 만든 값이라 기다릴 것이 없다. 두 갈래 모두 받아 둔 상태다.
       display: FEED_DEMO, calc: FEED_DEMO,
       loading: false, error: null, rulesBlocked: false,

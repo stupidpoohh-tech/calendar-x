@@ -648,3 +648,43 @@ describe('v6 — 규칙이 거절할 모양은 미리 거른다', () => {
     expect(problemsOf(r)[0]).toContain("'food~default~2026-09'");
   });
 });
+
+describe('v7 — 정산 기간 메모', () => {
+  const v7 = (over: Record<string, unknown> = {}) => ({
+    ...v3(), version: 7, budgets: [], reserves: [], categories: [], categoryBudgets: [], ledgerNotes: [],
+    ledger: { settleDay: 25 }, ...over,
+  });
+  const note = (over: Record<string, unknown> = {}) => ({
+    id: '2026-09', period: '2026-09', text: '배달 줄이기', createdAt: '', updatedAt: '', ...over,
+  });
+
+  it('그대로 읽는다', () => {
+    const r = read(v7({ ledgerNotes: [note()] }));
+    expect(r.ok).toBe(true);
+    if (r.ok) {
+      expect(r.file.format).toBe('v7');
+      expect(r.file.data.ledgerNotes).toEqual([note()]);
+    }
+  });
+
+  it('v7 에 ledgerNotes 가 없으면 잘린 파일로 본다', () => {
+    const obj = v7();
+    delete (obj as Record<string, unknown>).ledgerNotes;
+    expect(problemsOf(read(obj)).some((x) => x.startsWith('ledgerNotes') && x.includes('반드시'))).toBe(true);
+  });
+
+  it('v6 파일에 없는 것은 정상이다', () => {
+    const obj = v7({ version: 6 });
+    delete (obj as Record<string, unknown>).ledgerNotes;
+    const r = read(obj);
+    expect(r.ok).toBe(true);
+    if (r.ok) expect(r.file.data.ledgerNotes).toEqual([]);
+  });
+
+  it('규칙이 거절할 모양은 미리 거른다 — id ≠ 기간, 깨진 기간, 너무 긴 글', () => {
+    expect(problemsOf(read(v7({ ledgerNotes: [note({ id: 'memo' })] })))[0]).toContain('기간');
+    expect(problemsOf(read(v7({ ledgerNotes: [note({ id: '2026-13', period: '2026-13' })] })))[0]).toContain('YYYY-MM');
+    expect(problemsOf(read(v7({ ledgerNotes: [note({ text: 'x'.repeat(5001) })] }))).length).toBeGreaterThan(0);
+    expect(problemsOf(read(v7({ ledgerNotes: [note({ text: 3 })] }))).length).toBeGreaterThan(0);
+  });
+});

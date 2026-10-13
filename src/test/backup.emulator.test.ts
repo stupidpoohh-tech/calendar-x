@@ -130,6 +130,10 @@ function richAccount(): BackupData {
       setPeriodBudget('default-food', '2026-10', 250_000, '2026-10-01T00:00:00.000Z'),
       setDefaultBudget('pet', '2026-06', null, '2026-10-01T00:00:00.000Z'),
     ],
+    ledgerNotes: [{
+      id: '2026-09', period: '2026-09', text: '배달을 줄이자.\n외식은 주 1회.',
+      createdAt: '2026-09-25T00:00:00.000Z', updatedAt: '2026-09-25T00:00:00.000Z',
+    }],
     ledger: { settleDay: 25 },
     recovery: { ...defaultRecoveryRule(), enabled: true, intervalDays: 4, debtCount: 1 },
   };
@@ -163,7 +167,7 @@ describe('내보내기 → 빈 계정으로 가져오기', () => {
 
     const file = await exportFile(dbA, A);
     const parsed = JSON.parse(file) as { version: number };
-    expect(parsed.version).toBe(6);
+    expect(parsed.version).toBe(7);
     const incoming = readOk(file);
     expect(countBackup(incoming)).toBe(countBackup(original));
     expect(incoming.ledger).toEqual({ settleDay: 25 });
@@ -178,7 +182,7 @@ describe('내보내기 → 빈 계정으로 가져오기', () => {
     await saveLedgerSettings(dbB, B, incoming.ledger!);
 
     const [a, b] = await Promise.all([fetchAll(dbA, A), fetchAll(dbB, B)]);
-    for (const key of ['entries', 'accounts', 'debts', 'pins', 'budgets', 'reserves', 'categories', 'categoryBudgets'] as const) {
+    for (const key of ['entries', 'accounts', 'debts', 'pins', 'budgets', 'reserves', 'categories', 'categoryBudgets', 'ledgerNotes'] as const) {
       expect(byId(b[key]), key).toEqual(byId(a[key]));
     }
     // 원장 필드가 그대로다 — 실제 거래 · 회차 연결 · 계좌 · 반영 목록.
