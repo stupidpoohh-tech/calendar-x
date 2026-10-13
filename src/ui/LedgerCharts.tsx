@@ -1,5 +1,5 @@
 /**
- * 가계부 상세 — 월별 추이와 연간 통계.
+ * 가계부 분석 — 월별 추이와 카테고리(소비 비중 · 직전 대비 · 월평균 · 수입원).
  *
  * 차트는 두 계열(수입 · 지출)뿐이다. 색은 역할 이름으로 쓰고(`--led-in` · `--led-out`)
  * 다크에서는 다크용 단계로 바꾼다 — 검증기로 두 모드 모두 확인한 값이다. 색만으로 계열을
@@ -14,7 +14,7 @@ import {
 } from '../domain/ledgerStats';
 import { compactAmount, formatAmount, formatSigned } from '../domain/money';
 import {
-  periodName, periodRange, periodsBetween, shiftPeriodKey, type Period,
+  periodName, periodRange, periodsBetween, phaseOf, shiftPeriodKey, type Period,
 } from '../domain/period';
 import type { Category, Entry, PeriodKey } from '../domain/types';
 
@@ -165,7 +165,7 @@ function TrendChart({ series }: { series: readonly PeriodSeries[] }) {
   );
 }
 
-// ---------- 통계 · 카테고리 ----------
+// ---------- 분석 · 카테고리 ----------
 
 /** 고리 한 조각. 각도는 12시 방향에서 시계 방향, 라디안. */
 function ringPath(cx: number, cy: number, R: number, r: number, a0: number, a1: number): string {
@@ -212,6 +212,14 @@ function CategoryPie({ slices, total }: { slices: readonly PieSlice[]; total: nu
 
 const pct = (v: number, total: number) => `${total > 0 ? Math.round((v / total) * 1000) / 10 : 0}%`;
 
+/**
+ * 분석 · 카테고리 — 고른 기간의 소비 구성과 열두 기간의 패턴.
+ *
+ * 줄마다 이 기간 금액 · 비중 · **직전 기간 대비** · 월평균 · 열두 기간 막대. 직전 기간은 이미
+ * 받아 둔 열두 기간 안에 있으므로 구독을 더 늘리지 않는다. 이 기간에 0원이지만 열두 기간 안에
+ * 쓴 적이 있는 카테고리는 접어 둔 묶음으로 남긴다 — 줄이 끝없이 길어지지 않게, 그러나 "이번에는
+ * 안 썼다" 가 보이게. 수입원도 여기서 본다(예산 보기에는 없다).
+ */
 export function LedgerStats({ entries, settleDay, todayISO, period, categories }: {
   entries: readonly Entry[];
   settleDay: number;
@@ -226,12 +234,20 @@ export function LedgerStats({ entries, settleDay, todayISO, period, categories }
   );
   const last = periods.length - 1;
   const totals = useMemo(() => totalsOf(actualsIn(entries, period.start, period.end)), [entries, period.start, period.end]);
+  const prevTotals = useMemo(() => {
+    const p = periods[last - 1];
+    return p ? totalsOf(actualsIn(entries, p.start, p.end)) : null;
+  }, [entries, periods, last]);
   const trends = useMemo(
     () => categoryTrends(entries, periods, categories, 'consumption', todayISO),
     [entries, periods, categories, todayISO],
   );
   const finance = useMemo(
     () => categoryTrends(entries, periods, categories, 'finance', todayISO),
+    [entries, periods, categories, todayISO],
+  );
+  const incomeTrends = useMemo(
+    () => categoryTrends(entries, periods, categories, 'income', todayISO),
     [entries, periods, categories, todayISO],
   );
   const counted = useMemo(() => averagedPeriods(periods, todayISO), [periods, todayISO]);
@@ -241,26 +257,40 @@ export function LedgerStats({ entries, settleDay, todayISO, period, categories }
   const financeAvg = averagedOver > 0
     ? Math.round(financePer.reduce((a, v, i) => (counted[i] ? a + v : a), 0) / averagedOver)
     : null;
+  const inProgress = phaseOf(period, todayISO) === 'current';
 
-  // 이 기간에 쓴 카테고리만, 이 기간 금액 순으로.
-  const rows = trends
-    .map((t) => ({ ...t, now: t.perPeriod[last] ?? 0 }))
+  // 이 기간에 쓴 카테고리는 이 기간 금액 순으로. 0원이지만 열두 기간 안에 쓴 적이 있는 것은 따로.
+  const withNow = trends.map((t) => ({ ...t, now: t.perPeriod[last] ?? 0, prev: last > 0 ? t.perPeriod[last - 1] ?? 0 : null }));
+  const rows = withNow.filter((t) => t.now > 0).sort((a, b) => b.now - a.now);
+  const idle = withNow.filter((t) => t.now === 0 && t.total > 0).sort((a, b) => (b.average ?? 0) - (a.average ?? 0));
+  const incomeRows = incomeTrends
+    .map((t) => ({ ...t, now: t.perPeriod[last] ?? 0, prev: last > 0 ? t.perPeriod[last - 1] ?? 0 : null }))
     .filter((t) => t.now > 0)
     .sort((a, b) => b.now - a.now);
   const slices = pieSlices(rows.map((t) => ({ key: t.categoryId || '__none', name: t.name, value: t.now })));
   const slotOf = new Map(slices.map((s) => [s.key, s.slot]));
-  const peak = Math.max(1, ...rows.flatMap((t) => t.perPeriod));
+  const peak = Math.max(1, ...withNow.flatMap((t) => t.perPeriod));
+  const incomePeak = Math.max(1, ...incomeRows.flatMap((t) => t.perPeriod));
 
   return (
     <div className="led-body">
       <div className="led-totals">
-        <div><span>소비</span><b className="num minus">{formatAmount(totals.consumption)}</b></div>
-        <div><span>금융비용</span><b className="num">{formatAmount(totals.financeCost)}</b></div>
-        <div><span>수입</span><b className="num plus">{formatAmount(totals.income)}</b></div>
+        <div>
+          <span>소비</span><b className="num minus">{formatAmount(totals.consumption)}</b>
+          {prevTotals && <Delta now={totals.consumption} prev={prevTotals.consumption} />}
+        </div>
+        <div>
+          <span>금융비용</span><b className="num">{formatAmount(totals.financeCost)}</b>
+          {prevTotals && <Delta now={totals.financeCost} prev={prevTotals.financeCost} />}
+        </div>
+        <div>
+          <span>수입</span><b className="num plus">{formatAmount(totals.income)}</b>
+          {prevTotals && <Delta now={totals.income} prev={prevTotals.income} />}
+        </div>
         <p className="led-note">
-          줄의 큰 숫자는 이 기간에 쓴 돈입니다. 월평균 = 고른 기간까지 열두 기간 중 끝난 기간의 합 ÷ 끝난
-          기간 수({averagedOver}개) — 진행 중인 기간은 넣지 않고, 기록이 없는 끝난 기간은 0원으로 셉니다.
-          대출 원금 · 이체 · 카드 대금은 소비가 아니고, 대출 이자는 금융비용으로 따로 적습니다.
+          직전 = 바로 앞 정산 기간{inProgress && ' (진행 중인 기간은 지금까지 쓴 금액으로 견줍니다)'}. 월평균 = 열두 기간 중
+          끝난 기간 수({averagedOver}개)의 평균 — 기록이 없는 끝난 기간은 0원. 대출 이자는 금융비용으로 따로 적고,
+          대출 원금 · 이체 · 카드 대금은 소비가 아닙니다.
         </p>
       </div>
 
@@ -288,27 +318,68 @@ export function LedgerStats({ entries, settleDay, todayISO, period, categories }
               return (
                 <StatRow
                   key={key} name={t.name} slot={slotOf.has(key) ? (slotOf.get(key) ?? 'rest') : 'rest'}
-                  now={t.now} share={totals.consumption > 0 ? t.now / totals.consumption : 0}
+                  now={t.now} prev={t.prev} share={totals.consumption > 0 ? t.now / totals.consumption : 0}
                   average={t.average} perPeriod={t.perPeriod} peak={peak} periods={periods}
                 />
               );
             })}
             {financeNow > 0 && (
               <StatRow
-                name="금융비용 (대출 이자)" now={financeNow} share={null} average={financeAvg}
+                name="금융비용 (대출 이자)" now={financeNow} prev={last > 0 ? financePer[last - 1] ?? 0 : null}
+                share={null} average={financeAvg}
                 perPeriod={financePer} peak={Math.max(1, ...financePer)} periods={periods} finance
               />
             )}
           </ul>
         </>
       )}
+      {idle.length > 0 && (
+        <details className="led-idle">
+          <summary>이번 기간 0원 · {idle.length}개 카테고리 <span className="led-sub">열두 기간 안에 쓴 적이 있음</span></summary>
+          <ul className="led-stats" aria-label="이번 기간에 쓰지 않은 카테고리">
+            {idle.map((t) => (
+              <StatRow
+                key={t.categoryId || '__none'} name={t.name} now={0} prev={t.prev} share={null}
+                average={t.average} perPeriod={t.perPeriod} peak={peak} periods={periods}
+              />
+            ))}
+          </ul>
+        </details>
+      )}
+
+      <h4 className="led-h">수입원</h4>
+      {incomeRows.length === 0 ? (
+        <p className="led-empty">{periodName(period.key)}에 기록한 수입이 없습니다.</p>
+      ) : (
+        <ul className="led-stats" aria-label="수입원별 금액">
+          {incomeRows.map((t) => (
+            <StatRow
+              key={t.categoryId || '__none'} name={t.name} now={t.now} prev={t.prev}
+              share={totals.income > 0 ? t.now / totals.income : null} shareOf="수입"
+              average={t.average} perPeriod={t.perPeriod} peak={incomePeak} periods={periods}
+            />
+          ))}
+        </ul>
+      )}
     </div>
   );
 }
 
-function StatRow({ name, slot, now, share, average, perPeriod, peak, periods, finance = false }: {
-  name: string; slot?: number | 'rest'; now: number; share: number | null; average: number | null;
-  perPeriod: readonly number[]; peak: number; periods: readonly Period[]; finance?: boolean;
+/** "직전 +12,000" · "직전 −3,000" · "직전과 같음". 합계와 줄이 같은 꼴을 쓴다. */
+const deltaText = (now: number, prev: number) => (now === prev
+  ? '직전과 같음'
+  : `직전 ${now > prev ? '+' : '−'}${formatAmount(Math.abs(now - prev))}`);
+
+/** 직전 기간 대비 — 색으로 좋고 나쁨을 말하지 않는다(소비가 늘어난 것인지 수입이 늘어난 것인지는 자리가 말한다). */
+function Delta({ now, prev }: { now: number; prev: number }) {
+  return (
+    <span className="led-delta num">{deltaText(now, prev)}</span>
+  );
+}
+
+function StatRow({ name, slot, now, prev = null, share, shareOf = '소비', average, perPeriod, peak, periods, finance = false }: {
+  name: string; slot?: number | 'rest'; now: number; prev?: number | null; share: number | null; shareOf?: string;
+  average: number | null; perPeriod: readonly number[]; peak: number; periods: readonly Period[]; finance?: boolean;
 }) {
   const last = perPeriod.length - 1;
   return (
@@ -318,7 +389,8 @@ function StatRow({ name, slot, now, share, average, perPeriod, peak, periods, fi
         <span className="num">{formatAmount(now)}</span>
       </div>
       <div className="led-stat-s num">
-        {share != null && <span>소비의 {Math.round(share * 1000) / 10}%</span>}
+        {share != null && <span>{shareOf}의 {share > 0 && share < 0.001 ? '0.1% 미만' : `${Math.round(share * 1000) / 10}%`}</span>}
+        {prev != null && <span>{deltaText(now, prev)}</span>}
         <span>월평균 {average == null ? '—' : formatAmount(average)}</span>
       </div>
       {/* 열두 기간 막대. 고른 기간(맨 오른쪽)만 진하게 — 한 계열이라 범례가 없다. */}

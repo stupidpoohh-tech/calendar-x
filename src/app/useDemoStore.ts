@@ -143,7 +143,7 @@ export function useDemoStore(): StoreState {
       ],
       ledger: { settleDay: 1 },
       ledgerMeta: FEED_DEMO,
-      // 지난 기간의 돌아보기 한 장. 예결산 위에 어떻게 보이는지 미리 보여 준다.
+      // 지난 기간의 돌아보기 한 장. 분석 보기 아래에 어떻게 보이는지 미리 보여 준다.
       ledgerNotes: [{
         id: periodOf(addDaysISO(periodOf(today, 1).start, -1), 1).key,
         period: periodOf(addDaysISO(periodOf(today, 1).start, -1), 1).key,

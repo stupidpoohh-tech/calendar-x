@@ -1,5 +1,5 @@
 /**
- * 가계부 렌즈 — 내역 · 현금흐름 · 예산 · 통계.
+ * 가계부 렌즈 — 내역 · 현금흐름 · 예산 · 분석.
  *
  * 렌즈 바로 아래 한 줄이 보기를 고르고, 그 아래에는 **고른 보기의 본문 하나**만 그린다.
  * 예전에는 '며칠 버티나' 카드 → 큰 달력 → 상세 탭이 위아래로 쌓여, 아래 탭을 바꿔도 위의
@@ -8,8 +8,14 @@
  *
  *   내역      정산 기간 하나 — 수입 · 지출 · 수지와 거래 목록, 검색, 거래 추가
  *   현금흐름  달력 월 하나 — '며칠 버티나' 카드와 날짜별 한도 달력 (App 이 그려 넘긴다)
- *   예산      정산 기간 하나 — 카테고리 예산(결산용)과 생활비 주머니 · 세이브(한도 예약)
- *   통계      월별 추이(기간 열둘) · 카테고리(정산 연도) 둘 중 하나
+ *   예산      정산 기간 하나 — "계획대로 쓰고 있는가". 카테고리 예산 · 실제 사용 · 남음 · 초과와
+ *             생활비 주머니 · 세이브(한도 예약). 지난 기간과 견주지 않는다
+ *   분석      정산 기간 하나 — "평소 어디에 얼마나 쓰는가". 월별 추이(기간 열둘) · 카테고리
+ *             (비중 · 직전 대비 · 월평균 · 수입원) 둘 중 하나, 그 아래 기간 돌아보기 한 장
+ *
+ * 예산과 분석에 같은 금액이 나오는 것은 괜찮다 — 예산에서는 예산과 견주는 값이고, 분석에서는
+ * 비중과 추세를 설명하는 값이다. 같은 모양의 표 · 비교를 두 곳에 되풀이하지 않는다.
+ * 내부 id(`budget` · `stats`)는 그대로다 — 이름만 바꿨다.
  *
  * ── 숫자를 내는 조건 ─────────────────────────────────────────
  *
@@ -47,8 +53,8 @@ import { dayLabel, feedVerdict } from './ledgerView';
 const VIEWS: readonly { id: LedgerTabId; label: string }[] = [
   { id: 'history', label: '내역' },
   { id: 'cashflow', label: '현금흐름' },
-  { id: 'budget', label: '예결산' },
-  { id: 'stats', label: '통계' },
+  { id: 'budget', label: '예산' },
+  { id: 'stats', label: '분석' },
 ];
 
 /** 전체 검색 — 켜 둔 동안 실제 거래를 구독한다. 끄면 구독을 끊는다. */
@@ -79,7 +85,7 @@ export interface LedgerScreenProps {
   subscribeAll: SubscribeAll;
   /** 현금흐름 본문 — 카드와 한도 달력, 달력의 월 이동. App 이 그린다. */
   cashflow?: ReactNode;
-  /** 예산 보기의 생활비 주머니 · 세이브 구역. App 이 그린다. */
+  /** 예산 보기의 생활비 주머니 · 세이브 구역. App 이 그린다. 카테고리 예산과 합산하지 않는다. */
   pockets?: ReactNode;
 }
 
@@ -133,18 +139,14 @@ export function LedgerScreen(props: LedgerScreenProps) {
       {tab === 'budget' && (
         <>
           <div className="led-toolbar">{periodNav}</div>
-          <PeriodNote
-            key={period.key} period={period}
-            note={props.ledgerNotes.find((n) => n.id === period.key) ?? null}
-            feed={props.notesFeed} onSave={props.onSaveLedgerNote}
-          />
           {gated(<LedgerBudget {...props} period={period} />)}
           {props.pockets && (
             <section className="led-sec" aria-labelledby="led-pockets-h">
               <h3 className="led-sec-h" id="led-pockets-h">생활비 주머니 · 세이브</h3>
               <p className="led-note">
-                한도에서 <b>미리 빼 두는 돈</b>입니다. 위의 카테고리 예산과 달리 &lsquo;며칠 버티나&rsquo; 한도를 줄입니다.
-                기간과 무관하게 지금 살아 있는 주머니를 모두 보여 줍니다.
+                한도에서 <b>미리 빼 두는 돈</b>입니다. 카테고리 예산과 따로 셉니다 — 카테고리 예산은 쓴 돈과
+                견주기만 하고, 이 돈은 &lsquo;며칠 버티나&rsquo; 한도를 줄입니다. 기간과 무관하게 지금 살아 있는 주머니를
+                모두 보여 줍니다.
               </p>
               {props.pockets}
             </section>
@@ -154,19 +156,17 @@ export function LedgerScreen(props: LedgerScreenProps) {
 
       {tab === 'stats' && (
         <>
-          <div className="led-toolbar">
-            <div className="seg" role="radiogroup" aria-label="통계 보기">
-              {([['trend', '월별 추이'], ['category', '카테고리']] as const).map(([id, label]) => (
-                <button key={id} role="radio" aria-checked={statsView === id}
-                  className={'seg-btn' + (statsView === id ? ' on' : '')} onClick={() => setStatsView(id)}>
-                  {label}
-                </button>
-              ))}
-            </div>
+          <div className="led-toolbar">{periodNav}</div>
+          <div className="seg led-subview" role="radiogroup" aria-label="분석 보기">
+            {([['trend', '월별 추이'], ['category', '카테고리']] as const).map(([id, label]) => (
+              <button key={id} role="radio" aria-checked={statsView === id}
+                className={'seg-btn' + (statsView === id ? ' on' : '')} onClick={() => setStatsView(id)}>
+                {label}
+              </button>
+            ))}
           </div>
           {statsView === 'trend' && (
             <>
-              <div className="led-toolbar">{periodNav}</div>
               <p className="led-note led-scope">고른 기간까지 열두 정산 기간을 봅니다.</p>
               {gated(
                 <LedgerMonthly
@@ -176,17 +176,18 @@ export function LedgerScreen(props: LedgerScreenProps) {
               )}
             </>
           )}
-          {statsView === 'category' && (
-            <>
-              <div className="led-toolbar">{periodNav}</div>
-              {gated(
-                <LedgerStats
-                  entries={props.entries} settleDay={settleDay} todayISO={todayISO}
-                  period={period} categories={props.categories}
-                />,
-              )}
-            </>
+          {statsView === 'category' && gated(
+            <LedgerStats
+              entries={props.entries} settleDay={settleDay} todayISO={todayISO}
+              period={period} categories={props.categories}
+            />,
           )}
+          {/* 두 하위 보기가 같은 기간을 본다 — 돌아보기는 그 아래 한 번만 그린다. */}
+          <PeriodNote
+            key={period.key} period={period}
+            note={props.ledgerNotes.find((n) => n.id === period.key) ?? null}
+            feed={props.notesFeed} onSave={props.onSaveLedgerNote}
+          />
         </>
       )}
     </section>
@@ -364,7 +365,8 @@ function LedgerHistory({
 // ---------- 기간 메모 ----------
 
 /**
- * 그 기간을 돌아보는 글 한 장 — 반성 · 다짐. 예결산 숫자 위에 둔다.
+ * 기간 돌아보기 — 그 기간을 돌아보는 글 한 장(반성 · 다짐). 분석 보기 아래에 둔다 — 숫자로 그
+ * 기간을 본 뒤에 적는 자리다. 열쇠 · 저장 경로는 그대로(`ledgerNotes/{기간}`)다.
  *
  * 메모 구독이 아직 오지 않았거나 캐시가 비어 "없음" 을 확정할 수 없으면 고치지 못하게 둔다.
  * 그 사이 빈 칸으로 열어 저장하면 서버에 있는 글을 빈 글로 덮는다.
@@ -388,7 +390,9 @@ function PeriodNote({ period, note, feed, onSave }: {
   return (
     <section className="led-memo" aria-labelledby="led-memo-h">
       <div className="led-memo-h">
-        <h3 className="led-sec-h" id="led-memo-h">{periodName(period.key)} 돌아보기</h3>
+        <h3 className="led-sec-h" id="led-memo-h">
+          기간 돌아보기 <span className="led-sub">{periodName(period.key)} · {periodRange(period)}</span>
+        </h3>
         {!editing && known && (
           <button className="btn sm" onClick={open}>{saved ? '고치기' : '적기'}</button>
         )}
@@ -420,24 +424,39 @@ function PeriodNote({ period, note, feed, onSave }: {
   );
 }
 
-// ---------- 예결산 ----------
+// ---------- 예산 ----------
 
+/**
+ * 예산 — 이 기간을 계획대로 쓰고 있는가.
+ *
+ * 맨 위 요약은 **예산을 정한 카테고리만** 견준다: 총 예산 · 그 카테고리의 실제 사용 · 남음(또는 초과).
+ * 예전에는 "결산" 자리에 모든 지출을 적고 "남음" 은 예산 카테고리만 견줘, 결산 562,000 옆에
+ * 남음 +275,000 이 섰다 — 두 숫자가 서로 다른 범위를 봤다. 예산 밖 지출(예산 없는 카테고리 ·
+ * 미분류)은 빠뜨리지 않고 한 줄로 따로 적는다. 숫자는 그대로 `budgetSummary` 다.
+ *
+ * 지난 기간 결산 · 수입 · 장기 추이는 분석 보기의 몫이다.
+ */
 function LedgerBudget({
   entries, period, todayISO, settleDay, categories, categoryBudgets, categoriesReady,
   onSeedCategories, onSaveCategoryBudget,
 }: LedgerScreenProps & { period: Period }) {
   const [editing, setEditing] = useState<string | null>(null);
   const actuals = useMemo(() => actualsIn(entries, period.start, period.end), [entries, period]);
-  const prev = periodByKey(shiftPeriodKey(period.key, -1), settleDay)!;
-  const prevActuals = useMemo(() => actualsIn(entries, prev.start, prev.end), [entries, prev]);
   const rows = useMemo(() => budgetRows(categories, categoryBudgets, actuals, period.key, 'expense'), [categories, categoryBudgets, actuals, period.key]);
-  const prevRows = useMemo(() => budgetRows(categories, categoryBudgets, prevActuals, prev.key, 'expense'), [categories, categoryBudgets, prevActuals, prev.key]);
-  const income = useMemo(() => budgetRows(categories, categoryBudgets, actuals, period.key, 'income'), [categories, categoryBudgets, actuals, period.key]);
+  // 예산을 정한 카테고리가 먼저 — 같은 무리 안에서는 카테고리 순서 그대로.
+  const ordered = useMemo(
+    () => [...rows.filter((r) => r.budget.amountMinor != null), ...rows.filter((r) => r.budget.amountMinor == null)],
+    [rows],
+  );
   const sum = budgetSummary(rows);
   const phase = phaseOf(period, todayISO);
   const currentKey = periodOf(todayISO, settleDay).key;
   // 기본 예산은 지난 기간부터 바꾸지 않는다 — 소급되면 지난 결산이 바뀐다.
   const defaultFrom = period.key > currentKey ? period.key : currentKey;
+  const left = sum.budgeted - sum.actualInBudgeted;
+  const outside = sum.actual - sum.actualInBudgeted;
+  const outsideNames = rows.filter((r) => r.budget.amountMinor == null && r.actual > 0).map((r) => r.name);
+  const ratio = sum.budgeted > 0 ? sum.actualInBudgeted / sum.budgeted : 0;
 
   if (categoriesReady && categories.length === 0) {
     return (
@@ -450,34 +469,50 @@ function LedgerBudget({
 
   return (
     <div className="led-body">
-      <h3 className="led-sec-h">카테고리 예결산</h3>
-      <div className="led-totals">
-        <div><span>예산</span><b className="num">{formatAmount(sum.budgeted)}</b></div>
-        <div><span>결산</span><b className="num minus">{formatAmount(sum.actual)}</b></div>
-        <div>
-          <span>남음</span>
-          <b className={'num ' + (sum.budgeted - sum.actualInBudgeted < 0 ? 'minus' : '')}>
-            {formatSigned(sum.budgeted - sum.actualInBudgeted)}
-          </b>
-        </div>
+      <h3 className="led-sec-h">카테고리 예산</h3>
+      <div className="led-bsum" role="group" aria-label="예산 요약">
+        {sum.budgeted > 0 ? (
+          <>
+            <div className="led-bsum-n">
+              <div><span>총 예산</span><b className="num">{formatAmount(sum.budgeted)}</b></div>
+              <div><span>실제 사용</span><b className="num">{formatAmount(sum.actualInBudgeted)}</b></div>
+              <div>
+                <span>{left < 0 ? '초과' : '남은 예산'}</span>
+                <b className={'num ' + (left < 0 ? 'minus' : 'plus')}>{formatAmount(Math.abs(left))}</b>
+              </div>
+            </div>
+            <span className={'bp-bar' + (left < 0 ? ' over' : '')} aria-hidden="true">
+              <span className="bp-bar-f" style={{ width: `${Math.round(Math.min(1, ratio) * 100)}%` }} />
+            </span>
+            <p className="led-bsum-s num">
+              사용률 {Math.round(ratio * 100)}%
+              {sum.overCount > 0 && <> · <b className="minus">초과 {sum.overCount}개</b></>}
+            </p>
+          </>
+        ) : (
+          <p className="led-empty">아직 정한 예산이 없습니다. 아래 카테고리를 눌러 예산을 정하세요.</p>
+        )}
+        {outside > 0 && (
+          <p className="led-bsum-s num">
+            예산 밖 지출 {formatAmount(outside)}
+            {outsideNames.length > 0 && <> ({outsideNames.slice(0, 3).join(' · ')}{outsideNames.length > 3 ? ` 외 ${outsideNames.length - 3}개` : ''})</>}
+            {sum.budgeted > 0 && ' — 남은 예산에는 넣지 않습니다'}
+          </p>
+        )}
         <p className="led-note">
-          결산 = 이 기간에 실제로 쓴 지출(소비 + 대출 이자). 남음은 예산을 정한 카테고리만 견줍니다
-          (그 카테고리 지출 {formatAmount(sum.actualInBudgeted)})
-          {sum.overCount > 0 && <> · <b className="minus">초과 {sum.overCount}개</b></>}
-          {' '}· 카테고리 예산은 <b>결산용</b>입니다. 쓴 돈과 견주기만 하고, 아래 생활비 주머니와 달리 한도에서 미리 빼지 않습니다
+          사용 = 실제로 쓴 지출(소비 + 대출 이자). 결산용이라 한도에서 미리 빼지 않습니다
           {phase === 'current' && ' · 진행 중인 기간입니다'}
         </p>
       </div>
 
       <div className="led-bl-cols" aria-hidden="true">
-        <span>카테고리</span><span>예산</span><span>결산</span><span>남음</span>
+        <span>카테고리</span><span>예산</span><span>사용</span><span>남음</span>
       </div>
       <ul className="led-budgets" aria-label="카테고리별 예산">
-        {rows.map((r) => (
+        {ordered.map((r) => (
           <BudgetLine
             key={r.categoryId || '__none'}
             row={r}
-            prevActual={prevRows.find((p) => p.categoryId === r.categoryId)?.actual ?? 0}
             editing={editing === r.categoryId}
             onEdit={() => setEditing(editing === r.categoryId ? null : r.categoryId)}
             canDefault={phase !== 'past'}
@@ -491,28 +526,12 @@ function LedgerBudget({
           />
         ))}
       </ul>
-
-      {income.length > 0 && (
-        <>
-          <h4 className="led-h">수입 결산</h4>
-          <ul className="led-budgets">
-            {income.map((r) => (
-              <li key={r.categoryId || '__none'} className="led-bl">
-                <div className="led-bl-main static">
-                  <span className="led-bl-n">{r.name}{r.archived && ' (보관)'}</span>
-                  <span className="led-bl-v num plus">{formatAmount(r.actual)}</span>
-                </div>
-              </li>
-            ))}
-          </ul>
-        </>
-      )}
     </div>
   );
 }
 
-function BudgetLine({ row, prevActual, editing, onEdit, canDefault, defaultFrom, onSave }: {
-  row: BudgetRow; prevActual: number; editing: boolean; onEdit: () => void;
+function BudgetLine({ row, editing, onEdit, canDefault, defaultFrom, onSave }: {
+  row: BudgetRow; editing: boolean; onEdit: () => void;
   canDefault: boolean; defaultFrom: PeriodKey;
   onSave: (scope: 'period' | 'default', amount: number | null) => void;
 }) {
@@ -530,12 +549,14 @@ function BudgetLine({ row, prevActual, editing, onEdit, canDefault, defaultFrom,
         <span className="led-bl-n">
           {row.name}{row.archived && ' (보관)'}
           {row.budget.source === 'period' && <span className="led-badge muted">이 기간만</span>}
-          <span className="led-bl-s num">지난 기간 결산 {formatAmount(prevActual)}</span>
+          {budget != null && budget > 0 && (
+            <span className={'led-bl-s num' + (row.over ? ' minus' : '')}>사용률 {Math.round((row.actual / budget) * 100)}%</span>
+          )}
         </span>
         <span className="led-bl-c num" aria-label={`예산 ${budget == null ? '없음' : formatAmount(budget)}`}>
           {budget == null ? <span className="led-bl-none">—</span> : formatAmount(budget)}
         </span>
-        <span className="led-bl-c num" aria-label={`결산 ${formatAmount(row.actual)}`}>{formatAmount(row.actual)}</span>
+        <span className="led-bl-c num" aria-label={`사용 ${formatAmount(row.actual)}`}>{formatAmount(row.actual)}</span>
         <span
           className={'led-bl-c num' + (row.over ? ' minus' : '')}
           aria-label={row.remaining == null ? '남음 없음' : row.over ? `초과 ${formatAmount(-row.remaining)}` : `남음 ${formatAmount(row.remaining)}`}
@@ -576,4 +597,3 @@ function BudgetLine({ row, prevActual, editing, onEdit, canDefault, defaultFrom,
     </li>
   );
 }
-

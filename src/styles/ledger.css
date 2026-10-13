@@ -379,3 +379,37 @@ button.led-cat-n:hover { background: var(--accent-soft); }
   margin: 4px 0 6px 10px; padding: 8px 10px; border-radius: var(--radius-sm); background: var(--bg-soft);
 }
 .bp-apply p { margin: 0; font-size: 0.75rem; color: var(--ink-2); }
+
+/* ---------- 예산 요약 (IA) — 총 예산 · 실제 사용 · 남음/초과 + 사용률 막대 ---------- */
+.led-bsum {
+  display: flex; flex-direction: column; gap: 8px; padding: 12px;
+  border: 1px solid var(--line); border-radius: var(--radius); background: var(--bg-soft);
+}
+.led-bsum-n { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
+.led-bsum-n > div { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.led-bsum-n span { font-size: 0.6875rem; color: var(--ink-3); }
+.led-bsum-n b { font-size: 1.0625rem; color: var(--ink); overflow: hidden; text-overflow: ellipsis; }
+.led-bsum-n b.plus { color: var(--good); }
+.led-bsum-n b.minus { color: var(--bad); }
+.led-bsum-s { margin: 0; font-size: 0.75rem; color: var(--ink-2); }
+.led-bsum-s b { font-weight: 600; }
+.led-bsum-s .minus { color: var(--bad); }
+.led-bsum .led-empty { margin: 0; }
+.led-bl-s.minus { color: var(--bad); }
+
+/* ---------- 분석 (IA) ---------- */
+.led-subview { align-self: flex-start; }
+.led-delta { font-size: 0.6875rem; color: var(--ink-3); }
+.led-memo-h .led-sub { margin-left: 6px; font-weight: 400; }
+.led-idle { border-top: 1px solid var(--line); }
+.led-idle > summary {
+  padding: 12px 4px; font-size: 0.8125rem; color: var(--ink-2); cursor: pointer;
+}
+.led-idle > summary .led-sub { margin-left: 4px; }
+.led-idle .led-stat:last-child { border-bottom: 0; }
+@media (max-width: 480px) {
+  .led-bsum-n b { font-size: 0.9375rem; }
+}
+/* 좁은 폭에서 줄 아래 설명(비중 · 직전 · 월평균)이 낱말 중간에서 끊기지 않게 — 항목 단위로 내린다. */
+.led-stat-s { flex-wrap: wrap; row-gap: 0; }
+.led-stat-s > span, .led-memo-h .led-sub, .led-delta { white-space: nowrap; }
