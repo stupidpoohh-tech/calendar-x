@@ -118,40 +118,109 @@ export function unlinkedSpendingFor(budget: Budget, entries: readonly Entry[]): 
     .sort((a, b) => a.startDate.localeCompare(b.startDate));
 }
 
-/** 예산 하나의 상태. 화면이 그대로 그릴 수 있는 값만 담는다. */
+/**
+ * 예산 하나의 상태. 화면이 그대로 그릴 수 있는 값만 담는다.
+ *
+ * ── 사용 · 예정 · 현금 · 예약은 서로 다른 숫자다 ──────────────────
+ *
+ * 예전에는 연결된 지출을 실제 · 예정 가리지 않고 `spentMinor` 하나로 더해 "사용" 으로
+ * 적었다. 다음 주에 잡아 둔 예정까지 이미 쓴 돈처럼 보였다. 지금은 갈라 둔다.
+ *
+ *   actualMinor     실제로 쓴 돈. "남은 생활비" 는 이것만 뺀다
+ *   plannedMinor    아직 확정하지 않은 예정. 쓴 돈이 아니다
+ *   settledMinor    실제 지출 가운데 이미 잔고에 반영된 것 — 통장에서 이미 빠졌다
+ *   unsettledMinor  실제 지출 가운데 아직 잔고 밖인 것 — 예상 잔고가 이만큼 더 줄어든다
+ *   reservedMinor   생활비 외 가용 한도에서 지금 빠져 있는 몫 (`pocketReserve`)
+ *
+ * 생활비를 만드는 것만으로는 잔고도 예상 잔고도 줄지 않는다. 줄어드는 것은 가용 한도뿐이다.
+ */
 export interface BudgetState {
   budget: Budget;
-  /** 연결된 지출의 합. */
-  spentMinor: number;
-  /** 남은 예산. 초과했으면 0. */
+  /** 실제로 쓴 돈. */
+  actualMinor: number;
+  /** 아직 확정하지 않은 예정 지출. */
+  plannedMinor: number;
+  /** 실제 지출 중 잔고에 반영된 것. */
+  settledMinor: number;
+  /** 실제 지출 중 아직 잔고 밖인 것. */
+  unsettledMinor: number;
+  /** 남은 생활비 = 총 예산 − 실제로 쓴 돈. 넘겼으면 0. */
   remainingMinor: number;
-  /** 예산을 넘긴 금액. 넘지 않았으면 0. */
+  /** 실제로 넘긴 금액. 넘지 않았으면 0. */
   overspentMinor: number;
-  /** 연결된 지출 건수. */
+  /** 예정까지 다 쓰면 넘게 되는 금액. 실제 초과와 따로 적는다. */
+  plannedOverMinor: number;
+  /** 가용 한도에서 빠져 있는 몫. `today` 를 주지 않으면 끝나지 않은 것으로 본다. */
+  reservedMinor: number;
+  /** 연결된 지출 건수(실제 + 예정). */
   count: number;
+}
+
+const amt = (e: Entry) => Math.abs(e.money?.amountMinor ?? 0);
+
+/**
+ * 주머니 하나가 가용 한도에서 차지하는 몫. **양수**.
+ *
+ *   진행 중 · 앞으로   max(총 예산, 실제 + 예정) − 잔고에 반영된 지출
+ *   끝남              (실제 + 예정) − 잔고에 반영된 지출
+ *
+ * 잔고에 반영된 지출을 빼는 것이 이중 차감을 막는 자리다 — 그 돈은 이미 잔고에서 빠졌다.
+ * 반영되지 않은 실제 지출은 이 몫 안에 남아 있고, 예상 잔고 쪽에서는 현금으로 빠진다.
+ * 두 숫자는 다른 질문에 답하므로 둘 다에 있는 것이 맞다(가용 한도는 예상 잔고가 아니라
+ * 확인 잔고에서 출발해 연결 지출을 일반 흐름에서 빼고 센다 — `tide.limitOn`).
+ */
+export function pocketReserve(
+  budget: Budget, linked: readonly Entry[], inBalance: (e: Entry) => boolean, ended: boolean,
+): number {
+  const spent = linked.reduce((t, e) => t + amt(e), 0);
+  const settled = linked.filter(inBalance).reduce((t, e) => t + amt(e), 0);
+  return (ended ? spent : Math.max(budget.amountMinor, spent)) - settled;
+}
+
+/** 실제 거래는 잔고 반영 여부로, 예정은 날짜로 가른다 — `reservedOn` 과 같은 판정. */
+function inBalanceOf(accounts: readonly Account[] | undefined, unsettledAfter: DateISO | undefined) {
+  return (e: Entry): boolean => {
+    if (accounts && isActual(e)) return balanceInclusion(e, accounts) === 'in';
+    return unsettledAfter !== undefined && e.startDate <= unsettledAfter;
+  };
 }
 
 export function budgetState(
   budget: Budget, entries: readonly Entry[],
   confirmed: ReadonlySet<string> = confirmedSetOf(entries),
+  opts: { accounts?: readonly Account[]; today?: DateISO; unsettledAfter?: DateISO } = {},
 ): BudgetState {
   const linked = spendingIn(budget, entries, confirmed);
-  const spentMinor = linked.reduce((t, e) => t + Math.abs(e.money?.amountMinor ?? 0), 0);
+  const actual = linked.filter((e) => isActual(e));
+  const actualMinor = actual.reduce((t, e) => t + amt(e), 0);
+  const plannedMinor = linked.filter((e) => !isActual(e)).reduce((t, e) => t + amt(e), 0);
+  const inBalance = inBalanceOf(opts.accounts, opts.unsettledAfter);
+  const settledMinor = opts.accounts
+    ? actual.filter((e) => balanceInclusion(e, opts.accounts!) === 'in').reduce((t, e) => t + amt(e), 0)
+    : 0;
+  const ended = opts.today !== undefined && budgetEnded(budget, opts.today);
   return {
     budget,
-    spentMinor,
-    remainingMinor: Math.max(0, budget.amountMinor - spentMinor),
-    overspentMinor: Math.max(0, spentMinor - budget.amountMinor),
+    actualMinor,
+    plannedMinor,
+    settledMinor,
+    // 계좌를 모르면 반영 여부도 모른다. 둘 다 0 으로 두고 화면은 적지 않는다.
+    unsettledMinor: opts.accounts ? actualMinor - settledMinor : 0,
+    remainingMinor: Math.max(0, budget.amountMinor - actualMinor),
+    overspentMinor: Math.max(0, actualMinor - budget.amountMinor),
+    plannedOverMinor: Math.max(0, actualMinor + plannedMinor - budget.amountMinor),
+    reservedMinor: pocketReserve(budget, linked, inBalance, ended),
     count: linked.length,
   };
 }
 
 export function budgetStates(
   budgets: readonly Budget[], entries: readonly Entry[],
+  opts: { accounts?: readonly Account[]; today?: DateISO; unsettledAfter?: DateISO } = {},
 ): BudgetState[] {
   const confirmed = confirmedSetOf(entries);
   return budgets
-    .map((b) => budgetState(b, entries, confirmed))
+    .map((b) => budgetState(b, entries, confirmed, opts))
     .sort((a, b) => a.budget.startDate.localeCompare(b.budget.startDate));
 }
 
@@ -190,16 +259,8 @@ export function reservedOn(
   for (const budget of budgets) {
     // 아직 시작하지 않은 예산은 자리를 잡지 않는다 — 기간형 지출과 같은 규칙이다.
     if (budget.startDate > date) continue;
-
-    const linked = spendingIn(budget, entries, confirmed);
-    const spent = linked.reduce((t, e) => t + Math.abs(e.money?.amountMinor ?? 0), 0);
-    // 잔고에 이미 반영된 지출. 여기서 또 빼면 두 번 빠진다.
-    const settled = linked
-      .filter(inBalance)
-      .reduce((t, e) => t + Math.abs(e.money?.amountMinor ?? 0), 0);
-
     const ended = today !== undefined && budgetEnded(budget, today);
-    total += (ended ? spent : Math.max(budget.amountMinor, spent)) - settled;
+    total += pocketReserve(budget, spendingIn(budget, entries, confirmed), inBalance, ended);
   }
 
   // 세이브는 날짜가 없다. 언제 보든 같은 금액이 묶여 있다.

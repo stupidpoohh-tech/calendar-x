@@ -3,8 +3,8 @@ import { colorHex, MONEY_TYPE_BY_ID } from '../domain/constants';
 import { isWeekend, monthGrid, normalizeDate, toISO, weekdayLabels, ymOf } from '../domain/date';
 import { displayTitle, effectiveEndDate, isDone } from '../domain/entry';
 import { compactAmount } from '../domain/money';
-import { calcScopeOf, limitOn } from '../domain/tide';
-import type { Account, Budget, Entry, LensId, Reserve, WeekStart, YearMonth } from '../domain/types';
+import { calcScopeOf, projectedBalanceOn } from '../domain/tide';
+import type { Account, Entry, LensId, WeekStart, YearMonth } from '../domain/types';
 import { Icon } from './Icon';
 import { isRecoveryEntry } from '../domain/recovery';
 import { daySummary, type DaySummary } from '../domain/daySummary';
@@ -22,9 +22,6 @@ interface Props {
    * 전개해 같은 입출금을 여러 번 센다.
    */
   tideEntries: readonly Entry[];
-  /** 한도에서 미리 빠져 있는 돈. 카드와 같은 값을 봐야 셀과 머리 숫자가 어긋나지 않는다. */
-  budgets?: readonly Budget[];
-  reserves?: readonly Reserve[];
   /**
    * `tideEntries` 가 실제로 덮는 달.
    *
@@ -116,8 +113,6 @@ function placeWeek(
  * 항목을 숨기지 않는다. "+N개 더" 대신 개수에 따라 바 높이를 압축해 전부 보여 준다.
  * 이 프로젝트의 설계 원칙이라 그대로 지킨다.
  */
-const NO_BUDGETS: readonly Budget[] = [];
-const NO_RESERVES: readonly Reserve[] = [];
 
 function barMetrics(laneCount: number) {
   if (laneCount <= 4) return { height: 21, gap: 23, showText: true };
@@ -126,7 +121,7 @@ function barMetrics(laneCount: number) {
 }
 
 export function MonthCalendar({
-  cursor, onCursorChange, entries, tideEntries, budgets = NO_BUDGETS, reserves = NO_RESERVES,
+  cursor, onCursorChange, entries, tideEntries,
   tideMonths, accounts, hasBalance, lens, weekStart, todayISO,
   onEntryClick, onDayOpen, onDayCreate, ledgerSummary,
 }: Props) {
@@ -139,9 +134,14 @@ export function MonthCalendar({
   const curMonth = cursor.getMonth();
 
   /*
-    날짜별 한도. 잔고캘린더가 셀마다 적어 주던 숫자다 — "이 날까지 쓸 수 있는 돈".
-    오늘 이전은 적지 않는다. 지나간 발생분은 이미 잔고에 반영돼 있어 한도를
-    건드리지 못하므로, 과거 셀에는 잔고가 그대로 반복될 뿐이다.
+    날짜별 **예상 잔고** — 확인 잔고에 그 날까지 적어 둔 현금 입출금을 더한 값
+    (`projectedBalanceOn`). 생활비 · 세이브는 빼지 않는다 — 내부 배분이지 출금이 아니다.
+
+    예전에는 여기 가용 한도(`limitOn`, 생활비 · 세이브를 뺀 값)를 적었다. 잔고 250,000 ·
+    생활비 200,000 이면 셀마다 50,000 이 떠, 생활비를 만들기만 해도 통장에서 돈이 빠진
+    것처럼 읽혔다. 쓸 수 있는 돈은 카드와 날짜 상세가 따로 적는다.
+
+    오늘 이전은 적지 않는다(지난 날은 현금흐름 요약이 차지한다).
   */
   /*
     통화가 섞이면 최소 단위가 달라 애초에 더할 수 없다. 카드가 숫자를 내지 않는 상태에서
@@ -149,9 +149,6 @@ export function MonthCalendar({
     계좌를 모르는 실제 거래가 있을 때도 같다 (`calcScopeOf`).
   */
   const scope = useMemo(() => calcScopeOf(accounts, tideEntries), [accounts, tideEntries]);
-  // 셀의 한도도 카드와 같은 예약(생활비 · 세이브)을 본다. 한쪽만 빼면 달력이 카드보다
-  // 큰 숫자를 적어, 카드가 거절한 돈을 달력이 쓸 수 있는 것처럼 보여 준다.
-  const res = useMemo(() => ({ budgets, reserves }), [budgets, reserves]);
 
   const showLimits = lens === 'money' && hasBalance && scope.ok;
   const limits = useMemo(() => {
@@ -163,10 +160,10 @@ export function MonthCalendar({
       const iso = toISO(d);
       if (iso < todayISO) continue;
       if (!covered.has(ymOf(iso))) continue;
-      map.set(iso, limitOn(accounts, tideEntries, iso, todayISO, res));
+      map.set(iso, projectedBalanceOn(accounts, tideEntries, iso, todayISO));
     }
     return map;
-  }, [showLimits, grid, accounts, tideEntries, tideMonths, todayISO, res]);
+  }, [showLimits, grid, accounts, tideEntries, tideMonths, todayISO]);
 
   /*
     가계부 요약 모드. 지난 날 · 오늘의 실제 거래와 지난 날의 예정은 막대가 아니라 요약 칸이다.
@@ -285,7 +282,7 @@ export function MonthCalendar({
                     {limits?.has(iso) && (
                       <span
                         className={'cal-limit num' + ((limits.get(iso) ?? 0) < 0 ? ' bad' : '')}
-                        aria-label={`${iso} 한도`}
+                        aria-label={`${iso} 예상 잔고 ${(limits.get(iso) ?? 0).toLocaleString('ko-KR')}원`}
                       >
                         {compactAmount(limits.get(iso) ?? 0)}
                       </span>

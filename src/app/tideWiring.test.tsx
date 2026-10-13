@@ -100,7 +100,7 @@ describe('며칠 버티나 카드 — 계산 입력은 커서와 무관하다', 
 
     const card = screen.getByLabelText('며칠 버티나');
     // 잔고 1,000,000 − 주간 지출 09-15 · 09-22 두 번 = 980,000
-    expect(within(card).getByLabelText('잔고 고치기')).toHaveTextContent('980,000');
+    expect(within(card).getByLabelText(/^생활비 외 가용/)).toHaveTextContent('980,000');
     // 다음 입금은 급여일(09-25), 한도의 끝은 그 전날.
     expect(card).toHaveTextContent('다음 입금');
     expect(card).toHaveTextContent('25일');
@@ -149,7 +149,7 @@ describe('오늘 카드 — 표시용과 계산용을 따로 받는다', () => {
     );
 
     const panel = screen.getByLabelText('오늘');
-    expect(within(panel).getByLabelText('잔고 고치기')).toHaveTextContent('980,000');
+    expect(within(panel).getByLabelText(/^생활비 외 가용/)).toHaveTextContent('980,000');
   });
 
   it('계산용 자리에 화면용 목록을 넣으면 실패한다', () => {
@@ -177,7 +177,7 @@ describe('오늘 카드 — 표시용과 계산용을 따로 받는다', () => {
   });
 });
 
-describe('달력 — 날짜별 한도', () => {
+describe('달력 — 날짜별 예상 잔고', () => {
   const renderCalendar = (cursor: Date, tideMonths = tideWindow(TODAY)) => {
     const shown = shownFor(cursor);
     return wrap(
@@ -202,14 +202,14 @@ describe('달력 — 날짜별 한도', () => {
   it('오늘 이후 셀에 한도를 적는다', () => {
     renderCalendar(SEPTEMBER);
     // 09-14: 아직 주간 지출이 지나지 않았다 → 잔고 그대로 100만.
-    expect(screen.getByLabelText('2026-09-14 한도')).toHaveTextContent('100만');
+    expect(screen.getByLabelText(/^2026-09-14 예상 잔고/)).toHaveTextContent('100만');
     // 09-15: 주간 지출 한 번 → 99만.
-    expect(screen.getByLabelText('2026-09-15 한도')).toHaveTextContent('99만');
+    expect(screen.getByLabelText(/^2026-09-15 예상 잔고/)).toHaveTextContent('99만');
   });
 
   it('오늘 이전 셀에는 적지 않는다', () => {
     renderCalendar(SEPTEMBER);
-    expect(screen.queryByLabelText('2026-09-09 한도')).toBeNull();
+    expect(screen.queryByLabelText(/^2026-09-09 예상 잔고/)).toBeNull();
   });
 
   it('필터로 항목을 가려도 한도는 그대로다', () => {
@@ -232,14 +232,14 @@ describe('달력 — 날짜별 한도', () => {
         onDayCreate={() => {}}
       />,
     );
-    expect(screen.getByLabelText('2026-09-15 한도')).toHaveTextContent('99만');
+    expect(screen.getByLabelText(/^2026-09-15 예상 잔고/)).toHaveTextContent('99만');
   });
 
   it('계산 창이 덮지 않는 달에는 숫자를 적지 않는다', () => {
     // 자료가 없는 달에 0을 더해 그럴듯하게 틀린 값을 내지 않는다.
     const farAway = new Date(2028, 0, 1);
     renderCalendar(farAway);
-    expect(screen.queryByLabelText('2028-01-15 한도')).toBeNull();
+    expect(screen.queryByLabelText(/^2028-01-15 예상 잔고/)).toBeNull();
   });
 });
 
@@ -294,7 +294,7 @@ describe('달력 — 통화가 섞이면 셀에도 적지 않는다', () => {
         onDayCreate={() => {}}
       />,
     );
-    expect(screen.queryByLabelText('2026-09-15 한도')).toBeNull();
+    expect(screen.queryByLabelText(/^2026-09-15 예상 잔고/)).toBeNull();
   });
 });
 
@@ -327,7 +327,7 @@ describe('생활비 · 세이브 배선', () => {
     const card = screen.getByLabelText('며칠 버티나');
     // 980,000 (주간 지출 두 번) − 예산 200,000 − 세이브 100,000 = 680,000.
     // 생활비에서 나간 12,000 은 예산 몫 안에 있으므로 더 빠지지 않는다.
-    expect(within(card).getByLabelText('잔고 고치기')).toHaveTextContent('680,000');
+    expect(within(card).getByLabelText(/^생활비 외 가용/)).toHaveTextContent('680,000');
   });
 
   it('오늘 카드도 같은 숫자를 낸다 — 두 카드가 어긋나지 않는다', () => {
@@ -352,18 +352,22 @@ describe('생활비 · 세이브 배선', () => {
       />,
     );
     const panel = screen.getByLabelText('오늘');
-    expect(within(panel).getByLabelText('잔고 고치기')).toHaveTextContent('680,000');
+    expect(within(panel).getByLabelText(/^생활비 외 가용/)).toHaveTextContent('680,000');
   });
 
-  it('달력 셀도 카드와 같은 예약을 본다', () => {
+  /*
+    P0 생활비 · 잔고 분리로 기대값을 바꿨다. 예전에는 셀이 카드와 같은 가용 한도(생활비 ·
+    세이브를 뺀 값)를 적었고, 그래서 생활비를 만들기만 해도 셀의 숫자가 잔고처럼 줄어 보였다.
+    지금 셀은 **예상 잔고**다 — 생활비 · 세이브는 빼지 않고, 그 날까지의 현금 출금(점심
+    12,000 예정)만 뺀다. 쓸 수 있는 돈(70만)은 카드와 날짜 상세가 따로 적는다.
+  */
+  it('달력 셀은 예상 잔고 — 생활비 · 세이브를 빼지 않는다', () => {
     wrap(
       <MonthCalendar
         cursor={SEPTEMBER}
         onCursorChange={() => {}}
         entries={applyFilters(materialize([...RAW, LUNCH], '2026-09-01', '2026-09-30'), 'money', emptyFilters())}
         tideEntries={[...RAW, LUNCH]}
-        budgets={[BUDGET]}
-        reserves={[RESERVE]}
         tideMonths={tideWindow(TODAY)}
         accounts={ACCOUNTS}
         hasBalance
@@ -375,8 +379,8 @@ describe('생활비 · 세이브 배선', () => {
         onDayCreate={() => {}}
       />,
     );
-    // 09-14: 잔고 100만 − 예산 20만 − 세이브 10만 = 70만.
-    expect(screen.getByLabelText('2026-09-14 한도')).toHaveTextContent('70만');
+    // 09-14: 잔고 100만 − 점심 1만 2천(9/12 예정) = 98.8만. 생활비 20만 · 세이브 10만은 빼지 않는다.
+    expect(screen.getByLabelText(/^2026-09-14 예상 잔고/)).toHaveTextContent('98.8만');
   });
 
   it('화면용 목록을 예산 계산에 넘기면 렌더링이 실패한다', () => {

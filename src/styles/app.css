@@ -480,10 +480,8 @@
   display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap;
   padding: 8px 10px; background: var(--bg-soft);
   border-radius: var(--radius-sm); margin-bottom: 2px;
-  appearance: none; border: none; width: 100%; text-align: left;
-  color: var(--ink); font-family: inherit; cursor: pointer;
+  width: 100%; text-align: left; color: var(--ink);
 }
-.tp-bal:hover { background: var(--accent-soft); }
 .tp-bal.bad { background: color-mix(in oklab, var(--bad) 10%, var(--bg-soft)); }
 .tp-bal-l { font-size: 0.6875rem; color: var(--ink-3); width: 100%; }
 .tp-bal strong { font-size: 1rem; font-weight: 700; letter-spacing: -.01em; }
@@ -1076,14 +1074,24 @@
 .tide-h { display: flex; flex-direction: column; gap: 4px; align-items: flex-start; }
 .tide-l { margin: 0; font-size: 0.75rem; color: var(--ink-3); font-weight: 500; }
 .tide-l b { color: var(--ink-2); }
-/* 큰 숫자가 곧 잔고 편집 버튼이다. 한도는 잔고에서 나오는 값이라 고칠 대상은 잔고다. */
+/* 큰 숫자는 생활비 외 가용 한도다 — 잔고가 아니라서 눌러 고치는 자리가 아니다.
+   잔고를 고치는 자리는 아래 확인 잔고 줄(.tide-bal)이다. */
 .tide-v {
-  appearance: none; border: none; background: transparent; padding: 0;
-  font-family: inherit; color: var(--ink); text-align: left; cursor: pointer;
+  margin: 0; color: var(--ink);
   font-size: 1.875rem; font-weight: 700; letter-spacing: -.02em;
 }
-.tide-v:hover { color: var(--lens-money); }
 .tide-v.bad { color: var(--bad); }
+.tide-bal { display: flex; flex-wrap: wrap; align-items: center; gap: 2px 8px; margin-top: 4px; }
+.tide-bal p { margin: 0; font-size: 0.8125rem; color: var(--ink-2); }
+.tide-bal b { color: var(--ink); font-weight: 600; }
+.tide-bal-p { color: var(--ink-3); }
+.tide-held { width: 100%; margin-top: 2px; font-size: 0.78125rem; color: var(--ink-3); }
+.tide-held summary { cursor: pointer; padding: 2px 0; }
+.tide-held summary b { color: var(--ink-2); font-weight: 600; }
+.tide-held ul { list-style: none; margin: 4px 0 0; padding: 0 0 0 12px; display: flex; flex-direction: column; gap: 3px; }
+.tide-held li { display: flex; justify-content: space-between; gap: 8px; }
+.tide-held li i { font-style: normal; color: var(--ink-4); margin-left: 4px; }
+.tide-held-n { margin: 6px 0 0 12px; font-size: 0.71875rem; color: var(--ink-4); line-height: 1.5; }
 .tide-sub { margin: 2px 0 0; font-size: 0.78125rem; color: var(--ink-3); }
 .tide-sub b { color: var(--ink); font-weight: 600; }
 

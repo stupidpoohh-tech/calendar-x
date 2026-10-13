@@ -51,7 +51,7 @@ function mount(props: {
 
 /** 큰 숫자를 눌러 편집을 열고 새 잔고를 적은 뒤 Enter. 사람이 하는 그대로다. */
 function editBalance(text: string) {
-  fireEvent.click(screen.getByLabelText('잔고 고치기'));
+  fireEvent.click(screen.getByLabelText(/^잔고 고치기/));
   const input = screen.getByLabelText('잔고 금액');
   fireEvent.change(input, { target: { value: text } });
   fireEvent.keyDown(input, { key: 'Enter' });
@@ -181,7 +181,7 @@ describe('계산용 자료의 상태에 따라', () => {
 
   it('아직 못 받았으면 0원을 그리지 않고 무엇을 기다리는지 적는다', () => {
     render0(CALC_LOADING);
-    expect(screen.queryByLabelText('잔고 고치기')).toBeNull();
+    expect(screen.queryByLabelText(/^잔고 고치기/)).toBeNull();
     expect(screen.getByLabelText('며칠 버티나').textContent).toContain('불러오는 중');
   });
 
@@ -196,14 +196,14 @@ describe('계산용 자료의 상태에 따라', () => {
     render0(CALC_UNCONFIRMED);
     const card = screen.getByLabelText('며칠 버티나');
     expect(card.textContent).toContain('가릴 수 없습니다');
-    expect(screen.queryByLabelText('잔고 고치기')).toBeNull();
+    expect(screen.queryByLabelText(/^잔고 고치기/)).toBeNull();
   });
 
   it('캐시에 자료가 있으면 숫자는 내되 완전성 한계를 적는다', () => {
     // 오프라인에서 앱을 통째로 막지 않는다. 대신 무엇을 못 봤는지 말한다.
     render0({ kind: 'ready', fromCache: true, pending: false });
     const card = screen.getByLabelText('며칠 버티나');
-    expect(within(card).getByLabelText('잔고 고치기')).toHaveTextContent('1,000,000');
+    expect(within(card).getByLabelText(/^생활비 외 가용/)).toHaveTextContent('1,000,000');
     expect(card.textContent).toContain('이 기기에 저장된 자료 기준입니다');
   });
 
@@ -233,7 +233,7 @@ describe('계좌가 여럿일 때', () => {
     mount({ todayISO: '2026-09-10', accounts: two(), entries: [], tideFrom: '2026-09-01',
       onSaveAccount: () => {} });
 
-    fireEvent.click(screen.getByLabelText('잔고 고치기'));
+    fireEvent.click(screen.getByLabelText(/^잔고 고치기/));
     const pick = screen.getByLabelText('고칠 계좌') as HTMLSelectElement;
     expect([...pick.options].map((o) => o.textContent)).toEqual(['주계좌', '비상금']);
     // 처음에는 첫 계좌, 금액칸도 그 계좌의 값이다.
@@ -249,7 +249,7 @@ describe('계좌가 여럿일 때', () => {
     mount({ todayISO: '2026-09-10', accounts: two(), entries: [expense(100_000, '2026-09-05', '월세')],
       tideFrom: '2026-09-01', onSaveAccount: (a) => saved.push(a) });
 
-    fireEvent.click(screen.getByLabelText('잔고 고치기'));
+    fireEvent.click(screen.getByLabelText(/^잔고 고치기/));
     fireEvent.change(screen.getByLabelText('고칠 계좌'), { target: { value: 'a2' } });
     const input = screen.getByLabelText('잔고 금액');
     fireEvent.change(input, { target: { value: '250000' } });
@@ -378,8 +378,8 @@ describe('오늘 거래 — 잔고에 이미 빠져 있는 것 고르기', () =>
       onSaveAccount: (a) => saved.push(a),
     });
     // 한도는 잔고 − 아직 반영 안 된 커피.
-    expect(screen.getByLabelText('잔고 고치기')).toHaveTextContent('995,000');
-    fireEvent.click(screen.getByLabelText('잔고 고치기'));
+    expect(screen.getByLabelText(/^생활비 외 가용/)).toHaveTextContent('995,000');
+    fireEvent.click(screen.getByLabelText(/^잔고 고치기/));
     const box = screen.getByRole('checkbox', { name: /커피/ });
     expect(box).not.toBeChecked();
     fireEvent.change(screen.getByLabelText('잔고 금액'), { target: { value: '995000' } });
@@ -405,7 +405,7 @@ describe('오늘 거래 — 잔고에 이미 빠져 있는 것 고르기', () =>
       entries: [coffee, lunch],
       onSaveAccount: () => {},
     });
-    fireEvent.click(screen.getByLabelText('잔고 고치기'));
+    fireEvent.click(screen.getByLabelText(/^잔고 고치기/));
     fireEvent.click(screen.getByRole('button', { name: '전체 선택' }));
     expect(screen.getByRole('checkbox', { name: /커피/ })).toBeChecked();
     expect(screen.getByRole('checkbox', { name: /점심/ })).toBeChecked();
@@ -423,8 +423,8 @@ describe('오늘 거래 — 잔고에 이미 빠져 있는 것 고르기', () =>
       onSaveAccount: () => {},
     });
     // 이미 잔고에 들어 있는 커피를 또 빼지 않는다.
-    expect(screen.getByLabelText('잔고 고치기')).toHaveTextContent('995,000');
-    fireEvent.click(screen.getByLabelText('잔고 고치기'));
+    expect(screen.getByLabelText(/^생활비 외 가용/)).toHaveTextContent('995,000');
+    fireEvent.click(screen.getByLabelText(/^잔고 고치기/));
     expect(screen.getByRole('checkbox', { name: /커피/ })).toBeChecked();
   });
 
@@ -442,7 +442,7 @@ describe('오늘 거래 — 잔고에 이미 빠져 있는 것 고르기', () =>
       entries: [coffee, other],
       onSaveAccount: () => {},
     });
-    fireEvent.click(screen.getByLabelText('잔고 고치기'));
+    fireEvent.click(screen.getByLabelText(/^잔고 고치기/));
     expect(screen.getByRole('checkbox', { name: /커피/ })).toBeInTheDocument();
     expect(screen.queryByRole('checkbox', { name: /택시/ })).toBeNull();
   });

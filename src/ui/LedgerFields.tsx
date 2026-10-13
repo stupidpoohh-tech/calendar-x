@@ -175,6 +175,11 @@ export function LedgerFields({
           </div>
         </div>
       )}
+      {/* 카드 사용은 생활비에 걸지 않는다. 카드 대금과 이어 줄 연결 정보가 없어서, 걸면 주머니와
+          대금에서 같은 돈이 두 번 빠진다. 고를 자리를 감추는 것에서 그치지 않고 이유를 적는다. */}
+      {isOutflow && flow === 'cardSpend' && pockets.length > 0 && (
+        <p className="mod-hint">카드 사용은 생활비에 연결하지 않습니다 — 현금은 카드 대금을 내는 날 나가고, 그때 일반 지출로 셉니다.</p>
+      )}
       {canPocket && pockets.length > 1 && !money.budgetId && (
         <p className="mod-hint">이 날짜를 품는 생활비가 여럿입니다. 어느 주머니에서 나간 돈인지 골라 주세요.</p>
       )}

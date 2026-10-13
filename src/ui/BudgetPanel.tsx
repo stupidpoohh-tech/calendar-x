@@ -18,7 +18,7 @@ import {
 } from '../domain/budget';
 import { fmtDayShort } from '../domain/date';
 import { formatAmount, minorToInput, parseAmountToMinor } from '../domain/money';
-import type { Budget, Entry, Reserve } from '../domain/types';
+import type { Account, Budget, Entry, Reserve } from '../domain/types';
 import { Icon } from './Icon';
 import { PICKER } from './pickerField';
 
@@ -38,6 +38,8 @@ interface Props {
   bare?: boolean;
   /** 오늘. 종료일이 지난 주머니에 "끝남 — 남은 돈은 예약하지 않음" 을 적는다. */
   todayISO?: string;
+  /** 실제 지출이 이미 잔고에 들어갔는지 가르는 데 쓴다. 없으면 반영 여부를 적지 않는다. */
+  accounts?: readonly Account[];
   onSaveBudget: (b: Budget) => void;
   onDeleteBudget: (b: Budget) => void;
   onSaveReserve: (r: Reserve) => void;
@@ -48,7 +50,7 @@ interface Props {
 }
 
 export function BudgetPanel({
-  budgets, reserves, entries, collapsed: collapsedPref, onToggleCollapsed, bare = false, todayISO,
+  budgets, reserves, entries, collapsed: collapsedPref, onToggleCollapsed, bare = false, todayISO, accounts,
   onSaveBudget, onDeleteBudget, onSaveReserve, onDeleteReserve, onEntryClick, onLinkEntry,
 }: Props) {
   const [draft, setDraft] = useState<Budget | null>(null);
@@ -58,7 +60,7 @@ export function BudgetPanel({
   const [reserveText, setReserveText] = useState('');
 
   const collapsed = bare ? false : collapsedPref;
-  const states = budgetStates(budgets, entries);
+  const states = budgetStates(budgets, entries, { accounts, today: todayISO });
   const reservedMinor = reserves.reduce((t, r) => t + r.amountMinor, 0);
 
   const startEdit = (b: Budget) => {
@@ -113,10 +115,10 @@ export function BudgetPanel({
 
       {collapsed && states.length > 0 && (
         <div className="bp-compact">
-          {states.map(({ budget, spentMinor, remainingMinor }) => (
+          {states.map(({ budget, actualMinor, remainingMinor }) => (
             <p key={budget.id}>
               <span>{budget.name}</span>
-              <span className="num">사용 {formatAmount(spentMinor)} · 남음 {formatAmount(remainingMinor)} {budget.currency}</span>
+              <span className="num">사용 {formatAmount(actualMinor)} · 남음 {formatAmount(remainingMinor)} {budget.currency}</span>
             </p>
           ))}
         </div>
@@ -214,10 +216,12 @@ function BudgetRow({
   onEntryClick?: (e: Entry) => void;
   onLinkEntry?: (e: Entry, b: Budget) => void;
 }) {
-  const { budget, spentMinor, remainingMinor, overspentMinor, count } = state;
-  // 총 예산이 0이면 비율을 낼 수 없다. 막대를 그리지 않는다.
+  const {
+    budget, actualMinor, plannedMinor, unsettledMinor, remainingMinor, overspentMinor, plannedOverMinor, count,
+  } = state;
+  // 총 예산이 0이면 비율을 낼 수 없다. 막대를 그리지 않는다. 막대는 실제로 쓴 돈만 채운다.
   const ratio = budget.amountMinor > 0
-    ? Math.min(1, spentMinor / budget.amountMinor)
+    ? Math.min(1, actualMinor / budget.amountMinor)
     : 0;
   const linked = open ? spendingIn(budget, entries) : [];
   const loose = unlinkedSpendingFor(budget, entries);
@@ -233,13 +237,21 @@ function BudgetRow({
           <span className={'bp-bar' + (overspentMinor > 0 ? ' over' : '')}>
             <span className="bp-bar-f" style={{ width: `${Math.round(ratio * 100)}%` }} />
           </span>
+          {/* 쓴 돈 · 예정 · 남음은 다른 숫자다. 예정은 쓴 돈에 넣지 않는다. */}
           <span className="debt-d num">
-            사용 {formatAmount(spentMinor)}
+            사용 {formatAmount(actualMinor)}
             {overspentMinor > 0
               ? <> · <b className="bp-over">초과 {formatAmount(overspentMinor)}</b></>
               : <> · 남음 {formatAmount(remainingMinor)}</>}
             {count > 0 && ` · ${count}건`}
           </span>
+          {(plannedMinor > 0 || unsettledMinor > 0) && (
+            <span className="debt-d num">
+              {plannedMinor > 0 && <>예정 {formatAmount(plannedMinor)}{plannedOverMinor > overspentMinor && ` (다 쓰면 ${formatAmount(plannedOverMinor)} 초과)`}</>}
+              {plannedMinor > 0 && unsettledMinor > 0 && ' · '}
+              {unsettledMinor > 0 && <>잔고에 아직 안 들어간 사용 {formatAmount(unsettledMinor)}</>}
+            </span>
+          )}
           {ended && (
             <span className="debt-d">끝남 — 남은 돈은 더 이상 한도에서 빼 두지 않습니다. 아직 잔고에 안 들어간 지출만 셉니다.</span>
           )}

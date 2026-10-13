@@ -8,8 +8,9 @@
  *
  *   • 과거 지출은 입력하지 않는다. 잔고를 옮겨 적는 순간 그 사이의 변동 지출이
  *     정산된 것으로 본다.
- *   • 이 앱은 "예상 잔고"를 만들지 않는다. 표시하는 숫자는 "이 날까지 쓸 수
- *     있는 한도"다. 변동 지출을 추정하지 않는 것은 누락이 아니라 정의다.
+ *   • 예측하지 않는다. 카드의 숫자는 "이 날까지 쓸 수 있는 한도"(`limitOn`)이고,
+ *     달력의 "예상 잔고"(`projectedBalanceOn`)는 적어 둔 입출금만 더한 값이다.
+ *     변동 지출을 추정하지 않는 것은 누락이 아니라 정의다.
  *
  * ─────────────────────────────────────────────────────────────────
  * Dada Entry 위에서 도는 방식
@@ -514,6 +515,85 @@ export function headlineLimit(
   res: Reservations = {},
 ): number {
   return limitOn(accounts, entries, horizonOf(entries, today).end, today, res);
+}
+
+// ---------- 잔고 · 예상 잔고 · 가용 한도 ----------
+
+/*
+  네 숫자는 서로 다른 질문에 답한다. 섞지 않는다.
+
+    확인 잔고      사용자가 적은 계좌 잔고의 합. 생활비 · 세이브를 만들어도 변하지 않는다
+                  (`confirmedBalance`). 기준일이 지났으면 "지금 잔고" 가 아니다 — 화면이
+                  기준일을 함께 적는다.
+    예상 잔고      확인 잔고 + 그 날까지 적어 둔 현금 입출금(`projectedBalanceOn`).
+                  예정 입출금, 아직 잔고에 안 들어간 실제 거래를 더한다. 카드 사용은 0,
+                  카드 대금은 출금. 생활비 · 세이브는 **빼지 않는다** — 내부 배분이지
+                  출금이 아니다. 적지 않은 미래 소비는 모른다(예측하지 않는다).
+    남은 생활비    총 예산 − 실제로 쓴 돈 (`budget.budgetState`). 예정은 쓴 돈이 아니다.
+    생활비 외 가용  그 날까지 쓸 수 있는 돈 = `limitOn`. 확인 잔고에서 출발해 일반 흐름을
+                  더하고, 생활비 몫(`pocketReserve`) · 세이브 · 기간 예정의 남은 몫을 뺀다.
+                  생활비에서 쓴 돈은 몫 안에서 세어지고 일반 흐름에서 빠지므로 두 번 빠지지
+                  않는다.
+
+  예) 잔고 250,000 · 생활비 200,000 · 다른 거래 없음
+      확인 250,000 · 예상 250,000 · 남은 생활비 200,000 · 가용 50,000
+      생활비에서 40,000 을 쓰고 아직 잔고에 반영 전:  예상 210,000 · 남은 160,000 · 가용 50,000
+      잔고를 210,000 으로 다시 적음:                확인 210,000 · 예상 210,000 · 가용 50,000
+*/
+
+/** 확인 잔고 — 계좌에 적힌 잔고의 합. */
+export function confirmedBalance(accounts: readonly Account[]): number {
+  return accounts.reduce((s, a) => s + a.balanceMinor, 0);
+}
+
+/**
+ * 예상 잔고 — 확인 잔고에 `date` 까지 적어 둔 현금 입출금을 더한 값.
+ *
+ * 경계는 한도와 같다(`unsettledAfter`). 예정은 (경계, date] 의 회차를, 실제 거래는 아직
+ * 잔고 밖인 것 가운데 date 까지를 더한다. 생활비에 걸린 지출도 **현금이므로 더한다** —
+ * 가용 한도와 달리 생활비 몫을 따로 잡아 두지 않기 때문에 두 번 빠질 일이 없다.
+ * 기간 예정은 하루 몫으로 그 날까지만 더한다(한도는 기간에 들어서는 순간 남은 몫 전체를
+ * 잡아 두지만, 그것은 쓸 수 있는 돈의 규칙이지 통장의 움직임이 아니다).
+ */
+export function projectedBalanceOn(
+  accounts: readonly Account[], entries: readonly Entry[], date: DateISO, today: DateISO,
+): number {
+  assertOriginals(entries);
+  const from = unsettledAfter(accounts, today);
+  const d = normalizeDate(date);
+  return confirmedBalance(accounts)
+    + netOf(occurrences(entries, from, d))
+    + netOf(unreflectedActuals(accounts, entries, d));
+}
+
+/** 한 날짜의 잔고 보기. 화면은 이 하나로 셋을 함께 적는다. */
+export interface BalanceView {
+  date: DateISO;
+  /** 확인 잔고와 그 기준일(가장 최근에 적은 잔고의 날짜). */
+  confirmed: number;
+  asOf: DateISO;
+  /** 그 날의 예상 잔고. */
+  projected: number;
+  /** 그 날까지의 생활비 외 가용 한도 (`limitOn`). */
+  available: number;
+  /** 예상 잔고 가운데 생활비 · 세이브 · 기간 예정으로 확보돼 있는 몫 = projected − available. */
+  held: number;
+}
+
+export function balanceViewOn(
+  accounts: readonly Account[], entries: readonly Entry[], date: DateISO, today: DateISO,
+  res: Reservations = {},
+): BalanceView {
+  const projected = projectedBalanceOn(accounts, entries, date, today);
+  const available = limitOn(accounts, entries, date, today, res);
+  return {
+    date,
+    confirmed: confirmedBalance(accounts),
+    asOf: balanceAsOf(accounts, today),
+    projected,
+    available,
+    held: projected - available,
+  };
 }
 
 /**

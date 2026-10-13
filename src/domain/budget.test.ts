@@ -47,6 +47,18 @@ const spend = (
   money: newMoney({ type: 'expense', amountMinor, budgetId }),
 });
 
+/**
+ * 생활비에서 **실제로** 쓴 지출. "남은 생활비" 는 실제 사용만 뺀다 — 예정은 쓴 돈이 아니다
+ * (P0 생활비 · 잔고 분리). 예전 테스트는 예정(`spend`)을 "쓴 돈" 으로 셌고, 그 의미가
+ * 다음 주에 잡아 둔 예정까지 이미 쓴 것처럼 보이게 했다. 잔액 테스트는 이 실제 거래로 적는다.
+ */
+const paid = (
+  id: string, amountMinor: number, startDate: string, budgetId: string | null = 'b1',
+): Entry => newEntry('money', {
+  id, title: id, startDate,
+  money: newMoney({ status: 'actual', type: 'expense', amountMinor, budgetId }),
+});
+
 const income = (id: string, amountMinor: number, startDate: string): Entry =>
   newEntry('money', {
     id, title: id, startDate,
@@ -58,47 +70,47 @@ const income = (id: string, amountMinor: number, startDate: string): Entry =>
 describe('생활비 잔액', () => {
   it('70만으로 만들면 그대로 70만이 남는다', () => {
     const s = budgetState(budget(), []);
-    expect(s.spentMinor).toBe(0);
+    expect(s.actualMinor).toBe(0);
     expect(s.remainingMinor).toBe(700_000);
     expect(s.overspentMinor).toBe(0);
     expect(s.count).toBe(0);
   });
 
   it('1만 2천을 쓰면 68만 8천이 남는다', () => {
-    const s = budgetState(budget(), [spend('점심', 12_000, '2026-09-15')]);
-    expect(s.spentMinor).toBe(12_000);
+    const s = budgetState(budget(), [paid('점심', 12_000, '2026-09-15')]);
+    expect(s.actualMinor).toBe(12_000);
     expect(s.remainingMinor).toBe(688_000);
     expect(s.overspentMinor).toBe(0);
   });
 
   it('여러 지출을 합산한다', () => {
     const s = budgetState(budget(), [
-      spend('점심', 12_000, '2026-09-15'),
-      spend('커피', 4_500, '2026-09-16'),
-      spend('장보기', 63_000, '2026-09-18'),
+      paid('점심', 12_000, '2026-09-15'),
+      paid('커피', 4_500, '2026-09-16'),
+      paid('장보기', 63_000, '2026-09-18'),
     ]);
-    expect(s.spentMinor).toBe(79_500);
+    expect(s.actualMinor).toBe(79_500);
     expect(s.remainingMinor).toBe(620_500);
     expect(s.count).toBe(3);
   });
 
   it('연결된 지출의 금액을 고치면 잔액이 따라 바뀐다', () => {
-    const before = budgetState(budget(), [spend('점심', 12_000, '2026-09-15')]);
-    const after = budgetState(budget(), [spend('점심', 30_000, '2026-09-15')]);
+    const before = budgetState(budget(), [paid('점심', 12_000, '2026-09-15')]);
+    const after = budgetState(budget(), [paid('점심', 30_000, '2026-09-15')]);
     expect(before.remainingMinor).toBe(688_000);
     expect(after.remainingMinor).toBe(670_000);
   });
 
   it('연결된 지출을 지우면 그만큼 돌아온다', () => {
-    const s = budgetState(budget(), [spend('커피', 4_500, '2026-09-16')]);
+    const s = budgetState(budget(), [paid('커피', 4_500, '2026-09-16')]);
     expect(budgetState(budget(), []).remainingMinor).toBe(700_000);
     expect(s.remainingMinor).toBe(695_500);
   });
 
   it('기간 밖 지출은 이 생활비에서 나가지 않는다', () => {
-    const outside = spend('추석', 200_000, '2026-10-02');
+    const outside = paid('추석', 200_000, '2026-10-02');
     expect(inBudget(outside, budget())).toBe(false);
-    expect(budgetState(budget(), [outside]).spentMinor).toBe(0);
+    expect(budgetState(budget(), [outside]).actualMinor).toBe(0);
   });
 
   it('반복 항목은 생활비에 들어가지 않는다', () => {
@@ -111,8 +123,8 @@ describe('생활비 잔액', () => {
   });
 
   it('초과하면 남음 0 · 초과 금액을 따로 적는다', () => {
-    const s = budgetState(budget(), [spend('과지출', 720_000, '2026-09-20')]);
-    expect(s.spentMinor).toBe(720_000);
+    const s = budgetState(budget(), [paid('과지출', 720_000, '2026-09-20')]);
+    expect(s.actualMinor).toBe(720_000);
     expect(s.remainingMinor).toBe(0);
     expect(s.overspentMinor).toBe(20_000);
   });
@@ -182,11 +194,11 @@ describe('가용 한도와 생활비', () => {
 
   it('실제 사용액 + 남은 예약 = 총 예산', () => {
     // §7 의 불변식을 값으로 못박는다. 어느 시점에 보든 이 합은 총 예산이다.
-    const entries = [spend('점심', 12_000, '2026-09-15'), spend('커피', 4_500, '2026-09-16')];
+    const entries = [paid('점심', 12_000, '2026-09-15'), paid('커피', 4_500, '2026-09-16')];
     const b = budget();
     const s = budgetState(b, entries);
     const claim = reservedOn([b], [], entries, '2026-09-30', '2026-09-14');
-    expect(s.spentMinor + s.remainingMinor).toBe(b.amountMinor);
+    expect(s.actualMinor + s.remainingMinor).toBe(b.amountMinor);
     // 한도가 잡아 두는 자리도 총 예산 그대로다 (아직 통장에서 안 빠졌으므로).
     expect(claim).toBe(700_000);
   });

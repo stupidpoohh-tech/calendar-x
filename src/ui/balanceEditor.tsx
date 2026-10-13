@@ -352,7 +352,13 @@ export function BalanceInput({ editor, size = 'lg' }: { editor: BalanceEditor; s
  */
 export function BalanceNote({ editor }: { editor: BalanceEditor }) {
   return (
-    <button type="button" className="bal-note" onClick={editor.start}>
+    <button
+      type="button" className="bal-note" onClick={editor.start}
+      // 잔고를 고치는 자리는 여기 하나다. 카드의 큰 숫자(가용 한도)는 고치는 대상이 아니다.
+      aria-label={editor.primary
+        ? `잔고 고치기 (${editor.accounts.length > 1 ? `${editor.primary.name} ` : ''}${editor.primary.asOf} 기준)`
+        : '잔고 고치기 (아직 적지 않음)'}
+    >
       <Icon.Wallet size={12} />
       <span>
         {editor.primary

@@ -33,6 +33,8 @@ import {
 } from '../domain/confirm';
 import { applyReflectChoice, isActual, reflectChoiceFor } from '../domain/ledger';
 import { daySummary } from '../domain/daySummary';
+import { balanceViewOn, calcScopeOf } from '../domain/tide';
+import { ymOf } from '../domain/date';
 import { isRecoveryEntry } from '../domain/recovery';
 import type {
   Account, Budget, Category, CategoryBudget, Entry, Filters, LedgerNote, LedgerTabId, LensId, SharedInvite, SharedNote, SharedTodoItem,
@@ -1412,6 +1414,17 @@ function Workspace({ uid, user, onSignOut }: WorkspaceProps) {
     () => ({ entries: store.entries, ready: ledgerDayReady }),
     [store.entries, ledgerDayReady],
   );
+  /*
+    오늘 · 앞날의 잔고 보기 — 예상 잔고와 생활비 외 가용을 함께 적는다. 달력 셀은 예상 잔고
+    하나만 적으므로 쓸 수 있는 돈은 여기서 본다. 계산 자료가 준비되지 않았거나 그 달이
+    계산 창 밖이면 내지 않는다(달력 셀과 같은 조건).
+  */
+  const daySheetBalance = useMemo(() => {
+    if (!daySheet || !ledgerOn || daySheet < today || !hasBalance || calcState.kind !== 'ready') return null;
+    if (!store.tideMonths.includes(ymOf(daySheet))) return null;
+    if (!calcScopeOf(store.accounts, store.tideEntries).ok) return null;
+    return balanceViewOn(store.accounts, store.tideEntries, daySheet, today, { budgets: store.budgets, reserves: store.reserves });
+  }, [daySheet, ledgerOn, today, hasBalance, calcState.kind, store.tideMonths, store.accounts, store.tideEntries, store.budgets, store.reserves]);
   // 가계부 날짜 상세는 필터와 무관하게 그 날의 가계부 항목을 빠짐없이 보여 준다(소액 포함).
   const ledgerDayEntries = daySheet && ledgerOn
     ? materialized.filter((e) => e.kind === 'money' && e.startDate <= daySheet && effectiveEndDate(e) >= daySheet)
@@ -1821,13 +1834,17 @@ function Workspace({ uid, user, onSignOut }: WorkspaceProps) {
               }}
             />
           </TideBar>
+          {hasBalance && (
+            <p className="led-note cal-legend">
+              날짜 아래 숫자는 그 날의 <b>예상 잔고</b>입니다 — 적어 둔 입출금만 더하고, 생활비 · 세이브는 빼지 않습니다.
+              쓸 수 있는 돈은 날짜를 눌러 확인합니다.
+            </p>
+          )}
           <MonthCalendar
             cursor={cursor}
             onCursorChange={setCursor}
             entries={visible}
             tideEntries={store.tideEntries}
-            budgets={store.budgets}
-            reserves={store.reserves}
             // 계산 자료를 못 받았으면 덮는 달이 없는 것과 같다 — 셀에 숫자를 적지 않는다.
             tideMonths={calcState.kind === 'ready' ? store.tideMonths : EMPTY_MONTHS}
             accounts={store.accounts}
@@ -1847,6 +1864,7 @@ function Workspace({ uid, user, onSignOut }: WorkspaceProps) {
               budgets={store.budgets}
               reserves={store.reserves}
               entries={store.tideEntries}
+              accounts={store.accounts}
               collapsed={false}
               onToggleCollapsed={() => undefined}
               bare
@@ -1886,8 +1904,6 @@ function Workspace({ uid, user, onSignOut }: WorkspaceProps) {
             onCursorChange={setCursor}
             entries={visible}
             tideEntries={store.tideEntries}
-            budgets={store.budgets}
-            reserves={store.reserves}
             // 계산 자료를 못 받았으면 덮는 달이 없는 것과 같다 — 셀에 숫자를 적지 않는다.
             tideMonths={calcState.kind === 'ready' ? store.tideMonths : EMPTY_MONTHS}
             accounts={store.accounts}
@@ -1931,6 +1947,7 @@ function Workspace({ uid, user, onSignOut }: WorkspaceProps) {
           moneyEntries={store.entries}
           ledger={ledgerOn ? {
             summary: ledgerDayReady ? daySummary(store.entries, daySheet) : null,
+            balance: daySheetBalance,
             categories: store.categories,
             onToggleHighlight: toggleHighlight,
           } : undefined}

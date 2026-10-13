@@ -202,23 +202,22 @@ export function TodayPanel({
               </button>
               {!moneyCollapsed && (
                 <>
-                  {/* 금액은 하나만. 누르면 그 자리에서 잔고를 고친다. */}
+                  {/* 이 숫자는 생활비 외 가용 한도다 — 잔고가 아니라 눌러 고치지 않는다.
+                      잔고를 고치는 자리는 아래 '잔고 … 기준 · 수정' 줄이다. */}
                   {editor.editing ? (
                     <BalanceInput editor={editor} size="sm" />
                   ) : tideLimit != null ? (
-                    <button
-                      type="button"
+                    <div
                       className={'tp-bal' + (tideLimit < 0 ? ' bad' : '')}
-                      onClick={editor.start}
-                      aria-label="잔고 고치기"
+                      aria-label={`생활비 외 가용 ${formatAmount(tideLimit)}원`}
                     >
                       <span className="tp-bal-l">
                         {horizon.nextIncome
-                          ? `다음 입금 전날까지`
-                          : '앞으로 30일 · 이 돈으로'}
+                          ? `다음 입금 전날까지 · 생활비 · 세이브 빼고`
+                          : '앞으로 30일 · 생활비 · 세이브 빼고'}
                       </span>
                       <strong className="num">₩ {formatAmount(tideLimit)}</strong>
-                    </button>
+                    </div>
                   ) : calcState.kind !== 'ready' ? (
                     <p className="tp-empty">{calcNotice(calcState)}</p>
                   ) : !scope.ok ? (

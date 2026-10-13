@@ -5,7 +5,7 @@ import { displayTitle, isDone } from '../domain/entry';
 import { cashSignOf, isActual } from '../domain/ledger';
 import { flowBadge } from '../domain/ledgerStats';
 import { formatAmount, formatSigned } from '../domain/money';
-import { entriesOn, netOf } from '../domain/tide';
+import { entriesOn, netOf, type BalanceView } from '../domain/tide';
 import type { Category, Entry } from '../domain/types';
 import { Icon } from './Icon';
 
@@ -19,6 +19,8 @@ export interface DaySheetLedger {
   summary: DaySummary | null;
   categories: readonly Category[];
   onToggleHighlight: (e: Entry) => void;
+  /** 오늘 · 앞날의 예상 잔고와 생활비 외 가용. 낼 수 없으면 null — 지어내지 않는다. */
+  balance?: BalanceView | null;
 }
 
 interface Props {
@@ -128,6 +130,18 @@ function LedgerDay({ dateISO, todayISO, entries, ledger, onClose, onEntryClick, 
           </div>
           <button className="ico-btn" onClick={onClose} aria-label="닫기"><Icon.X size={18} /></button>
         </header>
+
+        {ledger.balance && (
+          <div className="sheet-sum bal" aria-label="이 날의 잔고 보기">
+            <div><span>예상 잔고</span><b className={'num' + (ledger.balance.projected < 0 ? ' minus' : '')}>{formatAmount(ledger.balance.projected)}</b></div>
+            <div><span>생활비 외 가용</span><b className={'num' + (ledger.balance.available < 0 ? ' minus' : '')}>{formatAmount(ledger.balance.available)}</b></div>
+            <div><span>생활비 · 세이브 확보</span><b className="num">{formatAmount(ledger.balance.held)}</b></div>
+            <p className="sheet-sum-n">
+              확인 잔고 {formatAmount(ledger.balance.confirmed)}원({ledger.balance.asOf} 기준)에 이 날까지 적어 둔 입출금을 더한
+              값입니다. 생활비 · 세이브는 통장에서 빠진 돈이 아니라 잔고 안에서 떼어 둔 몫이고, 적지 않은 소비는 들어 있지 않습니다.
+            </p>
+          </div>
+        )}
 
         {summary ? (
           <div className="sheet-sum" aria-label="이 날의 실제 현금흐름">

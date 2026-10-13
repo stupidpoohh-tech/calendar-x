@@ -290,7 +290,8 @@ describe('생활비 주머니', () => {
     const p = plan('lunch', '2026-10-13', { amountMinor: 12_000, budgetId: 'b1' });
     const paid = confirm(p, '2026-10-13', { amountMinor: 15_000 });
     expect(spendingIn(b, [p, paid]).map((e) => e.id)).toEqual([paid.id]);
-    expect(budgetState(b, [p, paid]).spentMinor).toBe(15_000);
+    expect(budgetState(b, [p, paid]).actualMinor).toBe(15_000);
+    expect(budgetState(b, [p, paid]).plannedMinor).toBe(0);
   });
 
   it('주머니 안에서 쓰는 한 한도는 움직이지 않는다 — 실제 거래도 같다', () => {

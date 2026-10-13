@@ -9,16 +9,18 @@
  * 접힌 줄로 들어온다 — 카드를 셋으로 나눠 세우면 모바일에서 달력이 화면 밖으로
  * 밀린다.
  *
- * 금액은 카드에 하나만 뜬다. 예정된 입출금이 없는 구간에서는 한도가 곧 잔고라
- * 잔고를 따로 적으면 같은 숫자가 두 번 보였고, 남은 날이 하루면 하루 몫까지
- * 같아져 세 번 보였다.
+ * 큰 숫자는 **생활비 외 가용 한도**다 — 잔고가 아니다. 잔고 250,000 · 생활비 200,000 이면
+ * 큰 숫자는 50,000 이고, 확인 잔고 250,000 은 그 아래 따로 적는다. 예전에는 큰 숫자를 누르면
+ * 잔고를 고쳤는데, 그래서 한도를 잔고로 읽고 50,000 을 잔고로 고쳐 적을 수 있었다. 지금
+ * 고치는 자리는 확인 잔고 줄 하나다. 생활비 · 세이브로 확보된 몫은 접힌 줄에서 펼쳐 본다.
  */
 import { useMemo, type ReactNode } from 'react';
+import { budgetStates } from '../domain/budget';
 import { MONEY_TYPE_BY_ID } from '../domain/constants';
 import { daysBetween, fmtDayShort } from '../domain/date';
 import { formatAmount, formatSigned } from '../domain/money';
 import {
-  calcScopeOf, headlineLimit, horizonOf, summarize, upcomingInHorizon,
+  balanceViewOn, calcScopeOf, horizonOf, projectedBalanceOn, summarize, unsettledAfter, upcomingInHorizon,
   type Summary,
 } from '../domain/tide';
 import type { Account, Budget, Entry, Reserve } from '../domain/types';
@@ -75,10 +77,22 @@ export function TideBar({
   const res = useMemo(() => ({ budgets, reserves }), [budgets, reserves]);
 
   const horizon = useMemo(() => horizonOf(entries, today), [entries, today]);
-  const limit = useMemo(
-    () => headlineLimit(accounts, entries, today, res),
-    [accounts, entries, today, res],
+  // 입금 전날의 잔고 보기 — 가용(큰 숫자) · 예상 잔고 · 확보한 몫을 같은 함수에서 함께 낸다.
+  const view = useMemo(
+    () => balanceViewOn(accounts, entries, horizon.end, today, res),
+    [accounts, entries, horizon.end, today, res],
   );
+  const limit = view.available;
+  // 오늘의 예상 잔고. 확인 잔고와 다르면(아직 반영 안 한 거래 · 기준일 뒤 지난 예정) 함께 적는다.
+  const projectedToday = useMemo(
+    () => projectedBalanceOn(accounts, entries, today, today),
+    [accounts, entries, today],
+  );
+  const pockets = useMemo(() => {
+    const from = unsettledAfter(accounts, today);
+    return budgetStates(budgets, entries, { accounts, today, unsettledAfter: from })
+      .filter((s) => s.budget.startDate <= horizon.end && s.reservedMinor > 0);
+  }, [budgets, entries, accounts, today, horizon.end]);
   const daysLeft = useMemo(() => Math.max(1, daysBetween(today, horizon.end) + 1), [today, horizon.end]);
   const upcoming = useMemo(
     () => summarize(upcomingInHorizon(accounts, entries, today, horizon, res)),
@@ -180,27 +194,56 @@ export function TideBar({
           {horizon.nextIncome
             ? <>다음 입금(<b>{fmtDayShort(horizon.nextIncome)}</b>) 전날까지</>
             : '앞으로 30일'}
+          {' · '}생활비 · 세이브 빼고 쓸 수 있는 돈
         </p>
-        {/* 이 숫자를 누르면 잔고를 고친다. 한도는 잔고에서 나오는 값이라
-            고칠 대상은 언제나 잔고다. */}
-        {editor.editing ? (
-          <BalanceInput editor={editor} />
-        ) : (
-          <button
-            type="button"
-            className={'tide-v num' + (negative ? ' bad' : '')}
-            onClick={editor.start}
-            aria-label="잔고 고치기"
-          >
-            ₩ {formatAmount(limit)}
-          </button>
-        )}
+        {/* 가용 한도는 잔고가 아니다 — 눌러서 고치는 숫자가 아니다. 고칠 대상은 아래 확인 잔고다. */}
+        <p className={'tide-v num' + (negative ? ' bad' : '')} aria-label={`생활비 외 가용 ${formatAmount(limit)}원`}>
+          ₩ {formatAmount(limit)}
+        </p>
         <p className="tide-sub num">
           이 돈으로 <b>{daysLeft}일</b> 버티기
           {/* 남은 날이 하루면 하루 몫이 위 숫자와 같다. 같은 금액을 두 번 적지 않는다. */}
           {daysLeft > 1 && <> · 하루 <b>{formatAmount(perDay)}원</b></>}
         </p>
-        <BalanceNote editor={editor} />
+        {editor.editing ? (
+          <BalanceInput editor={editor} />
+        ) : (
+          <div className="tide-bal">
+            <p className="num">
+              확인 잔고 <b aria-label={`확인 잔고 ${formatAmount(view.confirmed)}원`}>₩ {formatAmount(view.confirmed)}</b>
+              {projectedToday !== view.confirmed && (
+                <span className="tide-bal-p"> · 오늘 예상 <b aria-label={`오늘 예상 잔고 ${formatAmount(projectedToday)}원`}>₩ {formatAmount(projectedToday)}</b></span>
+              )}
+            </p>
+            <BalanceNote editor={editor} />
+          </div>
+        )}
+        {view.held !== 0 && (
+          <details className="tide-held">
+            <summary className="num">
+              생활비 · 세이브로 확보 <b>₩ {formatAmount(view.held)}</b>
+            </summary>
+            <ul>
+              {pockets.map((p) => (
+                <li key={p.budget.id} className="num">
+                  <span>{p.budget.name} <i>{fmtDayShort(p.budget.startDate)}–{fmtDayShort(p.budget.endDate)}</i></span>
+                  <span>
+                    남음 {formatAmount(p.remainingMinor)}
+                    {p.plannedMinor > 0 && ` · 예정 ${formatAmount(p.plannedMinor)}`}
+                    {p.overspentMinor > 0 && ` · 초과 ${formatAmount(p.overspentMinor)}`}
+                  </span>
+                </li>
+              ))}
+              {reserves.filter((r) => r.amountMinor > 0).map((r) => (
+                <li key={r.id} className="num"><span>{r.name} <i>세이브</i></span><span>{formatAmount(r.amountMinor)}</span></li>
+              ))}
+            </ul>
+            <p className="tide-held-n num">
+              {Number(horizon.end.slice(5, 7))}월 {Number(horizon.end.slice(8))}일 예상 잔고 {formatAmount(view.projected)} − 확보 {formatAmount(view.held)} = 쓸 수 있는 돈 {formatAmount(limit)}.
+              생활비 · 세이브는 통장에서 빠진 돈이 아니라 잔고 안에서 떼어 둔 몫입니다.
+            </p>
+          </details>
+        )}
         {caveat && <p className="tide-caveat">{caveat}</p>}
       </div>
 
