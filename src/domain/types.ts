@@ -149,6 +149,13 @@ export interface MoneyFields {
    * 앞서고, 하루에 한 건만 뜬다(`daySummary.pickMajor`). 계산에 쓰지 않는 표시값이다.
    */
   highlight?: boolean;
+  /**
+   * 사용자가 "생활비 외 지출" 로 **명시**했다. `budgetId` 가 비어 있는 거래는 둘로 갈린다 —
+   * 이 값이 true 면 일부러 생활비 밖에 둔 것이고, 아니면 아직 사용처를 정하지 않은 것이다.
+   * 미연결 경고(`unlinkedSpendingFor`)는 정하지 않은 것만 보여 주고, 자동 선택은 이 값을
+   * 덮지 않는다. 계산에는 쓰지 않는다 — 생활비 몫은 언제나 `budgetId` 로만 정해진다.
+   */
+  outsidePocket?: boolean;
 }
 
 /** 예정 · 실제. */

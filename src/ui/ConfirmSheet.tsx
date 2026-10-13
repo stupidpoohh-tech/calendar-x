@@ -8,7 +8,7 @@
  * 편집 창 위에 겹쳐 띄우지 않는다 — 부르는 쪽이 편집 창을 닫고 이것을 연다.
  */
 import { useEffect, useRef, useState } from 'react';
-import { budgetCovers } from '../domain/budget';
+import { budgetCovers, pocketEligible } from '../domain/budget';
 import { confirmOccurrence, needsTypeChoice, pocketChoiceFor, type ConfirmRefusal } from '../domain/confirm';
 import { confirmedEntryId } from '../domain/ledger';
 import { fmtDayShort } from '../domain/date';
@@ -68,7 +68,8 @@ export function ConfirmSheet({
       flow: legacy ? undefined : planMoney.flow ?? 'normal',
       status: 'actual',
     };
-    if (base.budgetId || base.type !== 'expense' || base.flow === 'cardSpend' || base.debtId) return base;
+    // 일반 지출만, 그리고 예정에서 이미 고른 사용처(주머니 · 생활비 외)는 덮지 않는다.
+    if (base.budgetId || base.outsidePocket || !pocketEligible({ money: base, recurrence: null })) return base;
     return { ...base, budgetId: pocketChoiceFor(occurrenceDate, budgets).selected?.id ?? null };
   });
   const [typeChosen, setTypeChosen] = useState(!legacy);
@@ -86,7 +87,7 @@ export function ConfirmSheet({
   const pockets = budgets.filter((b) => budgetCovers(b, date));
 
   const patch = (p: Partial<MoneyFields>) => {
-    if ('budgetId' in p) setPocketTouched(true);
+    if ('budgetId' in p || 'outsidePocket' in p) setPocketTouched(true);
     setMoney((m) => ({ ...m, ...p }));
   };
 
@@ -105,7 +106,7 @@ export function ConfirmSheet({
 
   const changeDate = (d: string) => {
     setDate(d);
-    if (pocketTouched || type !== 'expense' || money.flow === 'cardSpend' || money.debtId) return;
+    if (pocketTouched || money.outsidePocket || !pocketEligible({ money, recurrence: null })) return;
     setMoney((m) => ({ ...m, budgetId: pocketChoiceFor(d, budgets).selected?.id ?? null }));
   };
 

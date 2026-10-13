@@ -509,12 +509,45 @@ export function limitOn(
   return total - reservedOn(budgets, reserves, entries, date, from, accounts, today);
 }
 
-/** 머리 숫자 — 다음 입금 전날(또는 30일 뒤)까지 남는 한도. */
+/**
+ * 머리 숫자 — 다음 입금 전날(또는 30일 뒤)까지 **지금 쓸 수 있는** 돈.
+ *
+ * 구간 안 날짜별 가용의 **최솟값**이다. 예전에는 끝점 하루의 값이었는데, 그때는 가용이 날마다
+ * 줄기만 해서 끝점이 곧 최솟값이었다. 생활비 예약이 조회일 기준으로 풀리면서(P1) 가용이 중간에
+ * 다시 늘 수 있다 — 10/17 에 끝나는 생활비 200,000 은 10/18 부터 가용으로 돌아온다. 그 늘어난
+ * 끝점 값을 머리에 적으면 "생활비 밖에서 지금 250,000 을 써도 된다" 로 읽히고, 그렇게 쓰면
+ * 생활비 기간 동안 쓸 돈이 모자란다. 오늘 쓰는 돈은 구간의 **모든** 날의 가용을 줄이므로,
+ * 지금 쓸 수 있는 것은 그중 가장 작은 값이다.
+ *
+ * 가용이 늘어나는 날은 생활비가 풀리는 날뿐이다(입금은 구간 밖이다). 그래서 최솟값은
+ * 끝점과, 구간 안에서 끝나는 각 생활비의 종료일 가운데 하나에 있다 — 그 날들만 잰다.
+ */
 export function headlineLimit(
   accounts: readonly Account[], entries: readonly Entry[], today: DateISO,
   res: Reservations = {},
 ): number {
-  return limitOn(accounts, entries, horizonOf(entries, today).end, today, res);
+  return limitOn(accounts, entries, headlineDate(accounts, entries, today, res), today, res);
+}
+
+/**
+ * 머리 숫자를 정하는 날 — 구간 안에서 가용이 가장 작은 날. 같으면 앞날을 고른다.
+ * 카드가 "그 날의 예상 잔고 − 확보 = 쓸 수 있는 돈" 을 같은 날로 적도록 따로 내놓는다.
+ */
+export function headlineDate(
+  accounts: readonly Account[], entries: readonly Entry[], today: DateISO,
+  res: Reservations = {},
+): DateISO {
+  const end = horizonOf(entries, today).end;
+  const checkpoints = new Set<DateISO>([end]);
+  for (const b of res.budgets ?? NO_BUDGETS) {
+    if (b.endDate >= today && b.endDate < end) checkpoints.add(b.endDate);
+  }
+  let best: { date: DateISO; value: number } | null = null;
+  for (const d of [...checkpoints].sort()) {
+    const value = limitOn(accounts, entries, d, today, res);
+    if (!best || value < best.value) best = { date: d, value };
+  }
+  return best ? best.date : end;
 }
 
 // ---------- 잔고 · 예상 잔고 · 가용 한도 ----------

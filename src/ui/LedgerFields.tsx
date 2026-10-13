@@ -54,8 +54,9 @@ export function LedgerFields({
   const pickable = pickableCategories(categories, type);
   const picked = money.categoryId ? categories.find((c) => c.id === money.categoryId) ?? null : null;
   const isOutflow = type === 'expense';
-  // 카드 사용은 주머니에 걸지 않는다 — 대금이 나갈 때 일반 지출로 한 번 더 빠진다.
-  const canPocket = isOutflow && flow !== 'cardSpend' && pockets.length > 0;
+  // 주머니는 일반 지출에만 건다(`pocketEligible`). 대출 · 이체 · 카드 대금 · 카드 사용은 아니다.
+  const canPocket = isOutflow && flow === 'normal' && !money.debtId && pockets.length > 0;
+  const use = money.budgetId ? 'linked' : money.outsidePocket ? 'outside' : 'undecided';
   const ambiguous = accounts.length > 1
     && balanceInclusion({ id: entryId, startDate: date, money }, accounts) === 'ambiguous';
   const reflect = onReflected
@@ -150,28 +151,33 @@ export function LedgerFields({
         </p>
       )}
 
+      {/*
+        사용처 — 생활비 주머니 · 생활비 외 지출. 고르지 않으면 '미결정' 으로 남고 생활비
+        상세에서 다시 고른다. "생활비 외" 는 명시한 선택이라 자동 선택이 덮지 않는다.
+      */}
       {canPocket && (
         <div className="mod-row">
-          <span className="mod-lbl">생활비</span>
-          <div className="mod-chips">
-            <button
-              type="button"
-              className={'chip' + (!money.budgetId ? ' on' : '')}
-              aria-pressed={!money.budgetId}
-              onClick={() => onMoney({ budgetId: null })}
-            >
-              연결 안 함
-            </button>
+          <span className="mod-lbl">사용처</span>
+          <div className="mod-chips" role="radiogroup" aria-label="사용처">
             {pockets.map((b) => (
               <button
-                key={b.id} type="button"
+                key={b.id} type="button" role="radio"
                 className={'chip' + (money.budgetId === b.id ? ' on' : '')}
-                aria-pressed={money.budgetId === b.id}
-                onClick={() => onMoney({ budgetId: b.id, debtId: null })}
+                aria-checked={money.budgetId === b.id}
+                onClick={() => onMoney({ budgetId: b.id, outsidePocket: false, debtId: null })}
               >
-                {b.name}
+                {/* 이름에 이미 '생활비' 가 있으면 앞말을 겹쳐 적지 않는다. */}
+                {b.name.includes('생활비') ? b.name : `생활비 · ${b.name}`}
               </button>
             ))}
+            <button
+              type="button" role="radio"
+              className={'chip' + (use === 'outside' ? ' on' : '')}
+              aria-checked={use === 'outside'}
+              onClick={() => onMoney({ budgetId: null, outsidePocket: true })}
+            >
+              생활비 외 지출
+            </button>
           </div>
         </div>
       )}
@@ -180,8 +186,12 @@ export function LedgerFields({
       {isOutflow && flow === 'cardSpend' && pockets.length > 0 && (
         <p className="mod-hint">카드 사용은 생활비에 연결하지 않습니다 — 현금은 카드 대금을 내는 날 나가고, 그때 일반 지출로 셉니다.</p>
       )}
-      {canPocket && pockets.length > 1 && !money.budgetId && (
-        <p className="mod-hint">이 날짜를 품는 생활비가 여럿입니다. 어느 주머니에서 나간 돈인지 골라 주세요.</p>
+      {canPocket && use === 'undecided' && (
+        <p className="mod-hint">
+          {pockets.length > 1
+            ? '이 날짜를 품는 생활비가 여럿입니다. 어느 주머니에서 나간 돈인지 고르거나, 생활비 외로 두세요.'
+            : '사용처를 고르지 않으면 미결정으로 남고, 생활비 상세에서 다시 고를 수 있습니다.'}
+        </p>
       )}
 
       {!advanced && flow === 'normal' && !money.debtId && (
@@ -200,7 +210,8 @@ export function LedgerFields({
                   className={'chip' + (money.flow === f.id ? ' on' : '')}
                   aria-checked={money.flow === f.id}
                   title={f.hint}
-                  onClick={() => onMoney(f.id === 'cardSpend' ? { flow: f.id, budgetId: null } : { flow: f.id })}
+                  // 일반 지출이 아니면 주머니에 걸지 않는다 — 이 편집에서 고른 주머니를 푼다.
+                  onClick={() => onMoney(f.id === 'normal' ? { flow: f.id } : { flow: f.id, budgetId: null })}
                 >
                   {f.label}
                 </button>

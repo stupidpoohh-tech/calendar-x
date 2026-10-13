@@ -93,13 +93,22 @@ export interface LedgerBatchPayload {
   entries: Entry[];
   deleteIds: string[];
   accounts: Account[];
+  /**
+   * 생활비 주머니 쓰기 · 지우기. 주머니의 기간을 바꾸거나 지우면서 걸린 거래의 연결을 함께
+   * 고칠 때 쓴다 — 나눠 보내 주머니만 들어가면, 연결을 푼 거래가 그 주머니 기간 안에서
+   * 일반 지출로도 세어지고 주머니도 남은 금액을 그대로 잡아 두어 같은 돈이 두 번 빠진다.
+   * 옛 큐에는 없는 필드다.
+   */
+  budgets?: Budget[];
+  deleteBudgetIds?: string[];
 }
 
 /** 한 배치의 상한(500)보다 여유를 둔다. 넘으면 부르는 쪽이 나눠 보내지 않고 멈춘다. */
 export const LEDGER_BATCH_MAX = 450;
 
 export function ledgerBatchSize(p: LedgerBatchPayload): number {
-  return p.entries.length + p.deleteIds.length + p.accounts.length;
+  return p.entries.length + p.deleteIds.length + p.accounts.length
+    + (p.budgets?.length ?? 0) + (p.deleteBudgetIds?.length ?? 0);
 }
 
 /**
@@ -248,6 +257,8 @@ export function sendPending(db: Firestore, uid: string, op: CommitInput): Promis
       for (const id of p.deleteIds) batch.delete(docIn(db, uid, COL.entries, id));
       for (const e of p.entries) batch.set(docIn(db, uid, COL.entries, e.id), entryToDoc(e));
       for (const a of p.accounts) batch.set(docIn(db, uid, COL.accounts, a.id), accountToDoc(a));
+      for (const id of p.deleteBudgetIds ?? []) batch.delete(docIn(db, uid, COL.budgets, id));
+      for (const b of p.budgets ?? []) batch.set(docIn(db, uid, COL.budgets, b.id), budgetToDoc(b));
       return batch.commit();
     }
     /* 이웃 필드(recovery · migratedAt)를 지우지 않도록 merge 로 쓴다. */

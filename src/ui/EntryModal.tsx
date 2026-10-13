@@ -12,6 +12,7 @@ import { confirmBlockOf } from '../domain/confirm';
 import { fmtDayShort } from '../domain/date';
 import { budgetCovers } from '../domain/budget';
 import { pocketChoiceFor } from '../domain/confirm';
+import { pocketEligible } from '../domain/budget';
 import type {
   Account, Budget, Category, Debt, Entry, EntryKind, MoneyFields, NewMoneyType, RepeatFreq, TaskStatus,
 } from '../domain/types';
@@ -84,11 +85,12 @@ const NO_METHODS: readonly string[] = [];
  *
  * 그 날을 품는 주머니가 **하나**면 그것을 고르고, 여럿이면 고르지 않는다 — 넘겨짚으면
  * 다른 주머니의 남은 금액이 틀린다. 무엇이 골라졌는지는 칩으로 저장 전에 보인다.
- * 카드 사용 · 입금 · 대출 연결이 있으면 주머니를 걸지 않는다.
+ * 일반 지출만 고른다(`pocketEligible` — 수입 · 대출 · 이체 · 카드 대금 · 카드 사용은 아니다).
+ * 사용자가 "생활비 외" 로 명시했으면 덮지 않는다.
  */
 function withDefaultPocket(e: Entry, budgets: readonly Budget[]): Entry {
   const m = e.money;
-  if (!m || m.status !== 'actual' || m.type !== 'expense' || m.flow === 'cardSpend' || m.debtId) return e;
+  if (!m || m.status !== 'actual' || !pocketEligible(e) || m.outsidePocket) return e;
   const pick = pocketChoiceFor(e.startDate, budgets).selected;
   return { ...e, money: { ...m, budgetId: pick?.id ?? null } };
 }
@@ -223,7 +225,7 @@ export function EntryModal({
 
   /** 실제 거래 칸에서 온 변경. 생활비를 건드렸으면 그 뒤로는 기본값을 다시 고르지 않는다. */
   const setLedger = (p: Partial<MoneyFields>) => {
-    if ('budgetId' in p) setPocketTouched(true);
+    if ('budgetId' in p || 'outsidePocket' in p) setPocketTouched(true);
     setMoney(p);
   };
 

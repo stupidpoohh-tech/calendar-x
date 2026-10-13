@@ -74,7 +74,7 @@ describe('실제 거래 빠른 입력', () => {
   it('상세를 펼치면 거래 유형을 고른다 — 카드 사용은 생활비 연결을 푼다', () => {
     const { onSave } = openModal({ initial: actualDraft(), budgets: [budget()] });
     // 기간에 주머니가 하나면 기본으로 걸려 있다.
-    expect(screen.getByRole('button', { name: '10월 생활비' })).toHaveAttribute('aria-pressed', 'true');
+    expect(screen.getByRole('radio', { name: '10월 생활비' })).toHaveAttribute('aria-checked', 'true');
     fireEvent.click(screen.getByRole('button', { name: /상세/ }));
     fireEvent.click(screen.getByRole('radio', { name: '카드 사용' }));
     fireEvent.change(screen.getByLabelText('금액'), { target: { value: '30000' } });
@@ -82,10 +82,44 @@ describe('실제 거래 빠른 입력', () => {
     expect((onSave.mock.calls[0]![0] as Entry).money).toMatchObject({ flow: 'cardSpend', budgetId: null });
   });
 
-  it('생활비 주머니가 여럿이면 고르지 않고 고르라고 말한다', () => {
-    openModal({ initial: actualDraft(), budgets: [budget(), budget({ id: 'b2', name: '여행 경비' })] });
-    expect(screen.getByRole('button', { name: '연결 안 함' })).toHaveAttribute('aria-pressed', 'true');
-    expect(screen.getByText(/주머니가 여럿입니다|생활비가 여럿입니다/)).toBeInTheDocument();
+  it('생활비 주머니가 여럿이면 고르지 않고 고르라고 말한다 — 아무것도 고르지 않은 미결정', () => {
+    const { onSave } = openModal({ initial: actualDraft(), budgets: [budget(), budget({ id: 'b2', name: '여행 경비' })] });
+    const group = screen.getByRole('radiogroup', { name: '사용처' });
+    for (const r of within(group).getAllByRole('radio')) expect(r).toHaveAttribute('aria-checked', 'false');
+    expect(screen.getByText(/생활비가 여럿입니다/)).toBeInTheDocument();
+    // 고르지 않아도 일반 지출로 저장된다.
+    fireEvent.change(screen.getByLabelText('금액'), { target: { value: '9000' } });
+    fireEvent.click(screen.getByRole('button', { name: '저장' }));
+    const m = (onSave.mock.calls[0]![0] as Entry).money!;
+    expect(m.budgetId).toBeNull();
+    expect(m.outsidePocket ?? false).toBe(false);
+  });
+
+  it('생활비 외 지출을 고르면 그 뜻이 저장되고, 날짜를 바꿔도 자동 선택이 덮지 않는다', () => {
+    const { onSave } = openModal({ initial: actualDraft(), budgets: [budget()] });
+    fireEvent.click(screen.getByRole('radio', { name: '생활비 외 지출' }));
+    fireEvent.change(screen.getByLabelText(/날짜/), { target: { value: '2026-10-20' } });
+    expect(screen.getByRole('radio', { name: '생활비 외 지출' })).toHaveAttribute('aria-checked', 'true');
+    fireEvent.change(screen.getByLabelText('금액'), { target: { value: '650000' } });
+    fireEvent.click(screen.getByRole('button', { name: '저장' }));
+    expect((onSave.mock.calls[0]![0] as Entry).money).toMatchObject({ budgetId: null, outsidePocket: true });
+  });
+
+  it('주머니가 없으면 사용처를 묻지 않고 일반 지출로 저장한다', () => {
+    openModal({ initial: actualDraft(), budgets: [] });
+    expect(screen.queryByRole('radiogroup', { name: '사용처' })).toBeNull();
+  });
+
+  it('수입 · 대출 원금 · 이체 · 카드 대금은 주머니에 걸지 않는다', () => {
+    openModal({ initial: actualDraft(), budgets: [budget()] });
+    fireEvent.click(screen.getByRole('button', { name: /상세/ }));
+    for (const flow of ['대출 원금', '이체 · 저축', '카드 대금']) {
+      fireEvent.click(screen.getByRole('radio', { name: flow }));
+      expect(screen.queryByRole('radiogroup', { name: '사용처' })).toBeNull();
+    }
+    fireEvent.click(screen.getByRole('radio', { name: '일반' }));
+    fireEvent.click(screen.getByRole('button', { name: /수입/ }));
+    expect(screen.queryByRole('radiogroup', { name: '사용처' })).toBeNull();
   });
 
   it('예정으로 바꾸면 반복을 고를 수 있다', () => {
@@ -218,12 +252,37 @@ describe('생활비 — 연결되지 않은 실제 지출', () => {
       <BudgetPanel
         budgets={[budget()]} reserves={[]} entries={[loose, card]} collapsed={false}
         onToggleCollapsed={() => {}} onSaveBudget={() => {}} onDeleteBudget={() => {}}
-        onSaveReserve={() => {}} onDeleteReserve={() => {}} onLinkEntry={onLink}
+        onSaveReserve={() => {}} onDeleteReserve={() => {}} onLinkEntries={onLink}
       />,
     );
-    fireEvent.click(screen.getByRole('button', { name: /연결되지 않은 실제 지출 1건/ }));
-    const row = screen.getByText('마트').closest('li')!;
-    fireEvent.click(within(row).getByRole('button', { name: '연결' }));
-    expect(onLink).toHaveBeenCalledWith(loose, expect.objectContaining({ id: 'b1' }));
+    fireEvent.click(screen.getByRole('button', { name: /사용처를 정하지 않은 지출 1건/ }));
+    // 고르면 연결 전에 바뀌는 금액을 먼저 보여 준다.
+    fireEvent.click(screen.getByRole('checkbox', { name: /마트/ }));
+    expect(screen.getByRole('group', { name: '연결 미리보기' }).textContent).toContain('1건 · 30,000원');
+    fireEvent.click(screen.getByRole('button', { name: '1건 연결' }));
+    expect(onLink).toHaveBeenCalledWith([loose], expect.objectContaining({ id: 'b1' }));
+  });
+
+  it('생활비 외로 명시한 지출은 미결정 목록에 없다', () => {
+    const outside = newEntry('money', {
+      id: 'z', title: '월세', startDate: '2026-10-05',
+      money: newMoney({ status: 'actual', amountMinor: 650_000, outsidePocket: true }),
+    });
+    const undecided = newEntry('money', {
+      id: 'u', title: '마트', startDate: '2026-10-06', money: newMoney({ status: 'actual', amountMinor: 30_000 }),
+    });
+    const onOutside = vi.fn();
+    render(
+      <BudgetPanel
+        budgets={[budget()]} reserves={[]} entries={[outside, undecided]} collapsed={false}
+        onToggleCollapsed={() => {}} onSaveBudget={() => {}} onDeleteBudget={() => {}}
+        onSaveReserve={() => {}} onDeleteReserve={() => {}} onMarkOutside={onOutside}
+      />,
+    );
+    fireEvent.click(screen.getByRole('button', { name: /사용처를 정하지 않은 지출 1건/ }));
+    const list = screen.getByRole('list', { name: '사용처를 정하지 않은 지출' });
+    expect(within(list).queryByText('월세')).toBeNull();
+    fireEvent.click(within(list).getByRole('button', { name: '생활비 외' }));
+    expect(onOutside).toHaveBeenCalledWith(undecided);
   });
 });

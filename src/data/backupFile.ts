@@ -329,8 +329,10 @@ function checkLedgerRaw(c: Collector, where: string, e: Raw, m: Raw): void {
   optStr(c, `${at}.categoryId`, m.categoryId, LIMITS.categoryId);
   optStr(c, `${at}.method`, m.method, LIMITS.method);
   optStr(c, `${at}.accountId`, m.accountId, LIMITS.accountId);
-  if (m.highlight !== undefined && m.highlight !== null && typeof m.highlight !== 'boolean') {
-    c.add(`${at}.highlight`, `참·거짓이 아닙니다: ${describe(m.highlight)}`);
+  for (const key of ['highlight', 'outsidePocket'] as const) {
+    if (m[key] !== undefined && m[key] !== null && typeof m[key] !== 'boolean') {
+      c.add(`${at}.${key}`, `참·거짓이 아닙니다: ${describe(m[key])}`);
+    }
   }
 
   const actual = m.status === 'actual';

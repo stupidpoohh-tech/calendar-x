@@ -11,7 +11,7 @@ import { LEDGER_BATCH_MAX, ledgerBatchSize } from '../data/pendingWrites';
 import { planFromFiles, readImportFiles, writeLedgerImport, type ImportIO } from '../data/ledgerImportRun';
 import { convertLegacyItems, readLegacyItems, summarize } from '../data/migrate';
 import {
-  createManyIfAbsent, fetchAll, fetchConfirmationsOf, fetchEntry, fetchLedgerSettings, markMigrated,
+  createManyIfAbsent, fetchAll, fetchConfirmationsOf, fetchEntry, fetchLedgerSettings, fetchPocketEntries, markMigrated,
   subscribeActualEntries,
   readMigrationMark, writeMany,
 } from '../data/repo';
@@ -32,6 +32,7 @@ import {
   confirmationOf, confirmationsOfPlan, lostConfirmations, planScheduleChanged, reflectedAfterRename, repairLink,
 } from '../domain/confirm';
 import { applyReflectChoice, isActual, reflectChoiceFor } from '../domain/ledger';
+import { movedToPocket, pocketPeriodImpact, unlinkedFromPocket } from '../domain/budget';
 import { daySummary } from '../domain/daySummary';
 import { balanceViewOn, calcScopeOf } from '../domain/tide';
 import { ymOf } from '../domain/date';
@@ -638,12 +639,188 @@ function Workspace({ uid, user, onSignOut }: WorkspaceProps) {
   }, [isAnon, uid, promptLogin, commit]);
 
   /** 생활비에 연결되지 않은 실제 지출을 그 주머니에 건다. 사용처는 하나만 — 대출 연결은 푼다. */
-  const linkToPocket = useCallback((e: Entry, b: Budget) => {
+  /*
+    사용처를 정하지 않은 실제 지출을 주머니에 건다. 여러 건이면 **한 배치** — 반쯤 걸리면 남은
+    생활비가 화면의 미리보기와 다르다. 금액 · 날짜 · 분류는 건드리지 않고 사용처만 바꾼다.
+  */
+  const linkToPocket = useCallback((es: Entry[], b: Budget) => {
+    if (isAnon || !uid) { void promptLogin(); return; }
+    const now = new Date().toISOString();
+    const changed = es
+      .map((e) => findBase(e.id) ?? e)
+      .filter((x) => x.money)
+      .map((x) => withDerived({ ...x, updatedAt: now, money: { ...x.money!, budgetId: b.id, outsidePocket: false, debtId: null } }));
+    if (changed.length === 0) return;
+    if (changed.length === 1) persist(changed[0]!);
+    else commit({ kind: 'ledgerBatch', label: '생활비 연결', summary: `${b.name} · ${changed.length}건`, payload: { entries: changed, deleteIds: [], accounts: [] } });
+    dialog.toast(`'${b.name}'에 ${changed.length}건 연결했습니다.`);
+  }, [isAnon, uid, promptLogin, findBase, persist, commit, dialog]);
+
+  /** "생활비 외" 로 명시한다 — 미결정 목록에서 빠지고, 다음에도 자동 선택이 덮지 않는다. */
+  const markOutsidePocket = useCallback((e: Entry) => {
+    if (isAnon || !uid) { void promptLogin(); return; }
     const base = findBase(e.id) ?? e;
     if (!base.money) return;
-    persist(withDerived({ ...base, money: { ...base.money, budgetId: b.id, debtId: null } }));
-    dialog.toast(`'${b.name}'에 연결했습니다.`);
-  }, [findBase, persist, dialog]);
+    persist(withDerived({ ...base, updatedAt: new Date().toISOString(), money: { ...base.money, budgetId: null, outsidePocket: true } }));
+  }, [isAnon, uid, promptLogin, findBase, persist]);
+
+  /**
+   * 그 주머니를 가리키는 거래 — 서버 전량에 이 기기에서 방금 적은 것을 겹친다.
+   * 서버에 닿지 못하면 complete: false — 화면이 그 사실을 함께 적는다.
+   */
+  const pocketLinks = useCallback(async (budgetId: string): Promise<{ entries: Entry[]; complete: boolean }> => {
+    const known = new Map<string, Entry>();
+    let complete = true;
+    if (uid) {
+      try {
+        const r = await fetchPocketEntries(db, uid, budgetId);
+        for (const e of r.entries) known.set(e.id, e);
+        complete = r.complete;
+      } catch {
+        complete = false;
+      }
+    }
+    for (const e of [...store.entries, ...store.tideEntries]) {
+      if (isVirtualEntry(e)) continue;
+      if (e.money?.budgetId === budgetId) known.set(e.id, e);
+      else if (known.has(e.id)) known.delete(e.id); // 이 기기에서 방금 연결을 바꿨다
+    }
+    return { entries: [...known.values()], complete };
+  }, [uid, db, store.entries, store.tideEntries]);
+
+  /**
+   * 생활비 저장 (P1-E). 금액만 바꾸면 그대로 쓰고 계산이 다시 돈다. 기간을 바꿔 걸린 거래가
+   * 기간 밖으로 나가면 저장 전에 묻는다 — 유지 · 해제 · 옮기기. 주머니와 거래는 한 배치로 쓴다.
+   */
+  const saveBudget = useCallback(async (b: Budget) => {
+    if (isAnon || !uid) { void promptLogin(); return; }
+    const before = store.budgets.find((x) => x.id === b.id);
+    if (!before || (before.startDate === b.startDate && before.endDate === b.endDate)) {
+      commit({ kind: 'budget', label: '생활비', summary: b.name, payload: b });
+      return;
+    }
+    const { entries: linked, complete } = await pocketLinks(b.id);
+    const after = store.budgets.map((x) => (x.id === b.id ? b : x));
+    const impact = pocketPeriodImpact(before, b, linked, after);
+    const n = (v: number) => v.toLocaleString('ko-KR');
+    const sum = (es: Entry[]) => es.reduce((t, e) => t + (e.money?.amountMinor ?? 0), 0);
+    const incomplete = !complete && (
+      <p className="dlg-warn">서버에 닿지 못해 이 기기에 있는 거래만 확인했습니다. 다른 기기에서 연결한 거래가 더 있을 수 있습니다.</p>
+    );
+    if (impact.leaving.length === 0) {
+      if (impact.entering.length > 0 || !complete) {
+        const ok = await dialog.confirm({
+          title: '생활비 기간을 바꿀까요?',
+          body: (
+            <>
+              {impact.entering.length > 0 && (
+                <p>연결해 둔 거래 {n(impact.entering.length)}건({formatAmount(sum(impact.entering))})이 새 기간에 들어와 이 생활비에서 다시 셉니다.</p>
+              )}
+              {incomplete}
+            </>
+          ),
+          confirmLabel: '저장',
+        });
+        if (!ok) return;
+      }
+      commit({ kind: 'budget', label: '생활비', summary: b.name, payload: b });
+      return;
+    }
+
+    const day = (d: string) => d.slice(5).replace('-', '.');
+    const target = impact.targets ? store.budgets.find((x) => x.id === [...impact.targets!.values()][0]) : undefined;
+    const oneTarget = impact.targets && new Set(impact.targets.values()).size === 1 ? target : undefined;
+    const choice = await dialog.choose(`연결된 거래 ${n(impact.leaving.length)}건이 새 기간 밖으로 나갑니다`, [
+      {
+        id: 'keep' as const,
+        label: '연결 유지하고 저장',
+        hint: '연결은 남지만 기간 밖이라 이 생활비에서 세지 않고 일반 지출로 셉니다. 기간을 다시 늘리면 돌아옵니다.',
+      },
+      {
+        id: 'unlink' as const,
+        label: '연결 해제하고 저장',
+        hint: '사용처를 정하지 않은 지출로 돌아갑니다. 다른 생활비 기간에 들면 그쪽 확인 목록에 뜹니다.',
+      },
+      ...(impact.targets ? [{
+        id: 'move' as const,
+        label: oneTarget ? `'${oneTarget.name}'(으)로 옮기고 저장` : '그 날의 다른 생활비로 옮기고 저장',
+        hint: '거래마다 그 날짜를 품는 다른 생활비가 하나뿐이라 옮길 곳이 정해져 있습니다.',
+      }] : []),
+    ], (
+      <>
+        <p>기간 밖 거래는 어느 쪽을 골라도 지워지지 않고, 금액은 일반 지출로든 다른 생활비로든 한 번만 셉니다.</p>
+        <ul className="dlg-skips">
+          {impact.leaving.slice(0, 8).map((e) => (
+            <li key={e.id}><span className="num">{day(e.startDate)} · {formatAmount(e.money!.amountMinor)}</span> {e.title.trim() || '(제목 없음)'}{isActual(e) ? '' : ' (예정)'}</li>
+          ))}
+          {impact.leaving.length > 8 && <li>그 외 {n(impact.leaving.length - 8)}건</li>}
+        </ul>
+        <p className="num">합계 {formatAmount(sum(impact.leaving))}</p>
+        {impact.entering.length > 0 && (
+          <p>새 기간에 다시 들어오는 연결 거래 {n(impact.entering.length)}건({formatAmount(sum(impact.entering))})은 이 생활비에서 셉니다.</p>
+        )}
+        {!impact.targets && (
+          <p>그 날짜를 품는 다른 생활비가 없거나 여럿인 거래가 있어 옮기기는 고를 수 없습니다.</p>
+        )}
+        {incomplete}
+      </>
+    ));
+    if (!choice) return;
+    if (choice === 'keep') {
+      commit({ kind: 'budget', label: '생활비', summary: b.name, payload: b });
+      return;
+    }
+    const now = new Date().toISOString();
+    const changed = impact.leaving.map((e) => withDerived(choice === 'move' && impact.targets
+      ? movedToPocket(e, impact.targets.get(e.id)!, now)
+      : unlinkedFromPocket(e, now)));
+    const payload = { entries: changed, deleteIds: [], accounts: [], budgets: [b] };
+    if (ledgerBatchSize(payload) > LEDGER_BATCH_MAX) {
+      dialog.toast(`한 번에 고칠 거래가 너무 많습니다(${n(changed.length)}건). 기간을 나눠 고쳐 주세요.`, 'bad');
+      return;
+    }
+    commit({
+      kind: 'ledgerBatch', label: '생활비 기간',
+      summary: `${b.name} · ${choice === 'move' ? '옮김' : '연결 해제'} ${n(changed.length)}건`, payload,
+    });
+  }, [isAnon, uid, promptLogin, store.budgets, pocketLinks, commit, dialog]);
+
+  /**
+   * 생활비 삭제 (P1-E). 거래는 지우지 않는다. 걸린 거래의 연결을 같은 배치에서 풀어 사용처
+   * 미결정으로 돌린다 — 없는 주머니를 가리키는 연결을 남기지 않는다.
+   */
+  const deleteBudget = useCallback(async (b: Budget) => {
+    if (isAnon || !uid) { void promptLogin(); return; }
+    const { entries: linked, complete } = await pocketLinks(b.id);
+    const n = (v: number) => v.toLocaleString('ko-KR');
+    const sum = linked.reduce((t, e) => t + (e.money?.amountMinor ?? 0), 0);
+    const ok = await dialog.confirm({
+      title: `'${b.name}'을(를) 삭제할까요?`,
+      body: (
+        <>
+          {linked.length > 0
+            ? <p>연결된 거래 {n(linked.length)}건({formatAmount(sum)})은 지워지지 않습니다. 연결만 풀려 사용처를 정하지 않은 지출로 돌아가고, 일반 지출로 셉니다.</p>
+            : <p>이 생활비에 연결된 거래는 없습니다.</p>}
+          {!complete && (
+            <p className="dlg-warn">서버에 닿지 못해 이 기기에 있는 거래만 확인했습니다. 다른 기기에서 연결한 거래는 연결이 남지만 일반 지출로 셉니다.</p>
+          )}
+        </>
+      ),
+      danger: true, confirmLabel: '삭제',
+    });
+    if (!ok) return;
+    const now = new Date().toISOString();
+    const payload = {
+      entries: linked.map((e) => withDerived(unlinkedFromPocket(e, now))),
+      deleteIds: [], accounts: [], deleteBudgetIds: [b.id],
+    };
+    if (linked.length === 0 || ledgerBatchSize(payload) > LEDGER_BATCH_MAX) {
+      // 거래가 너무 많으면 주머니만 지운다. 남은 연결은 없는 주머니를 가리켜 일반 지출로 센다.
+      commit({ kind: 'budgetDelete', label: '생활비 삭제', summary: b.name, payload: { id: b.id } });
+      return;
+    }
+    commit({ kind: 'ledgerBatch', label: '생활비 삭제', summary: `${b.name} · 연결 해제 ${n(linked.length)}건`, payload });
+  }, [isAnon, uid, promptLogin, pocketLinks, dialog, commit]);
 
   /** 전에 적은 결제수단. 최근 것부터 열 개. */
   const methods = useMemo(() => {
@@ -1869,21 +2046,8 @@ function Workspace({ uid, user, onSignOut }: WorkspaceProps) {
               onToggleCollapsed={() => undefined}
               bare
               todayISO={today}
-              onSaveBudget={(b) => {
-                if (isAnon || !uid) { void promptLogin(); return; }
-                commit({ kind: 'budget', label: '생활비', summary: b.name, payload: b });
-              }}
-              onDeleteBudget={async (b) => {
-                if (isAnon || !uid) { void promptLogin(); return; }
-                const ok = await dialog.confirm({
-                  title: `'${b.name}'을(를) 삭제할까요?`,
-                  // 연결된 지출은 남는다. 예산이 사라지면 그 돈들은 일반 지출로 돌아간다 —
-                  // 사라지지 않고 계산 자리만 바뀐다는 사실을 미리 말해 둔다.
-                  body: '이 생활비에서 쓴 지출은 지워지지 않고 별도 지출로 남습니다.',
-                  danger: true, confirmLabel: '삭제',
-                });
-                if (ok) commit({ kind: 'budgetDelete', label: '생활비 삭제', summary: b.name, payload: { id: b.id } });
-              }}
+              onSaveBudget={(b) => { void saveBudget(b); }}
+              onDeleteBudget={(b) => { void deleteBudget(b); }}
               onSaveReserve={(r) => {
                 if (isAnon || !uid) { void promptLogin(); return; }
                 commit({ kind: 'reserve', label: '세이브', summary: r.name, payload: r });
@@ -1894,7 +2058,8 @@ function Workspace({ uid, user, onSignOut }: WorkspaceProps) {
                 if (ok) commit({ kind: 'reserveDelete', label: '세이브 삭제', summary: r.name, payload: { id: r.id } });
               }}
               onEntryClick={openEdit}
-              onLinkEntry={linkToPocket}
+              onLinkEntries={linkToPocket}
+              onMarkOutside={markOutsidePocket}
             />
             )}
           />

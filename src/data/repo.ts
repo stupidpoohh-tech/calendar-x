@@ -385,6 +385,18 @@ export async function fetchConfirmationsOf(
   return { entries: mapSnap(snap, entryFromDoc), complete: !snap.metadata.fromCache };
 }
 
+/**
+ * 그 생활비 주머니를 가리키는 거래 전부 — 화면 · 계산 구독 창 밖의 지난 거래까지.
+ * 주머니의 기간을 바꾸거나 지울 때, 연결을 어떻게 할지 고르려면 빠짐없이 봐야 한다.
+ * 서버에 닿지 못하면 캐시 결과와 함께 complete: false 를 돌려준다.
+ */
+export async function fetchPocketEntries(
+  db: Firestore, uid: string, budgetId: string,
+): Promise<{ entries: Entry[]; complete: boolean }> {
+  const snap = await getDocs(query(col(db, uid, COL.entries), where('money.budgetId', '==', budgetId)));
+  return { entries: mapSnap(snap, entryFromDoc), complete: !snap.metadata.fromCache };
+}
+
 /** migratedAt 같은 이웃 필드를 지우지 않도록 merge 로 쓴다. */
 export function saveRecoveryRule(db: Firestore, uid: string, rule: RecoveryRule): Promise<void> {
   return setDoc(userDoc(db, uid), { recovery: recoveryRuleToDoc(rule) }, { merge: true });

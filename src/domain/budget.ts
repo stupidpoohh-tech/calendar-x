@@ -103,6 +103,49 @@ export function spendingIn(
 }
 
 /**
+ * 주머니에 걸 수 있는 지출인가 — **일반** 지출만.
+ *
+ * 수입 · 대출 원금 · 대출 이자 · 이체(저축) · 카드 대금 · 카드 사용은 걸지 않는다. 대출 연결이
+ * 있거나 반복이면 걸지 않는다. legacy 종류(`living` · `save` · `free` · `repay` · `priority`)도
+ * 걸지 않는다 — 무엇인지 코드로 정할 수 없다.
+ *
+ * 카드 사용을 막는 이유: 카드 대금과 이어 줄 연결 정보가 없다. 걸면 주머니(사용)와 일반 흐름
+ * (대금)에서 같은 돈이 두 번 빠지고, 대금을 낸 뒤에도 주머니가 그 채무를 계속 잡아 둔다.
+ *
+ * 이 판정은 **새로 고르는 자리**(자동 선택 · 고를 칩)에만 쓴다. 이미 저장된 연결은 건드리지
+ * 않는다 — 계산은 지금처럼 `inBudget` 이 정한다.
+ */
+export function pocketEligible(e: Pick<Entry, 'money' | 'recurrence'>): boolean {
+  const m = e.money;
+  if (!m || m.type !== 'expense' || m.debtId || e.recurrence) return false;
+  return moneyFlowOf(m) === 'normal';
+}
+
+/** 사용처 — 주머니에 걸렸는가, 생활비 밖으로 명시했는가, 아직 정하지 않았는가. */
+export type PocketUse = 'linked' | 'outside' | 'undecided';
+
+export function pocketUseOf(e: Pick<Entry, 'money'>): PocketUse {
+  if (e.money?.budgetId) return 'linked';
+  return e.money?.outsidePocket ? 'outside' : 'undecided';
+}
+
+/**
+ * 새 실제 지출의 주머니 기본값 — 그 날을 품는 주머니가 **하나**일 때만 고른다.
+ *
+ * 여럿이면 고르지 않는다(넘겨짚으면 다른 주머니의 남은 금액이 틀린다). 마지막에 고른 주머니를
+ * 다시 쓰지도 않는다. 사용자가 "생활비 외" 로 명시했거나 이미 골라 둔 것은 덮지 않는다.
+ */
+export function defaultPocketFor(
+  e: Pick<Entry, 'money' | 'recurrence' | 'startDate' | 'kind'>, budgets: readonly Budget[],
+): string | null {
+  const m = e.money;
+  if (!m || !isActual(e) || !pocketEligible(e)) return m?.budgetId ?? null;
+  if (m.budgetId || m.outsidePocket) return m.budgetId ?? null;
+  const covering = budgets.filter((b) => budgetCovers(b, e.startDate));
+  return covering.length === 1 ? covering[0]!.id : null;
+}
+
+/**
  * 그 주머니 기간 안의 실제 지출인데 어느 주머니에도 걸려 있지 않은 것.
  *
  * 생활비에서 쓴 돈을 연결하지 않으면 그 돈은 일반 지출로 한도를 한 번 더 깎고, 주머니는
@@ -114,8 +157,59 @@ export function unlinkedSpendingFor(budget: Budget, entries: readonly Entry[]): 
     .filter((e) => isActual(e) && e.money?.type === 'expense'
       && moneyFlowOf(e.money) === 'normal'
       && !e.money.budgetId && !e.money.debtId && !e.recurrence
+      // 일부러 생활비 밖에 둔 것은 경고하지 않는다 — 정하지 않은 것만 보여 준다.
+      && !e.money.outsidePocket
       && e.startDate >= budget.startDate && e.startDate <= budget.endDate)
     .sort((a, b) => a.startDate.localeCompare(b.startDate));
+}
+
+/**
+ * 주머니의 기간을 바꾸면 걸린 거래가 어떻게 되는가 (P1-E).
+ *
+ *   leaving   지금은 주머니에서 세어지는데 새 기간 밖으로 나가는 거래. 저장 전에 고르게 한다 —
+ *             연결 유지(기간 밖이라 일반 지출로 센다) · 연결 해제(미결정) · 다른 주머니로 옮기기.
+ *   entering  연결은 돼 있지만 지금은 기간 밖이라 일반 지출로 세어지다가, 새 기간에 다시 들어오는
+ *             거래. 고르지 않고 알린다 — 사용자가 걸어 둔 연결이다.
+ *   targets   leaving 의 거래마다 그 날을 품는 **다른** 주머니가 정확히 하나일 때 그 id.
+ *             하나라도 없거나 여럿이면 null — 옮기기를 제안하지 않는다(넘겨짚지 않는다).
+ *
+ * 금액만 바꾸면 둘 다 비고, 계산이 그대로 다시 돈다.
+ */
+export interface PocketPeriodImpact {
+  leaving: Entry[];
+  entering: Entry[];
+  targets: Map<string, string> | null;
+}
+
+export function pocketPeriodImpact(
+  before: Budget, after: Budget, linked: readonly Entry[], budgets: readonly Budget[],
+): PocketPeriodImpact {
+  const mine = linked.filter((e) => e.money?.budgetId === before.id);
+  const leaving = mine.filter((e) => inBudget(e, before) && !inBudget(e, after));
+  const entering = mine.filter((e) => !inBudget(e, before) && inBudget(e, after));
+  const others = budgets.filter((b) => b.id !== before.id);
+  let targets: Map<string, string> | null = new Map();
+  for (const e of leaving) {
+    const covering = others.filter((b) => budgetCovers(b, e.startDate));
+    if (covering.length !== 1) { targets = null; break; }
+    targets.set(e.id, covering[0]!.id);
+  }
+  if (leaving.length === 0) targets = null;
+  return { leaving: sortByDate(leaving), entering: sortByDate(entering), targets };
+}
+
+/** 주머니 연결을 푼 거래 — 미결정으로 돌아간다. "생활비 외" 로 바꾸지 않는다(사용자가 정한 적 없다). */
+export function unlinkedFromPocket(e: Entry, now: string): Entry {
+  return { ...e, updatedAt: now, money: e.money ? { ...e.money, budgetId: null } : e.money };
+}
+
+/** 다른 주머니로 옮긴 거래. */
+export function movedToPocket(e: Entry, budgetId: string, now: string): Entry {
+  return { ...e, updatedAt: now, money: e.money ? { ...e.money, budgetId, outsidePocket: false } : e.money };
+}
+
+function sortByDate(es: Entry[]): Entry[] {
+  return es.sort((a, b) => a.startDate.localeCompare(b.startDate) || a.title.localeCompare(b.title));
 }
 
 /**
@@ -148,6 +242,8 @@ export interface BudgetState {
   remainingMinor: number;
   /** 실제로 넘긴 금액. 넘지 않았으면 0. */
   overspentMinor: number;
+  /** 예정 반영 잔여 = 총 예산 − 실제 − 예정. 넘으면 0 (그때는 `plannedOverMinor`). */
+  remainingWithPlannedMinor: number;
   /** 예정까지 다 쓰면 넘게 되는 금액. 실제 초과와 따로 적는다. */
   plannedOverMinor: number;
   /** 가용 한도에서 빠져 있는 몫. `today` 를 주지 않으면 끝나지 않은 것으로 본다. */
@@ -208,6 +304,7 @@ export function budgetState(
     unsettledMinor: opts.accounts ? actualMinor - settledMinor : 0,
     remainingMinor: Math.max(0, budget.amountMinor - actualMinor),
     overspentMinor: Math.max(0, actualMinor - budget.amountMinor),
+    remainingWithPlannedMinor: Math.max(0, budget.amountMinor - actualMinor - plannedMinor),
     plannedOverMinor: Math.max(0, actualMinor + plannedMinor - budget.amountMinor),
     reservedMinor: pocketReserve(budget, linked, inBalance, ended),
     count: linked.length,
@@ -259,7 +356,14 @@ export function reservedOn(
   for (const budget of budgets) {
     // 아직 시작하지 않은 예산은 자리를 잡지 않는다 — 기간형 지출과 같은 규칙이다.
     if (budget.startDate > date) continue;
-    const ended = today !== undefined && budgetEnded(budget, today);
+    /*
+      끝났는지는 **조회하는 날** 기준이다(P1). 10/10~14 생활비를 10/15 로 조회하면 남은 확보액은
+      이미 풀려 있다. 예전에는 실제 오늘로만 판정해, 미래 날짜를 조회해도 끝난 주머니가 계속
+      예약돼 있었다. 오늘이 이미 지났으면 당연히 끝났다(조회일이 오늘보다 앞서는 경우는 없지만
+      그때도 오늘 기준의 해제를 되돌리지 않는다).
+      예약 해제는 거래 취소가 아니다 — 걸린 지출 중 잔고 밖인 것은 몫에 그대로 남는다.
+    */
+    const ended = budget.endDate < date || (today !== undefined && budgetEnded(budget, today));
     total += pocketReserve(budget, spendingIn(budget, entries, confirmed), inBalance, ended);
   }
 

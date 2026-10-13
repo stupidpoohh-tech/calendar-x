@@ -139,6 +139,22 @@ it('newMoney 로 만든 실제 거래도 저장 형태가 온전하다', () => {
   expect(entryToDoc(e).money).toMatchObject({ status: 'actual', plannedRef: null });
 });
 
+describe('entry — 생활비 외 지출(outsidePocket)', () => {
+  const mk = (extra: Record<string, unknown>) => legacyMoneyDoc({ money: { type: 'expense', amountMinor: 1, currency: 'KRW', linkedEntryId: null, ...extra } });
+  it('없던 문서는 미결정(false), 켠 값은 그대로 오간다', () => {
+    expect(entryFromDoc('x', legacyMoneyDoc()).money?.outsidePocket).toBe(false);
+    const on = entryFromDoc('x', mk({ outsidePocket: true }));
+    expect(on.money?.outsidePocket).toBe(true);
+    expect((entryToDoc(on).money as Record<string, unknown>).outsidePocket).toBe(true);
+    expect(entryFromDoc('x', mk({ outsidePocket: 'yes' })).money?.outsidePocket).toBe(false);
+  });
+
+  it('주머니에 걸린 지출에는 쓰지 않는다 — 사용처는 하나다', () => {
+    const both = entryFromDoc('x', mk({ outsidePocket: true, budgetId: 'b1' }));
+    expect((entryToDoc(both).money as Record<string, unknown>).outsidePocket).toBe(false);
+  });
+});
+
 describe('entry — 달력에 표시(highlight)', () => {
   it('없던 문서는 false 로 읽고, 켠 값은 그대로 오간다', () => {
     expect(entryFromDoc('rent', legacyMoneyDoc()).money?.highlight).toBe(false);

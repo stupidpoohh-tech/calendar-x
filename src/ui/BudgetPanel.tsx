@@ -45,13 +45,15 @@ interface Props {
   onSaveReserve: (r: Reserve) => void;
   onDeleteReserve: (r: Reserve) => void;
   onEntryClick?: (e: Entry) => void;
-  /** 연결되지 않은 실제 지출을 이 주머니에 건다. */
-  onLinkEntry?: (e: Entry, b: Budget) => void;
+  /** 사용처를 정하지 않은 실제 지출을 이 주머니에 건다. 여러 건을 한 번에. */
+  onLinkEntries?: (es: Entry[], b: Budget) => void;
+  /** 그 지출을 "생활비 외" 로 명시한다. 미결정 목록에서 빠진다. */
+  onMarkOutside?: (e: Entry) => void;
 }
 
 export function BudgetPanel({
   budgets, reserves, entries, collapsed: collapsedPref, onToggleCollapsed, bare = false, todayISO, accounts,
-  onSaveBudget, onDeleteBudget, onSaveReserve, onDeleteReserve, onEntryClick, onLinkEntry,
+  onSaveBudget, onDeleteBudget, onSaveReserve, onDeleteReserve, onEntryClick, onLinkEntries, onMarkOutside,
 }: Props) {
   const [draft, setDraft] = useState<Budget | null>(null);
   const [amountText, setAmountText] = useState('');
@@ -142,7 +144,8 @@ export function BudgetPanel({
                 onEdit={() => startEdit(s.budget)}
                 onDelete={() => onDeleteBudget(s.budget)}
                 onEntryClick={onEntryClick}
-                onLinkEntry={onLinkEntry}
+                onLinkEntries={onLinkEntries}
+                onMarkOutside={onMarkOutside}
                 ended={todayISO !== undefined && budgetEnded(s.budget, todayISO)}
               />
             )
@@ -204,7 +207,7 @@ export function BudgetPanel({
 }
 
 function BudgetRow({
-  state, open, entries, onToggle, onEdit, onDelete, onEntryClick, onLinkEntry, ended = false,
+  state, open, entries, onToggle, onEdit, onDelete, onEntryClick, onLinkEntries, onMarkOutside, ended = false,
 }: {
   ended?: boolean;
   state: BudgetState;
@@ -214,10 +217,12 @@ function BudgetRow({
   onEdit: () => void;
   onDelete: () => void;
   onEntryClick?: (e: Entry) => void;
-  onLinkEntry?: (e: Entry, b: Budget) => void;
+  onLinkEntries?: (es: Entry[], b: Budget) => void;
+  onMarkOutside?: (e: Entry) => void;
 }) {
   const {
-    budget, actualMinor, plannedMinor, unsettledMinor, remainingMinor, overspentMinor, plannedOverMinor, count,
+    budget, actualMinor, plannedMinor, unsettledMinor, remainingMinor, remainingWithPlannedMinor,
+    overspentMinor, plannedOverMinor, count,
   } = state;
   // 총 예산이 0이면 비율을 낼 수 없다. 막대를 그리지 않는다. 막대는 실제로 쓴 돈만 채운다.
   const ratio = budget.amountMinor > 0
@@ -225,6 +230,15 @@ function BudgetRow({
     : 0;
   const linked = open ? spendingIn(budget, entries) : [];
   const loose = unlinkedSpendingFor(budget, entries);
+  const [picked, setPicked] = useState<ReadonlySet<string>>(new Set());
+  const chosen = loose.filter((e) => picked.has(e.id));
+  const chosenSum = chosen.reduce((t, e) => t + Math.abs(e.money?.amountMinor ?? 0), 0);
+  const afterLink = budget.amountMinor - actualMinor - chosenSum;
+  const toggle = (id: string) => setPicked((p) => {
+    const n = new Set(p);
+    if (n.has(id)) n.delete(id); else n.add(id);
+    return n;
+  });
 
   return (
     <div className="bp-i">
@@ -232,28 +246,33 @@ function BudgetRow({
         <button className="debt-i-main" onClick={onToggle} aria-expanded={open}>
           <span className="debt-n">{budget.name}</span>
           <span className="debt-d num">
-            {fmtDayShort(budget.startDate)} – {fmtDayShort(budget.endDate)} · 예산 {formatAmount(budget.amountMinor)}
+            {fmtDayShort(budget.startDate)} – {fmtDayShort(budget.endDate)} · 생활비 {formatAmount(budget.amountMinor)}원
           </span>
           <span className={'bp-bar' + (overspentMinor > 0 ? ' over' : '')}>
             <span className="bp-bar-f" style={{ width: `${Math.round(ratio * 100)}%` }} />
           </span>
-          {/* 쓴 돈 · 예정 · 남음은 다른 숫자다. 예정은 쓴 돈에 넣지 않는다. */}
-          <span className="debt-d num">
-            사용 {formatAmount(actualMinor)}
+          {/*
+            실제 사용 · 남은 생활비 · 예정은 다른 숫자다. 예정은 쓴 돈에 넣지 않는다 — 다음 주에
+            잡아 둔 장보기가 이미 쓴 돈처럼 보이면 남은 생활비가 실제보다 작게 읽힌다.
+          */}
+          <span className="bp-stats num">
+            <span>실제 사용 <b>{formatAmount(actualMinor)}</b></span>
             {overspentMinor > 0
-              ? <> · <b className="bp-over">초과 {formatAmount(overspentMinor)}</b></>
-              : <> · 남음 {formatAmount(remainingMinor)}</>}
-            {count > 0 && ` · ${count}건`}
+              ? <span>남은 생활비 <b>0</b> · <b className="bp-over">초과 {formatAmount(overspentMinor)}</b></span>
+              : <span>남은 생활비 <b>{formatAmount(remainingMinor)}</b></span>}
+            {plannedMinor > 0 && (
+              <span>
+                예정 사용 <b>{formatAmount(plannedMinor)}</b>
+                {plannedOverMinor > overspentMinor
+                  ? <> · <b className="bp-over">예정까지 쓰면 {formatAmount(plannedOverMinor)} 초과</b></>
+                  : <> · 예정 반영 시 남음 {formatAmount(remainingWithPlannedMinor)}</>}
+              </span>
+            )}
+            {unsettledMinor > 0 && <span>잔고에 아직 안 들어간 사용 {formatAmount(unsettledMinor)}</span>}
+            {count > 0 && <span className="bp-count">연결 {count}건</span>}
           </span>
-          {(plannedMinor > 0 || unsettledMinor > 0) && (
-            <span className="debt-d num">
-              {plannedMinor > 0 && <>예정 {formatAmount(plannedMinor)}{plannedOverMinor > overspentMinor && ` (다 쓰면 ${formatAmount(plannedOverMinor)} 초과)`}</>}
-              {plannedMinor > 0 && unsettledMinor > 0 && ' · '}
-              {unsettledMinor > 0 && <>잔고에 아직 안 들어간 사용 {formatAmount(unsettledMinor)}</>}
-            </span>
-          )}
           {ended && (
-            <span className="debt-d">끝남 — 남은 돈은 더 이상 한도에서 빼 두지 않습니다. 아직 잔고에 안 들어간 지출만 셉니다.</span>
+            <span className="debt-d">끝남 — 남은 생활비는 더 이상 가용 한도에서 빼 두지 않습니다. 아직 잔고에 안 들어간 지출만 셉니다.</span>
           )}
         </button>
         <button className="bp-e" onClick={onEdit} aria-label={`${budget.name} 고치기`}>
@@ -266,47 +285,77 @@ function BudgetRow({
 
       {open && (
         linked.length > 0 ? (
-          <ul className="bp-ul">
-            {linked.map((e) => (
-              <li key={e.id}>
-                <button className="bp-li" onClick={() => onEntryClick?.(e)}>
-                  <span className="bp-li-d num">{fmtDayShort(e.startDate)}</span>
-                  <span className="bp-li-t">{e.title.trim() || '(제목 없음)'}</span>
-                  <span className="bp-li-a num">{formatAmount(Math.abs(e.money?.amountMinor ?? 0))}</span>
-                </button>
-              </li>
-            ))}
+          <ul className="bp-ul" aria-label={`${budget.name} 연결 거래`}>
+            {linked.map((e) => {
+              const actual = e.money?.status === 'actual';
+              return (
+                <li key={e.id}>
+                  <button className={'bp-li' + (actual ? '' : ' planned')} onClick={() => onEntryClick?.(e)}>
+                    <span className="bp-li-d num">{fmtDayShort(e.startDate)}</span>
+                    <span className="bp-li-t">
+                      <i className={'bp-st' + (actual ? '' : ' plan')}>{actual ? '실제' : '예정'}</i>
+                      {e.title.trim() || '(제목 없음)'}
+                    </span>
+                    <span className="bp-li-a num">{formatAmount(Math.abs(e.money?.amountMinor ?? 0))}</span>
+                  </button>
+                </li>
+              );
+            })}
           </ul>
         ) : (
           <p className="bp-empty">아직 이 생활비에서 쓴 것이 없습니다.</p>
         )
       )}
       {/*
-        기간 안의 실제 지출 가운데 어느 주머니에도 걸리지 않은 것. 자동으로 걸지 않는다 —
-        생활비가 아닌 지출일 수 있다. 보이게 하고 사용자가 고른다.
+        기간 안의 실제 일반 지출 가운데 사용처를 **정하지 않은** 것. "생활비 외" 로 명시한 것은
+        여기 없다. 자동으로 걸지 않는다 — 금액만으로 생활비인지 알 수 없다. 사용자가 고른다.
       */}
       {loose.length > 0 && !open && (
         <button className="bp-loose" onClick={onToggle}>
-          이 기간에 생활비와 연결되지 않은 실제 지출 {loose.length}건 · 확인
+          이 기간에 사용처를 정하지 않은 지출 {loose.length}건 · 확인
         </button>
       )}
       {loose.length > 0 && open && (
         <div className="bp-loose-l">
-          <p className="bp-note">연결되지 않은 실제 지출 {loose.length}건 — 생활비에서 쓴 것이면 연결하세요. 연결하면 한도에서 두 번 빠지지 않습니다.</p>
-          <ul className="bp-ul">
+          <p className="bp-note">
+            사용처를 정하지 않은 지출 {loose.length}건 — 생활비에서 쓴 것은 골라 연결하고, 아니면 &lsquo;생활비 외&rsquo; 로 두세요.
+          </p>
+          <ul className="bp-ul" aria-label="사용처를 정하지 않은 지출">
             {loose.map((e) => (
               <li key={e.id} className="bp-loose-i">
+                <label className="bp-pick">
+                  <input
+                    type="checkbox" checked={picked.has(e.id)} onChange={() => toggle(e.id)}
+                    aria-label={`${e.title.trim() || '지출'} ${fmtDayShort(e.startDate)} 고르기`}
+                  />
+                </label>
                 <button className="bp-li" onClick={() => onEntryClick?.(e)}>
                   <span className="bp-li-d num">{fmtDayShort(e.startDate)}</span>
                   <span className="bp-li-t">{e.title.trim() || '(내역 없음)'}</span>
                   <span className="bp-li-a num">{formatAmount(Math.abs(e.money?.amountMinor ?? 0))}</span>
                 </button>
-                {onLinkEntry && (
-                  <button className="chip" onClick={() => onLinkEntry(e, budget)}>연결</button>
+                {onMarkOutside && (
+                  <button className="chip" onClick={() => onMarkOutside(e)}>생활비 외</button>
                 )}
               </li>
             ))}
           </ul>
+          {onLinkEntries && chosen.length > 0 && (
+            <div className="bp-apply" role="group" aria-label="연결 미리보기">
+              <p className="num">
+                {chosen.length}건 · {formatAmount(chosenSum)}원을 &lsquo;{budget.name}&rsquo; 에 연결 —
+                남은 생활비 {formatAmount(remainingMinor)} → <b className={afterLink < 0 ? 'bp-over' : ''}>
+                  {afterLink < 0 ? `초과 ${formatAmount(-afterLink)}` : formatAmount(afterLink)}
+                </b>
+              </p>
+              <button
+                className="btn primary sm"
+                onClick={() => { onLinkEntries(chosen, budget); setPicked(new Set()); }}
+              >
+                {chosen.length}건 연결
+              </button>
+            </div>
+          )}
         </div>
       )}
     </div>

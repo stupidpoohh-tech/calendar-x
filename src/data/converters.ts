@@ -225,6 +225,7 @@ export function entryFromDoc(id: string, raw: Raw): Entry {
           accountId: optStr(moneyRaw?.accountId),
           plannedRef,
           highlight: moneyRaw?.highlight === true,
+          outsidePocket: moneyRaw?.outsidePocket === true,
         }
       : null,
     // 회복 표식은 할 일 위에만 얹힌다.
@@ -292,6 +293,8 @@ function moneyToDoc(m: MoneyFields): Raw {
       ? { entryId: m.plannedRef.entryId, date: m.plannedRef.date }
       : null,
     highlight: m.highlight === true,
+    // 주머니에 걸렸으면 "생활비 외" 는 뜻이 없다. 둘이 함께 남지 않게 굳힌다.
+    outsidePocket: m.outsidePocket === true && !m.budgetId,
   };
 }
 

@@ -341,6 +341,12 @@ describe('가계부 원장', () => {
     await assertFails(setDoc(doc(db(OTHER), path('h2')), actual({ highlight: true })));
   });
 
+  it('생활비 외 지출(outsidePocket)도 규칙을 바꾸지 않고 쓸 수 있다', async () => {
+    await assertSucceeds(setDoc(doc(db(ME), path('o1')), actual({ outsidePocket: true })));
+    await assertSucceeds(setDoc(doc(db(ME), path('o1')), actual({ outsidePocket: false, budgetId: 'b1' })));
+    await assertFails(setDoc(doc(db(OTHER), path('o2')), actual({ outsidePocket: true })));
+  });
+
   it('schema 는 정수다', async () => {
     await assertFails(setDoc(doc(db(ME), path('x1')), { ...actual(), schema: '2' }));
   });

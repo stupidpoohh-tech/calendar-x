@@ -20,7 +20,7 @@ import { MONEY_TYPE_BY_ID } from '../domain/constants';
 import { daysBetween, fmtDayShort } from '../domain/date';
 import { formatAmount, formatSigned } from '../domain/money';
 import {
-  balanceViewOn, calcScopeOf, horizonOf, projectedBalanceOn, summarize, unsettledAfter, upcomingInHorizon,
+  balanceViewOn, calcScopeOf, headlineDate, horizonOf, projectedBalanceOn, summarize, unsettledAfter, upcomingInHorizon,
   type Summary,
 } from '../domain/tide';
 import type { Account, Budget, Entry, Reserve } from '../domain/types';
@@ -77,10 +77,12 @@ export function TideBar({
   const res = useMemo(() => ({ budgets, reserves }), [budgets, reserves]);
 
   const horizon = useMemo(() => horizonOf(entries, today), [entries, today]);
-  // 입금 전날의 잔고 보기 — 가용(큰 숫자) · 예상 잔고 · 확보한 몫을 같은 함수에서 함께 낸다.
+  // 머리 숫자를 정하는 날(구간 안 가용이 가장 작은 날 — 대개 입금 전날, 생활비가 구간 안에서
+  // 끝나면 그 종료일)의 잔고 보기. 가용(큰 숫자) · 예상 잔고 · 확보한 몫을 같은 날로 함께 낸다.
+  const bindDate = useMemo(() => headlineDate(accounts, entries, today, res), [accounts, entries, today, res]);
   const view = useMemo(
-    () => balanceViewOn(accounts, entries, horizon.end, today, res),
-    [accounts, entries, horizon.end, today, res],
+    () => balanceViewOn(accounts, entries, bindDate, today, res),
+    [accounts, entries, bindDate, today, res],
   );
   const limit = view.available;
   // 오늘의 예상 잔고. 확인 잔고와 다르면(아직 반영 안 한 거래 · 기준일 뒤 지난 예정) 함께 적는다.
@@ -239,7 +241,7 @@ export function TideBar({
               ))}
             </ul>
             <p className="tide-held-n num">
-              {Number(horizon.end.slice(5, 7))}월 {Number(horizon.end.slice(8))}일 예상 잔고 {formatAmount(view.projected)} − 확보 {formatAmount(view.held)} = 쓸 수 있는 돈 {formatAmount(limit)}.
+              {Number(view.date.slice(5, 7))}월 {Number(view.date.slice(8))}일 예상 잔고 {formatAmount(view.projected)} − 확보 {formatAmount(view.held)} = 쓸 수 있는 돈 {formatAmount(limit)}.
               생활비 · 세이브는 통장에서 빠진 돈이 아니라 잔고 안에서 떼어 둔 몫입니다.
             </p>
           </details>
