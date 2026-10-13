@@ -67,12 +67,14 @@ describe('내역', () => {
     expect(screen.getByText('9.25 – 10.24')).toBeInTheDocument();
   });
 
-  it('합계는 실제 거래만, 원금은 지출에서 뺀다', () => {
+  it('합계는 실제 거래만, 원금은 지출이 아니라 대금 — 수지 = 수입 − 지출 − 대금', () => {
     mount({ entries });
-    const totals = document.querySelector('.led-totals')!;
-    expect(totals.textContent).toContain('3,000,000');
-    expect(within(totals as HTMLElement).getByText('12,000', { selector: 'b' })).toBeInTheDocument();
-    expect(totals.textContent).toContain('대출 원금 · 이체 · 카드 대금 300,000');
+    const totals = document.querySelector('.led-totals')! as HTMLElement;
+    const cell = (label: string) => within(totals).getByText(label, { selector: 'span' }).nextElementSibling!.textContent;
+    expect(cell('수입')).toBe('3,000,000');
+    expect(cell('지출')).toBe('12,000');
+    expect(cell('대금')).toBe('300,000');
+    expect(cell('수지')).toBe('+2,688,000');
   });
 
   it('예정은 "예정" 으로 구분해 보이고, 다음 기간 거래는 없다', () => {
@@ -160,13 +162,14 @@ describe('예산', () => {
     mount({ tab: 'budget', entries, categoryBudgets: budgets });
     const list = screen.getByRole('list', { name: '카테고리별 예산' });
     const food = within(list).getByRole('button', { name: /식비/ });
-    expect(food.textContent).toContain('320,000');
-    expect(food.textContent).toContain('/ 300,000');
-    expect(food.textContent).toContain('초과 20,000');
-    expect(food.textContent).toContain('지난 기간 100,000');
+    // 예산 · 결산 · 남음이 나란히 — 칸마다 이름표가 있다.
+    expect(within(food).getByLabelText('예산 300,000')).toBeInTheDocument();
+    expect(within(food).getByLabelText('결산 320,000')).toBeInTheDocument();
+    expect(within(food).getByLabelText('초과 20,000')).toBeInTheDocument();
+    expect(food.textContent).toContain('지난 기간 결산 100,000');
     const cafe = within(list).getByRole('button', { name: /카페/ });
-    expect(cafe.textContent).toContain('예산 없음');
-    expect(cafe.textContent).toContain('9,000');
+    expect(within(cafe).getByLabelText('예산 없음')).toBeInTheDocument();
+    expect(within(cafe).getByLabelText('결산 9,000')).toBeInTheDocument();
   });
 
   it('진행 중인 기간 — "이 기간만" 과 "기본 예산(이번 기간부터)" 을 가른다', () => {
@@ -259,10 +262,11 @@ describe('통계 · 카테고리', () => {
     });
     const list = screen.getByRole('list', { name: '카테고리별 연간 소비' });
     const food = within(list).getByText('식비').closest('li')!;
-    expect(food.textContent).toContain('600,000');
+    expect(food.textContent).toContain('합계 600,000');
     expect(food.textContent).toContain('소비의 100%');
     // 끝난 기간은 1~9월(9개). (100,000 + 200,000) / 9 — 진행 중인 10월은 넣지 않는다.
-    expect(food.textContent).toContain('월평균 33,333');
+    // 오른쪽 큰 숫자가 월평균이다.
+    expect(food.querySelector('.led-stat-h .num')!.textContent).toBe('월평균33,333');
     expect(within(list).getByText('금융비용 (대출 이자)')).toBeInTheDocument();
     expect(screen.getByText(/끝난 기간 수\(9개\)/)).toBeInTheDocument();
     // 원금은 소비 합계에 없다.

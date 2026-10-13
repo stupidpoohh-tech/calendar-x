@@ -252,8 +252,8 @@ function Workspace({ uid, user, onSignOut }: WorkspaceProps) {
   );
 
   const visible = useMemo(
-    () => applyFilters(materialized, lens, filters),
-    [materialized, lens, filters],
+    () => applyFilters(materialized, lens, filters, today),
+    [materialized, lens, filters, today],
   );
 
   const allTags = useMemo(() => collectTags(store.entries), [store.entries]);
@@ -650,8 +650,8 @@ function Workspace({ uid, user, onSignOut }: WorkspaceProps) {
   }, [ledgerPeriod, ledgerYear, settleDay]);
   const ledgerOn = lens === 'money' && !sharedOpen;
   // 필터는 달력 · 리스트에 그리는 항목을 거른다. 가계부에서는 그 달력이 있는 현금흐름에서만 뜻이 있다.
-  // 마지막 보기는 세션 동안만 기억한다. 앱을 새로 열면 내역부터 — 가계부의 기본 화면이다.
-  const [ledgerTab, setLedgerTab] = useState<LedgerTabId>('history');
+  // 마지막 보기는 세션 동안만 기억한다. 앱을 새로 열면 현금흐름부터 — 가계부의 기본 화면이다.
+  const [ledgerTab, setLedgerTab] = useState<LedgerTabId>('cashflow');
   const filterUsable = !ledgerOn || ledgerTab === 'cashflow';
   const ledgerRange = useLedgerFeed(uid, ledgerMonths, ledgerOn && !isAnon);
   const ledgerEntries = useMemo(() => {

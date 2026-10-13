@@ -151,6 +151,7 @@ button.led-cat-n:hover { background: var(--accent-soft); }
 .led-totals b.plus { color: var(--good); }
 .led-totals b.minus { color: var(--bad); }
 .led-totals .led-note { grid-column: 1 / -1; }
+.led-totals.four { grid-template-columns: repeat(4, minmax(0, 1fr)); }
 
 .led-search { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; }
 .led-search .mod-input { flex: 1 1 200px; min-width: 0; }
@@ -186,6 +187,17 @@ button.led-cat-n:hover { background: var(--accent-soft); }
 .led-bl-b { color: var(--ink-4); }
 .led-bl-main .bp-bar { grid-column: 1 / -1; }
 .led-bl-s { grid-column: 1 / -1; font-size: 0.6875rem; color: var(--ink-4); }
+/* 예산 보기: 카테고리 | 예산 | 결산 | 남음 — 머리 줄과 행이 같은 칸을 쓴다. */
+.led-bl-cols, .led-bl-main.cols {
+  display: grid; grid-template-columns: minmax(0, 1.3fr) repeat(3, minmax(0, 1fr)); gap: 4px 8px;
+}
+.led-bl-cols { padding: 0 4px 4px; border-bottom: 1px solid var(--line); font-size: 0.6875rem; font-weight: 600; color: var(--ink-3); }
+.led-bl-cols span:not(:first-child) { text-align: right; }
+.led-bl-main.cols .led-bl-n { flex-direction: column; align-items: flex-start; gap: 2px; overflow-wrap: anywhere; }
+.led-bl-main.cols .led-bl-s { grid-column: auto; }
+.led-bl-c { font-size: 0.8125rem; color: var(--ink); text-align: right; align-self: start; overflow-wrap: anywhere; }
+.led-bl-c.minus { color: var(--bad); }
+.led-bl-none { color: var(--ink-4); }
 .led-bl-edit { display: flex; flex-direction: column; gap: 6px; padding: 0 4px 12px; }
 .led-bl-a { display: flex; gap: 6px; flex-wrap: wrap; }
 
@@ -219,7 +231,7 @@ button.led-cat-n:hover { background: var(--accent-soft); }
 .led-table caption { caption-side: bottom; text-align: left; padding-top: 6px; }
 .led-table th, .led-table td { padding: 8px 4px; border-bottom: 1px solid var(--line); text-align: right; }
 .led-table th[scope="row"], .led-table thead th:first-child { text-align: left; }
-.led-table thead th { font-weight: 600; color: var(--ink-3); font-size: 0.6875rem; }
+.led-table thead th { font-weight: 600; color: var(--ink-3); font-size: 0.6875rem; white-space: nowrap; }
 .led-table th[scope="row"] { display: flex; flex-wrap: wrap; gap: 4px 6px; align-items: baseline; font-weight: 500; }
 .led-table tbody tr { cursor: pointer; }
 .led-table tbody tr:hover { background: var(--accent-soft); }
@@ -235,6 +247,7 @@ button.led-cat-n:hover { background: var(--accent-soft); }
 }
 .led-stat-h { display: flex; justify-content: space-between; gap: 8px; font-size: 0.8125rem; color: var(--ink); }
 .led-stat-s { display: flex; gap: 10px; font-size: 0.6875rem; color: var(--ink-4); }
+.led-stat-u { margin-right: 6px; font-size: 0.6875rem; color: var(--ink-4); }
 .led-spark { grid-column: 2; grid-row: 1 / span 2; width: 120px; height: 24px; }
 .led-spark .bar.seq { fill: var(--led-in); }
 .led-stat.finance .led-stat-n { color: var(--ink-2); font-style: italic; }
@@ -243,6 +256,11 @@ button.led-cat-n:hover { background: var(--accent-soft); }
   .led-totals b { font-size: 0.875rem; }
   .led-stat { grid-template-columns: 1fr 84px; }
   .led-spark { width: 84px; }
+  .led-bl-c { font-size: 0.75rem; }
+}
+/* 금액 넷이 한 줄에 들어가지 않는 폭에서는 둘씩 두 줄. */
+@media (max-width: 380px) {
+  .led-totals.four { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }
 
 /* ---------- 가계부 이관 미리보기 (LedgerImport) ---------- */

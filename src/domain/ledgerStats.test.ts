@@ -50,7 +50,14 @@ describe('무엇을 소비로 세는가', () => {
     expect(t.financeCost).toBe(20_000);
     expect(t.income).toBe(3_000_000);
     expect(t.spending).toBe(82_000);
-    expect(t.net).toBe(3_000_000 - 82_000);
+    expect(t.repayment).toBe(300_000);
+    expect(t.net).toBe(3_000_000 - 82_000 - 300_000);
+  });
+
+  it('수지 = 수입 − 지출 − 대금. 카드 대금 · 이체는 빼지 않는다(카드는 쓴 날 이미 지출)', () => {
+    const t = totalsOf(list);
+    expect(t.net).toBe(t.income - t.spending - t.repayment);
+    expect(t.net).toBe(2_618_000);
   });
 
   it('예정은 세지 않는다 — 확정하지 않은 지난 예정도', () => {

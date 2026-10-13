@@ -81,3 +81,21 @@ describe('태그 정리', () => {
     expect(collectTags([task({ tags: ['나'] }), task({ tags: ['가', '나'] })])).toEqual(['가', '나']);
   });
 });
+
+describe('전체 렌즈는 지난 가계부 항목을 그리지 않는다', () => {
+  const today = '2026-10-13';
+  it('오늘 이전 가계부는 빠지고, 오늘 · 앞날은 남는다', () => {
+    const list = [
+      spend({ id: 'past', startDate: '2026-10-12' }),
+      spend({ id: 'today', startDate: today }),
+      spend({ id: 'next', startDate: '2026-10-20' }),
+      spend({ id: 'span', startDate: '2026-10-01', endDate: '2026-10-31' }),
+      task({ id: 'oldTask', startDate: '2026-10-01' }),
+      idea({ id: 'oldIdea', startDate: '2026-10-01' }),
+    ];
+    expect(applyFilters(list, 'all', f(), today).map((e) => e.id)).toEqual(['today', 'next', 'span', 'oldTask', 'oldIdea']);
+  });
+  it('가계부 렌즈는 지난 거래도 그대로 그린다', () => {
+    expect(applyFilters([spend({ startDate: '2026-10-01' })], 'money', f(), today)).toHaveLength(1);
+  });
+});

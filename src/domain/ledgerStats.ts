@@ -12,7 +12,12 @@
  *              대출 원금은 빚이 줄어드는 것이고, 이체는 내 돈의 자리만 바뀐 것이며,
  *              카드 대금은 쓴 날 이미 소비로 셌다. 셋 다 현금은 움직이지만 소비가 아니다
  *
- * 지출(spending) = 소비 + 금융비용, 수지 = 수입 − 지출.
+ * 지출(spending) = 소비 + 금융비용, 대금(repayment) = 대출 원금,
+ * 수지 = 수입 − 지출 − 대금.
+ *
+ * 대출 원금은 소비가 아니지만 그 달에 손에 남은 돈에서는 빠진다. 예전 수지(수입 − 지출)는
+ * 원금을 갚은 달을 그만큼 남은 것처럼 적었다. 카드 대금은 대금에 넣지 않는다 — 카드로
+ * 쓴 날 이미 지출로 셌으므로 넣으면 같은 돈이 두 번 빠진다. 이체는 내 돈의 자리만 바뀐 것이다.
  *
  * ── 예정은 소비가 아니다 ──────────────────────────────────────
  *
@@ -54,7 +59,9 @@ export interface LedgerTotals {
   cardPayment: number;
   /** 소비 + 금융비용. */
   spending: number;
-  /** 수입 − 지출. */
+  /** 대금 — 대출 원금. 소비는 아니지만 손에 남는 돈에서 빠진다. */
+  repayment: number;
+  /** 수입 − 지출 − 대금. */
   net: number;
   count: number;
 }
@@ -64,7 +71,7 @@ const amountOf = (e: Entry) => Math.abs(e.money?.amountMinor ?? 0);
 export function totalsOf(actuals: readonly Entry[]): LedgerTotals {
   const t: LedgerTotals = {
     income: 0, consumption: 0, financeCost: 0, principal: 0,
-    transferIn: 0, transferOut: 0, cardPayment: 0, spending: 0, net: 0, count: 0,
+    transferIn: 0, transferOut: 0, cardPayment: 0, spending: 0, repayment: 0, net: 0, count: 0,
   };
   for (const e of actuals) {
     const cls = ledgerClassOf(e);
@@ -83,7 +90,8 @@ export function totalsOf(actuals: readonly Entry[]): LedgerTotals {
     }
   }
   t.spending = t.consumption + t.financeCost;
-  t.net = t.income - t.spending;
+  t.repayment = t.principal;
+  t.net = t.income - t.spending - t.repayment;
   return t;
 }
 

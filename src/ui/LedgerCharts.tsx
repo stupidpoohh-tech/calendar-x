@@ -39,10 +39,11 @@ export function LedgerMonthly({ entries, settleDay, todayISO, period, onPick }: 
 
       <table className="led-table">
         <caption className="led-note">
-          기간 이름은 날이 더 많이 든 달입니다. 지출 = 소비 + 대출 이자. 대출 원금 · 이체 · 카드 대금은 넣지 않습니다.
+          기간 이름은 날이 더 많이 든 달입니다. 지출 = 소비 + 대출 이자. 대금 = 대출 원금.
+          수지 = 수입 − 지출 − 대금. 이체 · 카드 대금은 넣지 않습니다(카드는 쓴 날 지출로 셉니다).
         </caption>
         <thead>
-          <tr><th scope="col">기간</th><th scope="col">수입</th><th scope="col">지출</th><th scope="col">수지</th></tr>
+          <tr><th scope="col">기간</th><th scope="col">수입</th><th scope="col">지출</th><th scope="col">대금</th><th scope="col">수지</th></tr>
         </thead>
         <tbody>
           {[...series].reverse().map((s) => (
@@ -57,6 +58,7 @@ export function LedgerMonthly({ entries, settleDay, todayISO, period, onPick }: 
               </th>
               <td className="num plus">{formatAmount(s.totals.income)}</td>
               <td className="num minus">{formatAmount(s.totals.spending)}</td>
+              <td className="num">{formatAmount(s.totals.repayment)}</td>
               <td className={'num ' + (s.totals.net < 0 ? 'minus' : '')}>{formatSigned(s.totals.net)}</td>
             </tr>
           ))}
@@ -130,6 +132,7 @@ function TrendChart({ series }: { series: readonly PeriodSeries[] }) {
             <span className="num">{periodRange(hovered.period)}{hovered.phase === 'current' ? ' · 진행 중' : ''}</span>
             <span><i className="sw in" />수입 <b className="num">{formatAmount(hovered.totals.income)}</b></span>
             <span><i className="sw out" />지출 <b className="num">{formatAmount(hovered.totals.spending)}</b></span>
+            <span>대금 <b className="num">{formatAmount(hovered.totals.repayment)}</b></span>
             <span>수지 <b className="num">{formatSigned(hovered.totals.net)}</b></span>
           </div>
         )}
@@ -225,13 +228,16 @@ function StatRow({ name, total, share, average, perPeriod, peak, periods, financ
 }) {
   return (
     <li className={'led-stat' + (finance ? ' finance' : '')}>
+      {/* 줄마다 견주는 값은 월평균이다 — 해가 덜 끝났으면 합계는 기간 수에 따라 커지기만 한다. */}
       <div className="led-stat-h">
         <span className="led-stat-n">{name}</span>
-        <span className="num">{formatAmount(total)}</span>
+        <span className="num" aria-label={`월평균 ${average == null ? '없음' : formatAmount(average)}`}>
+          <span className="led-stat-u">월평균</span>{average == null ? '—' : formatAmount(average)}
+        </span>
       </div>
       <div className="led-stat-s num">
         {share != null && <span>소비의 {Math.round(share * 1000) / 10}%</span>}
-        <span>월평균 {average == null ? '—' : formatAmount(average)}</span>
+        <span>합계 {formatAmount(total)}</span>
       </div>
       {/* 기간별 막대. 한 계열이라 범례가 없다 — 줄 이름이 그것이다. */}
       <svg className="led-spark" viewBox="0 0 120 24" preserveAspectRatio="none" role="img"

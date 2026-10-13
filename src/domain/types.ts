@@ -548,7 +548,7 @@ export interface Prefs {
 
 /**
  * 가계부 렌즈 안의 보기. 렌즈 바로 아래 한 줄이고, 고른 보기의 본문 하나만 그린다.
- * 마지막 보기는 세션 동안만 기억한다 — 앱을 새로 열면 내역부터 시작한다.
+ * 마지막 보기는 세션 동안만 기억한다 — 앱을 새로 열면 현금흐름부터 시작한다.
  */
 export type LedgerTabId = 'history' | 'cashflow' | 'budget' | 'stats';
 

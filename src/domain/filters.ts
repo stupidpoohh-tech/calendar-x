@@ -1,6 +1,6 @@
 import { LENS_BY_ID } from './constants';
-import { displayTitle } from './entry';
-import type { ColorId, Entry, Filters, LensId } from './types';
+import { displayTitle, effectiveEndDate } from './entry';
+import type { ColorId, DateISO, Entry, Filters, LensId } from './types';
 
 export function emptyFilters(): Filters {
   return {
@@ -59,8 +59,19 @@ export function matchesFilters(e: Entry, f: Filters): boolean {
   return true;
 }
 
-export function applyFilters(entries: readonly Entry[], lens: LensId, f: Filters): Entry[] {
-  return entries.filter((e) => matchesLens(e, lens) && matchesFilters(e, f));
+/**
+ * 전체 렌즈는 지난 가계부 항목을 그리지 않는다. 그 화면은 "오늘 무엇을 해야 하는가" 를 보는
+ * 자리이고, 지난 거래는 가계부 내역에 이미 있다 — 이관한 몇 달치가 할 일을 덮었다.
+ * 경계는 끝나는 날이다: 오늘 끝나거나 아직 걸쳐 있는 것은 남는다.
+ * 화면용 목록에만 쓴다. 한도는 이 목록을 보지 않는다(`tideEntries`).
+ */
+export function hidesPastMoney(e: Entry, lens: LensId, todayISO: DateISO): boolean {
+  return lens === 'all' && e.kind === 'money' && effectiveEndDate(e) < todayISO;
+}
+
+export function applyFilters(entries: readonly Entry[], lens: LensId, f: Filters, todayISO?: DateISO): Entry[] {
+  return entries.filter((e) => matchesLens(e, lens) && matchesFilters(e, f)
+    && !(todayISO && hidesPastMoney(e, lens, todayISO)));
 }
 
 export function collectTags(entries: readonly Entry[]): string[] {

@@ -202,16 +202,18 @@ function PeriodNav({ period, todayISO, isCurrent, onPrev, onNext, onNow }: {
 }
 
 function TotalsRow({ t, phase }: { t: LedgerTotals; phase: 'past' | 'current' | 'future' }) {
-  const excluded = t.principal + t.transferOut + t.cardPayment;
+  const excluded = t.transferOut + t.cardPayment;
   return (
-    <div className="led-totals">
+    <div className="led-totals four">
       <div><span>수입</span><b className="num plus">{formatAmount(t.income)}</b></div>
       <div><span>지출</span><b className="num minus">{formatAmount(t.spending)}</b></div>
+      <div><span>대금</span><b className="num">{formatAmount(t.repayment)}</b></div>
       <div><span>수지</span><b className={'num ' + (t.net < 0 ? 'minus' : '')}>{formatSigned(t.net)}</b></div>
       <p className="led-note">
         지출 = 소비 {formatAmount(t.consumption)}
         {t.financeCost > 0 && <> + 대출 이자 {formatAmount(t.financeCost)}</>}
-        {excluded > 0 && <> · 대출 원금 · 이체 · 카드 대금 {formatAmount(excluded)}은 지출에 넣지 않았습니다</>}
+        {' '}· 대금 = 대출 원금 · 수지 = 수입 − 지출 − 대금
+        {excluded > 0 && <> · 이체 · 카드 대금 {formatAmount(excluded)}은 넣지 않았습니다(카드는 쓴 날 지출로 셉니다)</>}
         {phase === 'current' && ' · 진행 중인 기간이라 확정 합계가 아닙니다'}
       </p>
     </div>
@@ -380,7 +382,7 @@ function LedgerBudget({
       <h3 className="led-sec-h">카테고리 예산</h3>
       <div className="led-totals">
         <div><span>예산</span><b className="num">{formatAmount(sum.budgeted)}</b></div>
-        <div><span>예산 안 지출</span><b className="num">{formatAmount(sum.actualInBudgeted)}</b></div>
+        <div><span>결산</span><b className="num minus">{formatAmount(sum.actual)}</b></div>
         <div>
           <span>남음</span>
           <b className={'num ' + (sum.budgeted - sum.actualInBudgeted < 0 ? 'minus' : '')}>
@@ -388,13 +390,17 @@ function LedgerBudget({
           </b>
         </div>
         <p className="led-note">
-          전체 지출 {formatAmount(sum.actual)}
+          결산 = 이 기간에 실제로 쓴 지출(소비 + 대출 이자). 남음은 예산을 정한 카테고리만 견줍니다
+          (그 카테고리 지출 {formatAmount(sum.actualInBudgeted)})
           {sum.overCount > 0 && <> · <b className="minus">초과 {sum.overCount}개</b></>}
           {' '}· 카테고리 예산은 <b>결산용</b>입니다. 쓴 돈과 견주기만 하고, 아래 생활비 주머니와 달리 한도에서 미리 빼지 않습니다
           {phase === 'current' && ' · 진행 중인 기간입니다'}
         </p>
       </div>
 
+      <div className="led-bl-cols" aria-hidden="true">
+        <span>카테고리</span><span>예산</span><span>결산</span><span>남음</span>
+      </div>
       <ul className="led-budgets" aria-label="카테고리별 예산">
         {rows.map((r) => (
           <BudgetLine
@@ -449,28 +455,29 @@ function BudgetLine({ row, prevActual, editing, onEdit, canDefault, defaultFrom,
 
   return (
     <li className="led-bl">
-      <button className="led-bl-main" onClick={editable ? onEdit : undefined} aria-expanded={editable ? editing : undefined} disabled={!editable}>
+      <button className="led-bl-main cols" onClick={editable ? onEdit : undefined} aria-expanded={editable ? editing : undefined} disabled={!editable}>
         <span className="led-bl-n">
           {row.name}{row.archived && ' (보관)'}
           {row.budget.source === 'period' && <span className="led-badge muted">이 기간만</span>}
+          <span className="led-bl-s num">지난 기간 결산 {formatAmount(prevActual)}</span>
         </span>
-        <span className="led-bl-v num">
-          {formatAmount(row.actual)}
-          {budget != null && <span className="led-bl-b"> / {formatAmount(budget)}</span>}
+        <span className="led-bl-c num" aria-label={`예산 ${budget == null ? '없음' : formatAmount(budget)}`}>
+          {budget == null ? <span className="led-bl-none">—</span> : formatAmount(budget)}
+        </span>
+        <span className="led-bl-c num" aria-label={`결산 ${formatAmount(row.actual)}`}>{formatAmount(row.actual)}</span>
+        <span
+          className={'led-bl-c num' + (row.over ? ' minus' : '')}
+          aria-label={row.remaining == null ? '남음 없음' : row.over ? `초과 ${formatAmount(-row.remaining)}` : `남음 ${formatAmount(row.remaining)}`}
+        >
+          {row.remaining == null
+            ? <span className="led-bl-none">—</span>
+            : row.over ? <>초과 {formatAmount(-row.remaining)}</> : formatAmount(row.remaining)}
         </span>
         {budget != null && budget > 0 && (
           <span className={'bp-bar' + (row.over ? ' over' : '')} aria-hidden="true">
             <span className="bp-bar-f" style={{ width: `${Math.round(ratio * 100)}%` }} />
           </span>
         )}
-        <span className="led-bl-s num">
-          {row.remaining == null
-            ? '예산 없음'
-            : row.over
-              ? <b className="minus">초과 {formatAmount(-row.remaining)}</b>
-              : <>남음 {formatAmount(row.remaining)}</>}
-          {' '}· 지난 기간 {formatAmount(prevActual)}
-        </span>
       </button>
       {editing && (
         <div className="led-bl-edit">
