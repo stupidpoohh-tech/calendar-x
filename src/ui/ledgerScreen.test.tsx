@@ -27,7 +27,7 @@ function mount(over: Partial<LedgerScreenProps> = {}) {
     todayISO: TODAY, settleDay: 25, tab: 'history', onTab: vi.fn(), periodKey: '2026-10', onPeriodKey: vi.fn(),
     entries: [], feed: LIVE, categories: cats, categoryBudgets: [],
     ledgerNotes: [], notesFeed: LIVE, onSaveLedgerNote: vi.fn(),
-    categoriesReady: true, onSeedCategories: vi.fn(), onEntryClick: vi.fn(), onAdd: vi.fn(),
+    categoriesReady: true, onSeedCategories: vi.fn(), onEntryClick: vi.fn(),
     onSaveCategoryBudget: vi.fn(), subscribeAll: vi.fn(() => () => undefined),
     ...over,
   };
@@ -134,10 +134,15 @@ describe('내역', () => {
     expect(screen.queryByRole('button', { name: /이른 점심/ })).toBeNull();
   });
 
-  it('거래 추가는 기간 도구 옆에 있다 — 이 기간에 오늘이 있으면 오늘로', () => {
-    const p = mount({ entries });
-    fireEvent.click(screen.getByRole('button', { name: /거래 추가/ }));
-    expect(p.onAdd).toHaveBeenCalledWith(TODAY);
+  it('추가(+) · 더보기(···)는 보기마다 기간 도구 옆에 — 따로 세운 거래 추가 단추는 없다', () => {
+    const actions = <span data-testid="acts">+ ···</span>;
+    for (const tab of ['history', 'budget', 'stats'] as const) {
+      mount({ entries, tab, actions });
+      const acts = screen.getByTestId('acts');
+      expect(acts.closest('.led-toolbar')!.querySelector('.led-period')).not.toBeNull();
+      expect(screen.queryByRole('button', { name: /거래 추가/ })).toBeNull();
+      cleanup();
+    }
   });
 
   it('기간을 옮긴다. 이번 기간을 보고 있으면 "이번 기간" 버튼은 없다', () => {

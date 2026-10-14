@@ -77,7 +77,8 @@ export interface LedgerScreenProps {
   categoriesReady: boolean;
   onSeedCategories: () => void;
   onEntryClick: (e: Entry) => void;
-  onAdd: (dateISO: string) => void;
+  /** 좁은 화면의 추가(+) · 더보기(···). 기간 도구 옆에 둔다 — 머리에 한 줄을 따로 쓰지 않게. */
+  actions?: ReactNode;
   onSaveCategoryBudget: (b: CategoryBudget) => void;
   /** 정산 기간 메모(돌아보기). 기간 하나에 한 장. */
   ledgerNotes: readonly LedgerNote[];
@@ -125,9 +126,7 @@ export function LedgerScreen(props: LedgerScreenProps) {
         <>
           <div className="led-toolbar">
             {periodNav}
-            <button className="btn primary led-add" onClick={() => props.onAdd(todayISO >= period.start && todayISO <= period.end ? todayISO : period.end)}>
-              <Icon.Plus size={14} />거래 추가
-            </button>
+            {props.actions}
           </div>
           {gated(<LedgerHistory {...props} period={period} />)}
         </>
@@ -137,14 +136,14 @@ export function LedgerScreen(props: LedgerScreenProps) {
 
       {tab === 'budget' && (
         <>
-          <div className="led-toolbar">{periodNav}</div>
+          <div className="led-toolbar">{periodNav}{props.actions}</div>
           {gated(<LedgerBudget {...props} period={period} />)}
         </>
       )}
 
       {tab === 'stats' && (
         <>
-          <div className="led-toolbar">{periodNav}</div>
+          <div className="led-toolbar">{periodNav}{props.actions}</div>
           <div className="seg led-subview" role="radiogroup" aria-label="분석 보기">
             {([['trend', '월별 추이'], ['category', '카테고리']] as const).map(([id, label]) => (
               <button key={id} role="radio" aria-checked={statsView === id}
@@ -272,7 +271,7 @@ function LedgerHistory({
 
       <div className="led-search">
         <input
-          className="mod-input" type="search" placeholder="내역 · 메모 · 결제수단 · 카테고리 · 금액"
+          className="mod-input" type="search" placeholder="내역 · 메모 · 카테고리 · 금액"
           aria-label="거래 검색" value={q} onChange={(e) => setQ(e.target.value)}
           onKeyDown={(e) => { if (isComposingEnter(e)) e.preventDefault(); }}
         />
@@ -333,7 +332,8 @@ function LedgerHistory({
                             {it.entry.money?.plannedRef && ' · 예정 확정'}
                           </span>
                         </span>
-                        <span className={'led-row-a num ' + (it.planned ? '' : it.sign > 0 ? 'plus' : 'minus')}>
+                        {/* 들어온 돈 · 나간 돈을 색으로 먼저 가른다. 예정도 같다 — 예정은 배지와 옅은 줄로 따로 읽힌다. */}
+                        <span className={'led-row-a num ' + (it.sign > 0 ? 'plus' : 'minus')}>
                           {it.sign > 0 ? '+' : '−'}{formatAmount(it.amount)}
                         </span>
                       </button>

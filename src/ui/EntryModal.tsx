@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import {
-  COLORS, DEFAULT_CURRENCY, KIND_LABEL, MONEY_TYPE_BY_ID, NEW_MONEY_TYPES,
+  COLORS, DEFAULT_CURRENCY, KIND_LABEL, MONEY_TYPE_BY_ID,
   REPEAT_OPTIONS, STATUSES,
 } from '../domain/constants';
 import { todayISO as computeToday } from '../domain/date';
@@ -17,7 +17,10 @@ import type {
   Account, Budget, Category, Debt, Entry, EntryKind, MoneyFields, NewMoneyType, RepeatFreq, TaskStatus,
 } from '../domain/types';
 import { Icon } from './Icon';
+import { FlowChips } from './FlowChips';
 import { LedgerFields } from './LedgerFields';
+import { flowLabel, flowPickOf, flowPickPatch, type FlowPick } from './ledgerFlows';
+import { moneyFlowOf } from '../domain/ledger';
 import { PICKER } from './pickerField';
 import { isComposingEnter } from './ime';
 
@@ -33,12 +36,11 @@ interface Props {
   debts: readonly Debt[];
   /** 같이 보기 보드가 있는가. 없으면 비공개 토글을 띄울 이유가 없다. */
   sharedActive?: boolean;
-  /** 거래 카테고리 · 계좌 · 전에 쓴 결제수단. 실제 거래 칸에 쓴다. */
+  /** 거래 카테고리 · 계좌. 실제 거래 칸에 쓴다. */
   categories?: readonly Category[];
   categoriesReady?: boolean;
   onSeedCategories?: () => void;
   accounts?: readonly Account[];
-  methods?: readonly string[];
   /**
    * 편집 중인 예정의 **누른 회차** 날짜. 반복 발생분을 눌렀으면 그 날, 아니면 시작일.
    * '실제로 확정' 이 이 회차를 확정한다.
@@ -78,7 +80,6 @@ function moneyUseOf(money: Entry['money']): MoneyUse {
 
 const NO_CATEGORIES: readonly Category[] = [];
 const NO_ACCOUNTS: readonly Account[] = [];
-const NO_METHODS: readonly string[] = [];
 
 /**
  * 새 실제 지출의 생활비 주머니 기본값.
@@ -98,7 +99,7 @@ function withDefaultPocket(e: Entry, budgets: readonly Budget[]): Entry {
 export function EntryModal({
   open, mode, initial, allTags, linkableTasks, budgets, debts, sharedActive = false,
   categories = NO_CATEGORIES, categoriesReady = true, onSeedCategories,
-  accounts = NO_ACCOUNTS, methods = NO_METHODS, occurrenceDate = null, onConfirm, onUnconfirm,
+  accounts = NO_ACCOUNTS, occurrenceDate = null, onConfirm, onUnconfirm,
   onSave, onDelete, onClose,
 }: Props) {
   const [form, setForm] = useState<Entry>(() => initial ?? newEntry('task'));
@@ -151,6 +152,7 @@ export function EntryModal({
   /** 나가는 돈에만 사용처가 있다. 들어올 돈은 예산에서도 대출에서도 나가지 않는다. */
   const isOutflow = isMoney && (moneyDef?.sign ?? 0) < 0;
   const moneyUse = moneyUseOf(form.money);
+  const flowPick = flowPickOf(form.money);
   const pickedBudget = budgets.find((b) => b.id === form.money?.budgetId) ?? null;
   const outsideBudget = pickedBudget !== null
     && (form.startDate < pickedBudget.startDate || form.startDate > pickedBudget.endDate);
@@ -181,46 +183,26 @@ export function EntryModal({
   };
 
   /**
-   * 흐름 고르기. 옛 종류에서 새 종류로 옮기는 자리이기도 하다.
+   * 흐름 고르기 — 수입 · 지출 · 대출(`ledgerFlows.ts`). 옛 종류 · 옛 유형에서 옮기는 자리이기도 하다.
    *
    * 들어올 돈으로 바꾸면 사용처를 지운다 — 입금은 예산에서도 대출에서도 나가지 않는다.
-   * 남겨 두면 예산이 그 입금을 지출로 세어 남은 금액이 늘어난다.
+   * 남겨 두면 예산이 그 입금을 지출로 세어 남은 금액이 늘어난다. 대출은 생활비에 걸지 않는다.
    */
-  const setFlow = (type: NewMoneyType) => {
-    if (isActual) {
-      // 입금으로 바꾸면 카드 · 대출 유형도 뜻이 없다. 일반으로 돌린다.
-      setForm((f) => {
-        if (!f.money) return f;
-        const flow = type === 'income' && f.money.flow && ['cardSpend', 'cardPayment', 'loanPrincipal', 'loanInterest'].includes(f.money.flow)
-          ? 'normal' : f.money.flow;
-        const keepCat = categories.find((c) => c.id === f.money?.categoryId)?.kind === type;
-        const next: Entry = {
-          ...f,
-          color: MONEY_TYPE_BY_ID[type].defaultColor,
-          money: {
-            ...f.money, type, flow,
-            categoryId: keepCat ? f.money.categoryId : null,
-            ...(type === 'income' ? { budgetId: null, debtId: null } : {}),
-          },
-        };
-        return pocketTouched || type === 'income' ? next : withDefaultPocket(next, budgets);
-      });
-      return;
-    }
+  const setFlow = (pick: FlowPick) => {
+    const p = flowPickPatch(pick);
+    const type = p.type as NewMoneyType;
     // 카테고리는 흐름마다 따로다. 지출 카테고리를 단 채 입금으로 바꾸면 결산이 엉뚱한 쪽에 선다.
-    const keep = categories.find((c) => c.id === form.money?.categoryId)?.kind === type;
-    const categoryId = keep ? form.money?.categoryId ?? null : null;
-    setMoney(type === 'income' ? { type, budgetId: null, debtId: null, categoryId } : { type, categoryId });
+    const keep = pick !== 'loan' && categories.find((c) => c.id === form.money?.categoryId)?.kind === type;
+    setMoney({ ...p, categoryId: keep ? form.money?.categoryId ?? null : null });
+    if (isActual && pick === 'expense' && !pocketTouched) {
+      setForm((f) => withDefaultPocket(f, budgets));
+    }
   };
 
   /** 사용처. 한 번에 하나만 걸린다 — 같이 걸면 어느 쪽에서 나간 돈인지가 두 개가 된다. */
-  const setUse = (use: MoneyUse) => {
+  const setUse = (use: Exclude<MoneyUse, 'debt'>) => {
     if (use === 'plain') { setMoney({ budgetId: null, debtId: null }); return; }
-    if (use === 'budget') {
-      setMoney({ budgetId: form.money?.budgetId ?? budgets[0]?.id ?? null, debtId: null });
-      return;
-    }
-    setMoney({ debtId: form.money?.debtId ?? debts[0]?.id ?? null, budgetId: null });
+    setMoney({ budgetId: form.money?.budgetId ?? budgets[0]?.id ?? null, debtId: null });
   };
 
   /** 실제 거래 칸에서 온 변경. 생활비를 건드렸으면 그 뒤로는 기본값을 다시 고르지 않는다. */
@@ -370,37 +352,18 @@ export function EntryModal({
                 </div>
               </div>
 
-              <div className="mod-row">
-                <span className="mod-lbl">흐름</span>
-                <div className="mod-chips">
-                  {NEW_MONEY_TYPES.map((t) => (
-                    <button
-                      key={t.id}
-                      className={'chip mt' + (form.money?.type === t.id ? ' on' : '')}
-                      style={{ ['--c' as string]: t.color }}
-                      onClick={() => setFlow(t.id as NewMoneyType)}
-                      title={t.hint}
-                      aria-pressed={form.money?.type === t.id}
-                    >
-                      <span className="chip-dot" />{isActual ? (t.id === 'income' ? '수입' : '지출') : t.label}
-                    </button>
-                  ))}
-                  {legacyDef && (
-                    /*
-                      옛 종류로 저장된 항목. 고를 수는 없지만 **보여는 준다** — 안 보여 주면
-                      이 항목이 지금 무엇으로 계산되고 있는지 알 수 없고, 다른 칸을 고치려다
-                      종류가 조용히 바뀐다. 누르면 그때 비로소 새 흐름으로 옮긴다.
-                    */
-                    <span
-                      className="chip mt on legacy"
-                      style={{ ['--c' as string]: legacyDef.color }}
-                      title="예전 유형입니다. 위에서 흐름을 고르면 바뀝니다."
-                    >
-                      <span className="chip-dot" />{legacyDef.label} (예전)
-                    </span>
-                  )}
-                </div>
-              </div>
+              {form.money && (
+                /*
+                  옛 종류 · 옛 유형으로 저장된 항목은 고를 수는 없지만 **보여는 준다** — 안 보여 주면
+                  이 항목이 지금 무엇으로 계산되고 있는지 알 수 없고, 다른 칸을 고치려다 종류가
+                  조용히 바뀐다. 세 흐름 가운데 하나를 누르면 그때 비로소 옮긴다.
+                */
+                <FlowChips
+                  money={form.money}
+                  legacyLabel={legacyDef ? legacyDef.label : flowLabel(moneyFlowOf(form.money))}
+                  onPick={setFlow}
+                />
+              )}
 
               {moneyDef && !isActual && <p className="mod-hint">{moneyDef.hint}</p>}
 
@@ -426,14 +389,14 @@ export function EntryModal({
                     accounts={accounts}
                     pockets={pockets}
                     debts={debts}
-                    methods={methods}
                     reflected={reflected}
                     onReflected={setReflected}
                   />
                 </>
               )}
 
-              {!isActual && isOutflow && (
+              {/* 대출은 흐름이다 — 사용처(생활비)를 묻지 않고 대출 연결만 묻는다. */}
+              {!isActual && isOutflow && flowPick !== 'loan' && (
                 <div className="mod-row">
                   <span className="mod-lbl">사용처</span>
                   <div className="mod-chips">
@@ -451,14 +414,10 @@ export function EntryModal({
                     >
                       생활비에서 사용
                     </button>
-                    <button
-                      className={'chip' + (moneyUse === 'debt' ? ' on' : '')}
-                      onClick={() => setUse('debt')}
-                      disabled={debts.length === 0}
-                      title={debts.length === 0 ? '등록한 대출이 없습니다.' : undefined}
-                    >
-                      대출 상환
-                    </button>
+                    {/* 예전에 '대출 상환' 사용처로 적은 예정. 지금은 흐름의 대출이 그 자리다. */}
+                    {moneyUse === 'debt' && (
+                      <span className="chip on" title="예전 방식의 대출 상환입니다. 흐름에서 대출을 고르면 옮겨집니다.">대출 상환 (예전)</span>
+                    )}
                   </div>
                 </div>
               )}
@@ -490,14 +449,15 @@ export function EntryModal({
                 </p>
               )}
 
-              {!isActual && isOutflow && moneyUse === 'debt' && (
+              {!isActual && isOutflow && debts.length > 0 && (flowPick === 'loan' || moneyUse === 'debt') && (
                 <div className="mod-row">
-                  <label className="mod-lbl" htmlFor="debt">대출</label>
+                  <label className="mod-lbl" htmlFor="debt">대출 연결</label>
                   <select
                     id="debt" className="mod-input"
                     value={form.money?.debtId ?? ''}
                     onChange={(e) => setMoney({ debtId: e.target.value || null })}
                   >
+                    <option value="">연결 안 함</option>
                     {debts.map((d) => (
                       <option key={d.id} value={d.id}>{d.name || '(이름 없음)'}</option>
                     ))}
@@ -546,7 +506,6 @@ export function EntryModal({
                   accounts={accounts}
                   pockets={pockets}
                   debts={debts}
-                  methods={methods}
                 />
               )}
 

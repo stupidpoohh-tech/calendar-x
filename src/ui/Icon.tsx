@@ -100,6 +100,11 @@ export const Icon = {
       <polyline points="17 8 12 3 7 8" /><line x1="12" y1="3" x2="12" y2="15" />
     </svg>
   ),
+  Pencil: (p: Props) => (
+    <svg {...base(p)}>
+      <path d="M12 20h9" /><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z" />
+    </svg>
+  ),
   Trash: (p: Props) => (
     <svg {...base(p)}>
       <polyline points="3 6 5 6 21 6" />

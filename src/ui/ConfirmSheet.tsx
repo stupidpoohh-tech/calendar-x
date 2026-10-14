@@ -10,12 +10,14 @@
 import { useEffect, useRef, useState } from 'react';
 import { budgetCovers, pocketEligible } from '../domain/budget';
 import { confirmOccurrence, needsTypeChoice, pocketChoiceFor, type ConfirmRefusal } from '../domain/confirm';
-import { confirmedEntryId } from '../domain/ledger';
+import { confirmedEntryId, moneyFlowOf } from '../domain/ledger';
 import { fmtDayShort } from '../domain/date';
 import { formatAmount, minorToInput, parseAmountToMinor } from '../domain/money';
 import type { Account, Budget, Category, Debt, Entry, MoneyFields } from '../domain/types';
 import { Icon } from './Icon';
+import { FlowChips } from './FlowChips';
 import { LedgerFields } from './LedgerFields';
+import { flowLabel, flowPickPatch, type FlowPick } from './ledgerFlows';
 import { PICKER } from './pickerField';
 import { isComposingEnter } from './ime';
 
@@ -28,7 +30,6 @@ interface Props {
   accounts: readonly Account[];
   budgets: readonly Budget[];
   debts: readonly Debt[];
-  methods: readonly string[];
   /** `reflected` — "이 잔고에 이미 반영됨" 을 고른 값. 손대지 않았으면 undefined. */
   onSave: (actual: Entry, opts?: { reflected?: boolean }) => void;
   onClose: () => void;
@@ -49,7 +50,7 @@ const REASONS: Record<ConfirmRefusal, string> = {
 
 export function ConfirmSheet({
   plan, occurrenceDate, categories, categoriesReady, onSeedCategories,
-  accounts, budgets, debts, methods, onSave, onClose,
+  accounts, budgets, debts, onSave, onClose,
 }: Props) {
   const legacy = needsTypeChoice(plan);
   const planMoney = plan.money!;
@@ -91,16 +92,13 @@ export function ConfirmSheet({
     setMoney((m) => ({ ...m, ...p }));
   };
 
-  const pickType = (t: 'income' | 'expense') => {
+  /** 흐름 — 수입 · 지출 · 대출. 예전 종류는 여기서 고르기 전에는 확정하지 않는다. */
+  const pickFlow = (pick: FlowPick) => {
     setTypeChosen(true);
+    const p = flowPickPatch(pick);
     setMoney((m) => {
-      const keepCat = categories.find((c) => c.id === m.categoryId)?.kind === t;
-      const next: MoneyFields = {
-        ...m, type: t,
-        categoryId: keepCat ? m.categoryId : null,
-        ...(t === 'income' ? { budgetId: null, debtId: null } : {}),
-      };
-      return next;
+      const keepCat = pick !== 'loan' && categories.find((c) => c.id === m.categoryId)?.kind === p.type;
+      return { ...m, ...p, categoryId: keepCat ? m.categoryId : null };
     });
   };
 
@@ -171,28 +169,16 @@ export function ConfirmSheet({
           )}
 
           {legacy && (
-            <>
-              <p className="mod-hint warn" role="note">
-                예전 유형({planMoney.type === 'repay' ? '갚을 거' : '우선 상환'})으로 적힌 예정입니다.
-                실제로 어떤 거래였는지 골라 주세요 — 추정하지 않습니다.
-              </p>
-              <div className="mod-row">
-                <span className="mod-lbl">흐름</span>
-                <div className="mod-chips" role="radiogroup" aria-label="수입 지출">
-                  {(['expense', 'income'] as const).map((t) => (
-                    <button
-                      key={t} type="button" role="radio"
-                      className={'chip' + (typeChosen && type === t ? ' on' : '')}
-                      aria-checked={typeChosen && type === t}
-                      onClick={() => pickType(t)}
-                    >
-                      {t === 'income' ? '수입' : '지출'}
-                    </button>
-                  ))}
-                </div>
-              </div>
-            </>
+            <p className="mod-hint warn" role="note">
+              예전 유형({planMoney.type === 'repay' ? '갚을 거' : '우선 상환'})으로 적힌 예정입니다.
+              실제로 어떤 거래였는지 골라 주세요 — 추정하지 않습니다.
+            </p>
           )}
+          <FlowChips
+            money={money} chosen={typeChosen}
+            legacyLabel={flowLabel(moneyFlowOf(money))}
+            onPick={pickFlow}
+          />
 
           <LedgerFields
             entryId={confirmedEntryId(plan.id, occurrenceDate)}
@@ -206,8 +192,6 @@ export function ConfirmSheet({
             accounts={accounts}
             pockets={pockets}
             debts={debts}
-            methods={methods}
-            requireFlow={legacy}
             reflected={reflected}
             onReflected={setReflected}
           />

@@ -70,7 +70,26 @@
   background: none; border: 0; font: inherit; font-size: 0.8125rem; color: var(--ink); cursor: pointer;
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
+button.led-cat-n { display: flex; align-items: center; gap: 6px; }
+button.led-cat-n svg { flex: none; color: var(--ink-4); }
 button.led-cat-n:hover { background: var(--accent-soft); }
+button.led-cat-n:hover svg { color: var(--accent); }
+.led-cat-tag { flex: none; font-size: 0.6875rem; color: var(--ink-3); background: var(--bg-soft); border-radius: 999px; padding: 1px 7px; }
+/* 카테고리 목록은 한 줄로 접어 둔다. 펼치면 그 자리에서 고친다. */
+.led-catfold { border: 1px solid var(--line); border-radius: var(--radius-sm); padding: 0 10px; }
+.led-catfold > summary {
+  list-style: none; cursor: pointer; display: flex; align-items: center; gap: 8px; min-height: 44px;
+  font-size: 0.875rem; color: var(--ink);
+}
+.led-catfold > summary::-webkit-details-marker { display: none; }
+.led-catfold > summary::before { content: '›'; color: var(--ink-3); transition: transform .15s; }
+.led-catfold[open] > summary::before { transform: rotate(90deg); }
+.led-catfold-t { font-weight: 600; }
+.led-catfold-n { color: var(--ink-3); font-size: 0.75rem; }
+.led-catfold-e { margin-left: auto; color: var(--accent); font-size: 0.75rem; }
+.led-catfold[open] > summary .led-catfold-e { display: none; }
+.led-catfold[open] { padding-bottom: 10px; }
+.led-catfold > .set-row-inline { margin-bottom: 6px; }
 .led-cat.archived .led-cat-n { color: var(--ink-3); cursor: default; }
 .led-cat-a {
   flex: none; padding: 4px 8px; background: none; border: 1px solid var(--line); border-radius: var(--radius-sm);
@@ -129,7 +148,11 @@ button.led-cat-n:hover { background: var(--accent-soft); }
 
 /* 보기의 기간 도구 + 주요 행동 한 줄. 좁으면 행동이 아래로 내려간다. */
 .led-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 8px; flex-wrap: wrap; min-width: 0; }
-.led-add { display: inline-flex; align-items: center; gap: 4px; flex: none; }
+/* 좁은 화면의 추가(+) · 더보기(···)는 기간 도구와 한 줄에 선다 — 기간 이름이 길면 이름 쪽이 안에서 줄을 바꾼다. */
+.led-toolbar:has(> .mobile-actions) { flex-wrap: nowrap; }
+.led-toolbar:has(> .mobile-actions) > .led-period { flex: 1 1 auto; min-width: 0; flex-wrap: nowrap; }
+.led-toolbar:has(> .mobile-actions) .led-period-t { flex: 0 1 auto; row-gap: 2px; }
+.led-toolbar > .mobile-actions { flex: none; margin-left: auto; }
 .led-scope { margin-top: -4px; }
 .led-sec { display: flex; flex-direction: column; gap: 8px; padding-top: 12px; border-top: 1px solid var(--line); }
 .led-sec-h { margin: 0; font-size: 0.875rem; font-weight: 700; color: var(--ink); }
@@ -196,6 +219,8 @@ button.led-cat-n:hover { background: var(--accent-soft); }
 .led-row-t { font-size: 0.8125rem; color: var(--ink); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .led-row-s { font-size: 0.6875rem; color: var(--ink-4); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .led-row-a { flex: none; font-size: 0.875rem; color: var(--ink-2); }
+.led-row-a.plus, .led-day-h .plus { color: var(--good); }
+.led-row-a.minus, .led-day-h .minus { color: var(--bad); }
 
 .led-budgets { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; }
 .led-bl { border-bottom: 1px solid var(--line); }

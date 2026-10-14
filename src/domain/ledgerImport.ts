@@ -29,7 +29,7 @@
  * - 잔고를 적은 날 당일이거나 그 뒤의 행은 한도를 움직인다. 미리 건수를 알린다.
  */
 import { isValidDate, normalizeDate, pad2 } from './date';
-import { findCategoryByName } from './category';
+import { findCategoryByName, LOAN_CATEGORY_NAMES } from './category';
 import { newEntry, newMoney } from './entry';
 import { isActual } from './ledger';
 import type { Account, Category, DateISO, Entry, MoneyFlow } from './types';
@@ -47,8 +47,8 @@ const COLUMNS = {
 type ColumnKey = keyof typeof COLUMNS;
 const REQUIRED: readonly ColumnKey[] = ['date', 'type', 'amount'];
 
-/** 이 카테고리 이름의 지출은 대출 원금으로 센다. */
-export const LOAN_PRINCIPAL_CATEGORY_NAMES: readonly string[] = ['대출'];
+/** 이 카테고리 이름의 지출은 대출 원금으로 센다. 입력 화면의 '대출' 흐름과 같은 이름이다. */
+export const LOAN_PRINCIPAL_CATEGORY_NAMES: readonly string[] = LOAN_CATEGORY_NAMES;
 
 /** 엑셀 날짜 일련번호의 기준(1900 체계, 1900-02-29 버그 포함). */
 const EXCEL_EPOCH_UTC = Date.UTC(1899, 11, 30);

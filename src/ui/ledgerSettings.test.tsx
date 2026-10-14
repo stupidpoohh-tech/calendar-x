@@ -95,4 +95,20 @@ describe('카테고리', () => {
     fireEvent.click(screen.getByRole('button', { name: '기본 카테고리 만들기' }));
     expect(p.onSeedCategories).toHaveBeenCalled();
   });
+
+  it('목록은 한 줄로 접혀 있다 — 이름 · 개수만, 펼치면 그 자리에서 고친다', () => {
+    mount(list);
+    const fold = screen.getByText('카테고리', { selector: '.led-catfold-t' }).closest('details')!;
+    expect(fold.open).toBe(false);
+    expect(fold.querySelector('summary')!.textContent).toContain('지출 2 · 수입 1');
+    fireEvent.click(fold.querySelector('summary')!);
+    expect(fold.open).toBe(true);
+  });
+
+  it("'대출' 카테고리에는 입력에서 빠졌다는 표시가 붙는다 — 지우지 않는다", () => {
+    const p = mount([...list, newCategory('expense', '대출', 3, 'loan')]);
+    const loan = screen.getByRole('button', { name: '대출 이름 바꾸기' });
+    expect(loan.textContent).toContain("입력에서 빠짐 · 흐름 '대출'");
+    expect(p.onSaveCategory).not.toHaveBeenCalled();
+  });
 });

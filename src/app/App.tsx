@@ -828,18 +828,6 @@ function Workspace({ uid, user, onSignOut }: WorkspaceProps) {
     commit({ kind: 'ledgerBatch', label: '생활비 삭제', summary: `${b.name} · 연결 해제 ${n(linked.length)}건`, payload });
   }, [isAnon, uid, promptLogin, pocketLinks, dialog, commit]);
 
-  /** 전에 적은 결제수단. 최근 것부터 열 개. */
-  const methods = useMemo(() => {
-    const seen = new Map<string, string>();
-    for (const e of [...store.entries, ...store.tideEntries]) {
-      const m = e.money?.method?.trim();
-      if (!m || !isActual(e)) continue;
-      const prev = seen.get(m);
-      if (!prev || e.updatedAt > prev) seen.set(m, e.updatedAt);
-    }
-    return [...seen.entries()].sort((a, b) => b[1].localeCompare(a[1])).slice(0, 10).map(([m]) => m);
-  }, [store.entries, store.tideEntries]);
-
   /*
     ── 가계부 상세(내역 · 예산 · 월별 · 통계) ──────────────────────────
 
@@ -1659,6 +1647,31 @@ function Workspace({ uid, user, onSignOut }: WorkspaceProps) {
     />
   );
 
+  const quickActions = (
+        <div className="mobile-actions">
+          {!sharedOpen && <button className="add-btn" aria-label={ledgerOn ? '거래 추가' : '일정 추가'} onClick={() => openCreate()}><Icon.Plus size={16} /></button>}
+          <details className="mobile-more" onKeyDown={(e) => {
+            if (e.key === 'Escape') { e.currentTarget.open = false; e.currentTarget.querySelector('summary')?.focus(); }
+          }}>
+            <summary aria-label="더보기">···</summary>
+            <div className="mobile-more-panel" onClick={(e) => {
+              if ((e.target as HTMLElement).closest('button')) e.currentTarget.closest('details')?.removeAttribute('open');
+            }}>
+              {!sharedOpen && !ledgerOn && <>
+                <button onClick={() => set('view', 'calendar')} aria-pressed={view === 'calendar'}><Icon.Calendar size={16} />월간 보기</button>
+                <button onClick={() => set('view', 'list')} aria-pressed={view === 'list'}><Icon.List size={16} />리스트 보기</button>
+              </>}
+              {!sharedOpen && filterUsable && (
+                <button onClick={() => setShowFilters((x) => !x)} aria-expanded={showFilters}><Icon.Filter size={16} />필터{hasActiveFilter(filters) ? ' · 적용 중' : ''}</button>
+              )}
+              {isAnon
+                ? <button onClick={() => setShowAuth(true)}>로그인 · 가입</button>
+                : <button onClick={() => setShowSettings(true)}><Icon.Settings size={16} />설정</button>}
+            </div>
+          </details>
+        </div>
+  );
+
   return (
     <div className="app" data-lens={lens} style={{ ['--lens' as string]: `var(${lensDef.accentVar})` }}>
       <header className="topbar" data-space={sharedOpen ? 'shared' : 'me'}>
@@ -1748,28 +1761,11 @@ function Workspace({ uid, user, onSignOut }: WorkspaceProps) {
           </nav>
         )}
 
-        <div className="mobile-actions">
-          {!sharedOpen && <button className="add-btn" aria-label="일정 추가" onClick={() => openCreate()}><Icon.Plus size={16} /></button>}
-          <details className="mobile-more" onKeyDown={(e) => {
-            if (e.key === 'Escape') { e.currentTarget.open = false; e.currentTarget.querySelector('summary')?.focus(); }
-          }}>
-            <summary aria-label="더보기">···</summary>
-            <div className="mobile-more-panel" onClick={(e) => {
-              if ((e.target as HTMLElement).closest('button')) e.currentTarget.closest('details')?.removeAttribute('open');
-            }}>
-              {!sharedOpen && !ledgerOn && <>
-                <button onClick={() => set('view', 'calendar')} aria-pressed={view === 'calendar'}><Icon.Calendar size={16} />월간 보기</button>
-                <button onClick={() => set('view', 'list')} aria-pressed={view === 'list'}><Icon.List size={16} />리스트 보기</button>
-              </>}
-              {!sharedOpen && filterUsable && (
-                <button onClick={() => setShowFilters((x) => !x)} aria-expanded={showFilters}><Icon.Filter size={16} />필터{hasActiveFilter(filters) ? ' · 적용 중' : ''}</button>
-              )}
-              {isAnon
-                ? <button onClick={() => setShowAuth(true)}>로그인 · 가입</button>
-                : <button onClick={() => setShowSettings(true)}><Icon.Settings size={16} />설정</button>}
-            </div>
-          </details>
-        </div>
+        {/*
+          좁은 화면의 추가(+) · 더보기(···). 가계부에서는 머리에 두지 않고 보기의 기간 도구 옆으로
+          내려간다 — 가계부는 월 이동을 머리에서 숨기므로, 여기 두면 이 둘만으로 한 줄을 차지했다.
+        */}
+        {!ledgerOn && quickActions}
         <div className="header-right">
           {!sharedOpen && (
         <div className="tool-r">
@@ -1988,7 +1984,7 @@ function Workspace({ uid, user, onSignOut }: WorkspaceProps) {
             categoriesReady={categoriesReady}
             onSeedCategories={seedCategories}
             onEntryClick={openLedgerEntry}
-            onAdd={(iso) => openCreate({ startDate: iso })}
+            actions={quickActions}
             onSaveCategoryBudget={saveCategoryBudget}
             ledgerNotes={store.ledgerNotes}
             notesFeed={store.ledgerNotesFeed}
@@ -2012,10 +2008,8 @@ function Workspace({ uid, user, onSignOut }: WorkspaceProps) {
                     </button>
                     <button className="today-btn" onClick={() => setCursor(new Date())}>오늘</button>
                   </div>
-                  {/* 기존 거래 창 그대로 — 내역 보기로 가지 않고 여기서 바로 적는다. */}
-                  <button className="btn primary led-add" onClick={() => openCreate({ startDate: today })}>
-                    <Icon.Plus size={14} />거래 추가
-                  </button>
+                  {/* 추가(+) · 더보기(···). 머리의 같은 단추가 가계부에서는 여기로 내려온다. */}
+                  {quickActions}
                 </div>
           <TideBar
             todayISO={today}
@@ -2213,7 +2207,6 @@ function Workspace({ uid, user, onSignOut }: WorkspaceProps) {
         categoriesReady={categoriesReady}
         onSeedCategories={seedCategories}
         accounts={store.accounts}
-        methods={methods}
         occurrenceDate={modal.occurrence ?? null}
         onConfirm={startConfirm}
         onUnconfirm={(a) => void unconfirm(a)}
@@ -2232,7 +2225,6 @@ function Workspace({ uid, user, onSignOut }: WorkspaceProps) {
           accounts={store.accounts}
           budgets={store.budgets}
           debts={store.debts}
-          methods={methods}
           onSave={(actual, opts) => {
             setConfirming(null);
             persist(actual, reflectChanges(actual, opts?.reflected));

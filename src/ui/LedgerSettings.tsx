@@ -11,9 +11,14 @@
  *
  * 지우면 그 카테고리의 지난 거래가 미분류로 떨어진다. 보관만 있다 — 새 입력에서 빠지고
  * 지난 기록에는 이름 그대로 남는다. 보관한 것은 다시 꺼낼 수 있다.
+ *
+ * ── 목록은 접어 둔다 ────────────────────────────────────────────
+ *
+ * 카테고리는 스무 개가 넘게 쌓여 설정 창을 통째로 덮었다. 그래서 한 줄(이름 · 개수)로 접어 두고,
+ * 펼치면 그 자리에서 이름 바꾸기 · 순서 · 보관 · 추가를 한다.
  */
 import { useState } from 'react';
-import { findCategoryByName, moveCategory, newCategory, sortCategories } from '../domain/category';
+import { findCategoryByName, isLoanCategory, moveCategory, newCategory, sortCategories } from '../domain/category';
 import { uid as newId } from '../domain/entry';
 import { periodOf, periodRange } from '../domain/period';
 import type { Category } from '../domain/types';
@@ -47,6 +52,7 @@ export function LedgerSettings({
   const mine = sortCategories(categories.filter((c) => c.kind === kind));
   const active = mine.filter((c) => !c.archived);
   const archived = mine.filter((c) => c.archived);
+  const count = (k: Category['kind']) => categories.filter((c) => c.kind === k && !c.archived).length;
 
   const add = () => {
     const name = draft.trim();
@@ -104,8 +110,14 @@ export function LedgerSettings({
         {' '}바꾸면 지난 기간의 결산도 새 시작일로 다시 묶입니다. 거래와 기간별 예산은 그대로 남습니다.
       </p>
 
+      <details className="led-catfold">
+        <summary>
+          <span className="led-catfold-t">카테고리</span>
+          <span className="led-catfold-n num">지출 {count('expense')} · 수입 {count('income')}</span>
+          <span className="led-catfold-e">편집</span>
+        </summary>
       <div className="set-row-inline">
-        <span>카테고리</span>
+        <span className="set-note">이름을 누르면 바꿉니다.</span>
         <div className="seg" role="tablist" aria-label="카테고리 흐름">
           {(['expense', 'income'] as const).map((k) => (
             <button
@@ -142,6 +154,9 @@ export function LedgerSettings({
             ) : (
               <button className="led-cat-n" onClick={() => setEditing({ id: c.id, name: c.name })} aria-label={`${c.name} 이름 바꾸기`}>
                 {c.name}
+                {/* 대출은 흐름(수입 · 지출 · 대출)으로 옮겼다. 이 카테고리는 지난 거래가 가리키므로 남아 있다. */}
+                {isLoanCategory(c) && <span className="led-cat-tag">입력에서 빠짐 · 흐름 '대출'</span>}
+                <Icon.Pencil size={12} />
               </button>
             )}
             <button className="ico-btn sm" disabled={i === 0} onClick={() => move(c.id, -1)} aria-label={`${c.name} 위로`}>
@@ -198,6 +213,7 @@ export function LedgerSettings({
       <p className="set-note">
         카테고리는 지우지 않고 보관합니다. 보관하면 새 입력에서만 빠지고, 지난 거래와 통계에는 그대로 남습니다.
       </p>
+      </details>
     </div>
   );
 }

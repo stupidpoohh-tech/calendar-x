@@ -1,23 +1,62 @@
-/** 거래 유형의 이름과 설명. 입력 칸과 내역 화면이 같은 말을 쓴다. */
-import { OUTFLOW_ONLY_FLOWS } from '../domain/ledger';
-import type { MoneyFlow } from '../domain/types';
+/**
+ * 흐름 — 수입 · 지출 · 대출 세 가지.
+ *
+ * 예전에는 흐름(수입 · 지출) 아래에 거래 유형(일반 · 카드 사용 · 카드 대금 · 대출 원금 · 대출 이자 ·
+ * 이체)과 결제수단 칸이 따로 있었고, '대출' 은 지출 카테고리 가운데 하나였다. 실제로 쓰는 구분은
+ * 들어온 돈 · 나간 돈 · 빚 갚은 돈 셋이라, 대출을 카테고리에서 꺼내 흐름으로 올리고 나머지 칸은
+ * 입력에서 뺐다.
+ *
+ * 대출은 저장할 때 `type: 'expense'` + `flow: 'loanPrincipal'` 이다 — 이관이 카테고리 '대출' 을
+ * 대출 원금으로 세던 것과 같은 뜻이고, 계산(`cashSignOf` · `ledgerClassOf`)은 그대로다.
+ *
+ * **예전 유형은 지우지 않는다.** 카드 사용 · 카드 대금 · 대출 이자 · 이체로 저장된 거래는 지금도 그
+ * 뜻으로 계산된다. 편집 화면은 그 유형을 '(예전)' 칩으로 보여 주고, 세 흐름 가운데 하나를 눌렀을
+ * 때만 바꾼다 — 다른 칸을 고치려다 유형이 조용히 바뀌지 않게.
+ */
+import type { MoneyFields, MoneyFlow } from '../domain/types';
 
-/** 흐름별로 고를 수 있는 거래 유형. 카드 · 대출은 나가는 돈에만 뜻이 있다. */
-export const FLOW_OPTIONS: readonly { id: MoneyFlow; label: string; hint: string }[] = [
-  { id: 'normal', label: '일반', hint: '현금 · 체크카드 · 계좌이체로 바로 나가거나 들어온 돈' },
-  { id: 'cardSpend', label: '카드 사용', hint: '신용카드로 쓴 돈. 소비로 세고, 현금은 카드 대금 날에 나갑니다' },
-  { id: 'cardPayment', label: '카드 대금', hint: '카드값 결제. 쓴 날 이미 소비로 셌으므로 소비에 다시 넣지 않습니다' },
-  { id: 'loanPrincipal', label: '대출 원금', hint: '빚이 줄어드는 돈. 현금은 나가지만 소비가 아닙니다' },
-  { id: 'loanInterest', label: '대출 이자', hint: '금융비용. 소비와 따로 집계합니다' },
-  { id: 'transfer', label: '이체 · 저축', hint: '내 계좌 사이의 이동. 수입도 소비도 아닙니다' },
-];
+/** 예전 유형의 이름. 내역의 작은 글씨 · 편집 화면의 '(예전)' 칩이 같은 말을 쓴다. */
+export const FLOW_LABEL: Record<MoneyFlow, string> = {
+  normal: '일반',
+  cardSpend: '카드 사용',
+  cardPayment: '카드 대금',
+  loanPrincipal: '대출',
+  loanInterest: '대출 이자',
+  transfer: '이체 · 저축',
+};
 
 export function flowLabel(flow: MoneyFlow): string {
-  return FLOW_OPTIONS.find((f) => f.id === flow)?.label ?? '일반';
+  return FLOW_LABEL[flow] ?? '일반';
 }
 
-export function flowsFor(type: 'income' | 'expense'): typeof FLOW_OPTIONS {
-  return type === 'income'
-    ? FLOW_OPTIONS.filter((f) => !(OUTFLOW_ONLY_FLOWS as readonly MoneyFlow[]).includes(f.id))
-    : FLOW_OPTIONS;
+export type FlowPick = 'income' | 'expense' | 'loan';
+
+export const FLOW_PICKS: readonly { id: FlowPick; label: string }[] = [
+  { id: 'income', label: '수입' },
+  { id: 'expense', label: '지출' },
+  { id: 'loan', label: '대출' },
+];
+
+/** 지금 값이 세 흐름 가운데 무엇인가. 예전 종류 · 예전 유형이면 null. */
+export function flowPickOf(m: Pick<MoneyFields, 'type' | 'flow'> | null | undefined): FlowPick | null {
+  if (!m) return null;
+  const flow = m.flow ?? 'normal';
+  if (m.type === 'income') return flow === 'normal' ? 'income' : null;
+  if (m.type !== 'expense') return null;
+  if (flow === 'normal') return 'expense';
+  if (flow === 'loanPrincipal') return 'loan';
+  return null;
+}
+
+/**
+ * 흐름을 고른 결과. 들어오는 돈은 생활비에서도 대출에서도 나가지 않고, 대출은 생활비에 걸지
+ * 않는다(사용처는 하나다). 대출에는 카테고리를 붙이지 않는다 — 대출이 카테고리였던 자리를
+ * 흐름이 대신한다. 카테고리를 흐름마다 지킬지는 부르는 쪽이 정한다(카테고리 목록을 안다).
+ */
+export function flowPickPatch(pick: FlowPick): Partial<MoneyFields> {
+  switch (pick) {
+    case 'income': return { type: 'income', flow: 'normal', budgetId: null, debtId: null, outsidePocket: false };
+    case 'expense': return { type: 'expense', flow: 'normal' };
+    case 'loan': return { type: 'expense', flow: 'loanPrincipal', budgetId: null, outsidePocket: false, categoryId: null };
+  }
 }

@@ -1,20 +1,18 @@
 /**
- * 실제 거래의 칸들 — 카테고리 · 결제수단 · 계좌 · 생활비 · 거래 유형.
+ * 실제 거래의 칸들 — 카테고리 · 계좌 · 잔고 반영 · 생활비 · 대출 연결.
  *
  * 새 거래 입력(`EntryModal`)과 예정 확정(`ConfirmSheet`)이 같은 조각을 쓴다. 두 자리가
  * 따로 그리면 한쪽에만 계좌 칸이 생기는 식으로 서서히 달라진다.
  *
  * ── 자주 쓰는 입력은 짧게 ─────────────────────────────────────
  *
- * 일반 소비는 금액 · 카테고리만 고르면 저장된다. 거래 유형(카드 · 대출 · 이체)과 대출
- * 연결은 "상세" 를 눌러야 펼쳐진다 — 점심 한 끼를 적을 때마다 유형을 고르게 하면 안
- * 적게 된다. 고른 값이 일반이 아니면 접혀 있어도 줄 하나로 보인다.
+ * 흐름(수입 · 지출 · 대출)은 부르는 쪽이 `FlowChips` 로 고른다. 여기에는 결제수단 칸도 거래
+ * 유형 칸도 없다 — 일반 소비는 금액 · 카테고리만 고르면 저장된다. 이미 저장된 결제수단 · 유형은
+ * 지우지 않고 그대로 둔다(`ledgerFlows.ts`).
  */
-import { useState } from 'react';
-import { pickableCategories } from '../domain/category';
-import { balanceInclusion, reflectChoiceFor } from '../domain/ledger';
+import { isLoanCategory, pickableCategories } from '../domain/category';
+import { balanceInclusion, moneyFlowOf, reflectChoiceFor } from '../domain/ledger';
 import type { Account, Budget, Category, DateISO, Debt, MoneyFields } from '../domain/types';
-import { FLOW_OPTIONS, flowsFor } from './ledgerFlows';
 
 interface Props {
   /** 문서 id. 잔고 반영 판정(같은 날 고른 목록)에 쓴다. */
@@ -31,10 +29,6 @@ interface Props {
   /** 그 날짜를 품는 생활비 주머니. 부르는 쪽이 고른다. */
   pockets: readonly Budget[];
   debts: readonly Debt[];
-  /** 전에 적은 결제수단. 자주 쓰는 것을 다시 치지 않게. */
-  methods: readonly string[];
-  /** 거래 유형을 반드시 고르게 할 때(legacy 확정). 펼친 채로 시작하고 '일반' 을 미리 고르지 않는다. */
-  requireFlow?: boolean;
   /** 예정 항목에는 카테고리만 붙인다 — 확정할 때 기본값이 된다. */
   only?: 'category';
   /**
@@ -47,12 +41,14 @@ interface Props {
 
 export function LedgerFields({
   entryId, type, date, money, onMoney, categories, categoriesReady, onSeedCategories,
-  accounts, pockets, debts, methods, requireFlow = false, only, reflected, onReflected,
+  accounts, pockets, debts, only, reflected, onReflected,
 }: Props) {
-  const flow = money.flow ?? 'normal';
-  const [advanced, setAdvanced] = useState(requireFlow || flow !== 'normal' || !!money.debtId);
+  const flow = moneyFlowOf(money);
+  const isLoan = flow === 'loanPrincipal' || flow === 'loanInterest';
   const pickable = pickableCategories(categories, type);
   const picked = money.categoryId ? categories.find((c) => c.id === money.categoryId) ?? null : null;
+  /** 이미 걸려 있지만 지금 고르는 자리에는 없는 카테고리(보관 · 흐름으로 옮긴 '대출'). */
+  const pickedHidden = picked !== null && !pickable.some((c) => c.id === picked.id);
   const isOutflow = type === 'expense';
   // 주머니는 일반 지출에만 건다(`pocketEligible`). 대출 · 이체 · 카드 대금 · 카드 사용은 아니다.
   const canPocket = isOutflow && flow === 'normal' && !money.debtId && pockets.length > 0;
@@ -66,7 +62,8 @@ export function LedgerFields({
 
   return (
     <>
-      <div className="mod-row">
+      {/* 대출은 카테고리가 아니라 흐름이다. 대출에는 카테고리 칸이 없다 — 이미 붙은 값은 그대로 둔다. */}
+      {!isLoan && <div className="mod-row">
         <span className="mod-lbl">카테고리</span>
         <div className="mod-chips">
           {pickable.map((c) => (
@@ -79,9 +76,11 @@ export function LedgerFields({
               {c.name}
             </button>
           ))}
-          {/* 보관한 카테고리도 이미 걸려 있으면 보여 준다. 안 보이면 무엇으로 집계되는지 모른다. */}
-          {picked && picked.archived && (
-            <span className="chip on" title="보관한 카테고리입니다">{picked.name} (보관)</span>
+          {/* 보관한 카테고리 · 흐름으로 옮긴 '대출' 도 이미 걸려 있으면 보여 준다. 안 보이면 무엇으로 집계되는지 모른다. */}
+          {picked && pickedHidden && (
+            <span className="chip on" title={picked.archived ? '보관한 카테고리입니다' : '지금은 고르는 자리에 없는 카테고리입니다'}>
+              {picked.name}{picked.archived ? ' (보관)' : ''}
+            </span>
           )}
           {picked === null && money.categoryId && (
             <span className="chip on" title="목록에 없는 카테고리입니다">알 수 없는 카테고리</span>
@@ -95,21 +94,14 @@ export function LedgerFields({
             <span className="mod-hint">카테고리를 불러오는 중입니다.</span>
           )}
         </div>
-      </div>
+      </div>}
+      {!isLoan && picked && isLoanCategory(picked) && (
+        <p className="mod-hint">
+          예전에 '대출' 카테고리로 적은 거래입니다. 지금은 지출로 셉니다 — 빚을 갚은 돈이면 흐름에서 대출을 고르세요.
+        </p>
+      )}
 
       {only !== 'category' && <>
-      <div className="mod-row">
-        <label className="mod-lbl" htmlFor={`method-${entryId}`}>결제수단</label>
-        <input
-          id={`method-${entryId}`} className="mod-input" placeholder="선택 (예: 신한카드 · 현금)"
-          list={`methods-${entryId}`} maxLength={100}
-          value={money.method ?? ''}
-          onChange={(e) => onMoney({ method: e.target.value.trim() ? e.target.value : null })}
-        />
-        <datalist id={`methods-${entryId}`}>
-          {methods.map((m) => <option key={m} value={m} />)}
-        </datalist>
-      </div>
 
       {accounts.length > 1 && (
         <div className="mod-row">
@@ -194,45 +186,19 @@ export function LedgerFields({
         </p>
       )}
 
-      {!advanced && flow === 'normal' && !money.debtId && (
-        <button type="button" className="mod-more" onClick={() => setAdvanced(true)}>
-          상세 — 거래 유형 · 대출
-        </button>
-      )}
-      {(advanced || flow !== 'normal' || money.debtId) && (
-        <>
-          <div className="mod-row">
-            <span className="mod-lbl">유형</span>
-            <div className="mod-chips" role="radiogroup" aria-label="거래 유형">
-              {flowsFor(type).map((f) => (
-                <button
-                  key={f.id} type="button" role="radio"
-                  className={'chip' + (money.flow === f.id ? ' on' : '')}
-                  aria-checked={money.flow === f.id}
-                  title={f.hint}
-                  // 일반 지출이 아니면 주머니에 걸지 않는다 — 이 편집에서 고른 주머니를 푼다.
-                  onClick={() => onMoney(f.id === 'normal' ? { flow: f.id } : { flow: f.id, budgetId: null })}
-                >
-                  {f.label}
-                </button>
-              ))}
-            </div>
-          </div>
-          {money.flow && <p className="mod-hint">{FLOW_OPTIONS.find((f) => f.id === money.flow)?.hint}</p>}
-          {isOutflow && debts.length > 0 && (
-            <div className="mod-row">
-              <label className="mod-lbl" htmlFor={`debt-${entryId}`}>대출</label>
-              <select
-                id={`debt-${entryId}`} className="mod-input"
-                value={money.debtId ?? ''}
-                onChange={(e) => onMoney(e.target.value ? { debtId: e.target.value, budgetId: null } : { debtId: null })}
-              >
-                <option value="">연결 안 함</option>
-                {debts.map((d) => <option key={d.id} value={d.id}>{d.name || '(이름 없음)'}</option>)}
-              </select>
-            </div>
-          )}
-        </>
+      {/* 대출 연결 — 흐름이 대출일 때(또는 이미 연결돼 있을 때)만. 연결하지 않아도 대출로 센다. */}
+      {isOutflow && debts.length > 0 && (isLoan || money.debtId) && (
+        <div className="mod-row">
+          <label className="mod-lbl" htmlFor={`debt-${entryId}`}>대출 연결</label>
+          <select
+            id={`debt-${entryId}`} className="mod-input"
+            value={money.debtId ?? ''}
+            onChange={(e) => onMoney(e.target.value ? { debtId: e.target.value, budgetId: null } : { debtId: null })}
+          >
+            <option value="">연결 안 함</option>
+            {debts.map((d) => <option key={d.id} value={d.id}>{d.name || '(이름 없음)'}</option>)}
+          </select>
+        </div>
       )}
       </>}
     </>

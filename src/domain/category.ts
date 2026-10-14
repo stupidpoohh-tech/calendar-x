@@ -62,9 +62,21 @@ export function sortCategories(list: readonly Category[]): Category[] {
   return [...list].sort((a, b) => a.order - b.order || a.name.localeCompare(b.name, 'ko'));
 }
 
-/** 새 입력에서 고를 수 있는 것 — 그 흐름의, 보관하지 않은 것. */
+/**
+ * 대출 원금으로 세는 카테고리 이름. 이관이 이 이름의 지출을 대출 원금으로 넣는다.
+ *
+ * 대출은 이제 카테고리가 아니라 흐름(수입 · 지출 · 대출)이다. 그래서 이 이름의 지출 카테고리는
+ * 새 입력에서 고르는 자리에서 빠진다 — 문서는 지우지도 보관하지도 않는다(지난 거래가 가리킨다).
+ */
+export const LOAN_CATEGORY_NAMES: readonly string[] = ['대출'];
+
+export function isLoanCategory(c: Pick<Category, 'kind' | 'name'>): boolean {
+  return c.kind === 'expense' && LOAN_CATEGORY_NAMES.includes(c.name.trim());
+}
+
+/** 새 입력에서 고를 수 있는 것 — 그 흐름의, 보관하지 않은 것. 흐름으로 옮긴 '대출' 은 뺀다. */
 export function pickableCategories(list: readonly Category[], kind: Category['kind']): Category[] {
-  return sortCategories(list.filter((c) => c.kind === kind && !c.archived));
+  return sortCategories(list.filter((c) => c.kind === kind && !c.archived && !isLoanCategory(c)));
 }
 
 /** 같은 흐름 안에서 이름이 같은가. 공백 · 대소문자만 다른 이름은 같은 것으로 본다. */
