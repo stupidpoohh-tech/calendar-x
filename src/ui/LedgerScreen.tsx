@@ -31,6 +31,9 @@
  * 금융비용으로 따로 적는다. 예정은 합계에 넣지 않는다.
  */
 import { useEffect, useMemo, useState, type ReactNode } from 'react';
+import {
+  annualCategoryIds, annualRows, canChangeCycle, withoutAnnual, yearOfPeriod, yearRange,
+} from '../domain/annualBudget';
 import { setDefaultBudget, setPeriodBudget } from '../domain/category';
 import {
   actualsIn, budgetRows, budgetSummary, flowBadge, groupByDay, historyItems, matchesQuery, onSide,
@@ -42,8 +45,9 @@ import {
   shiftPeriodKey, type Period,
 } from '../domain/period';
 import type {
-  Category, CategoryBudget, Entry, LedgerNote, LedgerTabId, PeriodKey,
+  AnnualBudget, Category, CategoryBudget, Entry, LedgerNote, LedgerTabId, PeriodKey,
 } from '../domain/types';
+import { AnnualBudgetForm, AnnualBudgetSection } from './AnnualBudgetSection';
 import { LEDGER_NOTE_MAX } from '../data/converters';
 import type { FeedState } from '../app/useStore';
 import { Icon } from './Icon';
@@ -86,6 +90,11 @@ export interface LedgerScreenProps {
   /** 좁은 화면의 추가(+) · 더보기(···). 기간 도구 옆에 둔다 — 머리에 한 줄을 따로 쓰지 않게. */
   actions?: ReactNode;
   onSaveCategoryBudget: (b: CategoryBudget) => void;
+  /** 연간 카테고리 예산(P2). 없으면 연간 주기를 고르는 자리를 띄우지 않는다. */
+  annualBudgets?: readonly AnnualBudget[];
+  onSaveAnnualBudget?: (b: AnnualBudget) => void;
+  /** 연간 예산을 지운다 — 그 해 그 카테고리를 월간으로 되돌린다. 월간 예산 문서는 건드리지 않는다. */
+  onDeleteAnnualBudget?: (b: AnnualBudget) => void;
   /** 정산 기간 메모(돌아보기). 기간 하나에 한 장. */
   ledgerNotes: readonly LedgerNote[];
   notesFeed: FeedState;
@@ -476,6 +485,7 @@ function PeriodNote({ period, note, feed, onSave }: {
 function LedgerBudget({
   entries, period, todayISO, settleDay, categories, categoryBudgets, categoriesReady,
   onSeedCategories, onSaveCategoryBudget, onEntryClick,
+  annualBudgets = NO_ANNUAL, onSaveAnnualBudget, onDeleteAnnualBudget,
 }: LedgerScreenProps & { period: Period }) {
   /*
     카테고리 줄을 누르면 그 아래 이 기간의 거래 카드가 펼쳐진다(분석의 카테고리와 같은 조각). 예산을
@@ -484,7 +494,23 @@ function LedgerBudget({
   const [open, setOpen] = useState<{ period: string; key: string } | null>(null);
   const openKey = open?.period === period.key ? open.key : null;
   const actuals = useMemo(() => actualsIn(entries, period.start, period.end), [entries, period]);
-  const rows = useMemo(() => budgetRows(categories, categoryBudgets, actuals, period.key, 'expense'), [categories, categoryBudgets, actuals, period.key]);
+  /*
+    연간 예산(P2). 정산 기간 이름의 연도('2027-01' → 2027)로 그 해 연간으로 관리하는 카테고리를 가르고, 그 카테고리는
+    월간 줄 · 요약에서 뺀다 — 같은 카테고리를 월간과 연간에 함께 세지 않는다. 연간 숫자는 달력 연도로 센다.
+    그 해의 월간 예산 문서는 그대로 남는다(연간을 지우면 다시 보인다).
+  */
+  const year = yearOfPeriod(period.key);
+  const annualIds = useMemo(() => annualCategoryIds(annualBudgets, year), [annualBudgets, year]);
+  const annual = useMemo(() => annualRows(categories, annualBudgets, entries, year), [categories, annualBudgets, entries, year]);
+  const yearActuals = useMemo(() => {
+    const r = yearRange(year);
+    return actualsIn(entries, r.start, r.end).filter((e) => onSide(e, 'expense'));
+  }, [entries, year]);
+  const rows = useMemo(
+    () => withoutAnnual(budgetRows(categories, categoryBudgets, actuals, period.key, 'expense'), annualIds),
+    [categories, categoryBudgets, actuals, period.key, annualIds],
+  );
+  const cycleChangeable = canChangeCycle(year, todayISO);
   // 예산을 정한 카테고리가 먼저 — 같은 무리 안에서는 카테고리 순서 그대로.
   const ordered = useMemo(
     () => [...rows.filter((r) => r.budget.amountMinor != null), ...rows.filter((r) => r.budget.amountMinor == null)],
@@ -543,6 +569,12 @@ function LedgerBudget({
           사용 = 실제로 쓴 지출(소비 + 대출 이자)
           {phase === 'current' && ' · 진행 중인 기간입니다'}
         </p>
+        {annual.length > 0 && (
+          <p className="led-note">
+            연간으로 관리하는 카테고리 {annual.length}개({annual.slice(0, 3).map((r) => r.name).join(' · ')}{annual.length > 3 ? ' 외' : ''})는
+            여기 넣지 않고 아래 &lsquo;연간 예산 · {year}년&rsquo; 에서 견줍니다.
+          </p>
+        )}
       </div>
 
       <div className="led-bl-cols" aria-hidden="true">
@@ -566,15 +598,28 @@ function LedgerBudget({
                 ? setPeriodBudget(r.categoryId, period.key, amount)
                 : setDefaultBudget(r.categoryId, defaultFrom, amount));
             }}
+            annual={onSaveAnnualBudget ? { year, changeable: cycleChangeable, onSave: onSaveAnnualBudget } : undefined}
           />
         ))}
       </ul>
+
+      {onSaveAnnualBudget && onDeleteAnnualBudget && (
+        <AnnualBudgetSection
+          year={year} rows={annual} canChange={cycleChangeable}
+          yearEntries={(id) => yearActuals.filter((e) => (e.money?.categoryId || UNCATEGORIZED) === id)}
+          onEntryClick={onEntryClick} onSave={onSaveAnnualBudget} onDelete={onDeleteAnnualBudget}
+        />
+      )}
     </div>
   );
 }
 
-function BudgetLine({ row, open, onToggle, entries, onEntryClick, canDefault, defaultFrom, onSave }: {
+const NO_ANNUAL: readonly AnnualBudget[] = [];
+
+function BudgetLine({ row, open, onToggle, entries, onEntryClick, canDefault, defaultFrom, onSave, annual }: {
   row: BudgetRow; open: boolean; onToggle: () => void;
+  /** 연간으로 바꾸는 자리(P2). 그 해 · 바꿀 수 있는 해인가 · 저장. 없으면 월간만 고친다. */
+  annual?: { year: number; changeable: boolean; onSave: (b: AnnualBudget) => void };
   /** 펼쳤을 때만 채운다 — 이 기간 이 카테고리의 실제 지출. */
   entries: readonly Entry[];
   onEntryClick?: (e: Entry) => void;
@@ -582,6 +627,9 @@ function BudgetLine({ row, open, onToggle, entries, onEntryClick, canDefault, de
   onSave: (scope: 'period' | 'default', amount: number | null) => void;
 }) {
   const [editing, setEditing] = useState(false);
+  /** 예산 주기 — 편집을 열 때마다 월간에서 시작한다(이 줄은 월간으로 관리 중인 카테고리다). */
+  const [cycle, setCycle] = useState<'monthly' | 'annual'>('monthly');
+  useEffect(() => { if (!editing) setCycle('monthly'); }, [editing]);
   const [text, setText] = useState(row.budget.amountMinor != null ? String(row.budget.amountMinor) : '');
   useEffect(() => { if (editing) setText(row.budget.amountMinor != null ? String(row.budget.amountMinor) : ''); }, [editing, row.budget.amountMinor]);
   useEffect(() => { if (!open) setEditing(false); }, [open]);
@@ -626,7 +674,34 @@ function BudgetLine({ row, open, onToggle, entries, onEntryClick, canDefault, de
           )}
         </TxCard>
       )}
-      {open && editing && (
+      {open && editing && annual && editable && (
+        <div className="led-bl-edit ab-cycle">
+          <span className="ab-cycle-l" aria-hidden="true">예산 주기</span>
+          <div className="seg" role="radiogroup" aria-label="예산 주기">
+            {([['monthly', '월간'], ['annual', '연간']] as const).map(([id, label]) => (
+              <button
+                key={id} role="radio" aria-checked={cycle === id}
+                className={'seg-btn' + (cycle === id ? ' on' : '')}
+                disabled={id === 'annual' && !annual.changeable}
+                onClick={() => setCycle(id)}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
+          {!annual.changeable && (
+            <p className="led-note">지난 해({annual.year}년)는 예산 주기를 바꾸지 않습니다 — 이미 끝난 해의 결산 표시가 달라집니다.</p>
+          )}
+        </div>
+      )}
+      {open && editing && annual && cycle === 'annual' && (
+        <AnnualBudgetForm
+          categoryId={row.categoryId} categoryName={row.name} year={annual.year} initial={null}
+          onCancel={() => setEditing(false)}
+          onSave={(b) => { setEditing(false); annual.onSave(b); }}
+        />
+      )}
+      {open && editing && cycle === 'monthly' && (
         <div className="led-bl-edit">
           <input
             className="mod-input num" inputMode="numeric" placeholder="예산 (비우면 없음)" autoFocus

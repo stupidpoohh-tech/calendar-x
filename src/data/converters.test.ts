@@ -9,7 +9,7 @@ import { newEntry, newMoney } from '../domain/entry';
 import type { Account } from '../domain/types';
 import {
   LEDGER_SCHEMA, accountFromDoc, accountToDoc, entryFromDoc, entryToDoc,
-  reserveFromDoc, reservePatchToDoc, reserveToDoc,
+  reserveFromDoc, reservePatchToDoc, reserveToDoc, annualBudgetFromDoc, annualBudgetToDoc,
 } from './converters';
 
 const legacyMoneyDoc = (over: Record<string, unknown> = {}) => ({
@@ -210,5 +210,24 @@ describe('세이브 — 보호 · 목표 · 보관 (P1)', () => {
   it('부분 쓰기는 담긴 칸과 판 번호만 쓴다', () => {
     expect(reservePatchToDoc({ protected: false })).toEqual({ protected: false, schema: 2 });
     expect(reservePatchToDoc({ amountMinor: 10, targetDate: null })).toEqual({ amountMinor: 10, targetDate: null, schema: 2 });
+  });
+});
+
+describe('연간 카테고리 예산 (P2)', () => {
+  const raw = {
+    categoryId: 'beauty', year: 2027, amountMinor: 600000,
+    monthAllocations: { '04': 400000, '10': 200000 }, currency: 'KRW', createdAt: 'c', updatedAt: 'u',
+  };
+
+  it('왕복해도 같다', () => {
+    const b = annualBudgetFromDoc('beauty~2027', raw);
+    expect(b).toEqual({ id: 'beauty~2027', ...raw });
+    expect(annualBudgetFromDoc(b.id, annualBudgetToDoc(b))).toEqual(b);
+  });
+
+  it('깨진 배분은 그 달만 "배분 없음" 으로 읽는다 — 다른 값은 그대로', () => {
+    const b = annualBudgetFromDoc('x', { ...raw, monthAllocations: { '04': 400000, '13': 5, '05': 0, '06': 1.5, '07': '9' } });
+    expect(b.monthAllocations).toEqual({ '04': 400000 });
+    expect(annualBudgetFromDoc('x', { ...raw, monthAllocations: null }).monthAllocations).toEqual({});
   });
 });

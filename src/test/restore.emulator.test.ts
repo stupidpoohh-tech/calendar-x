@@ -48,7 +48,7 @@ const pin = (p: Partial<Pin> = {}): Pin => ({
 });
 const data = (p: Partial<BackupData> = {}): BackupData => ({
   entries: [], accounts: [], debts: [], pins: [], budgets: [], reserves: [],
-  categories: [], categoryBudgets: [], ledgerNotes: [], ledger: null, recovery: null, ...p,
+  categories: [], categoryBudgets: [], ledgerNotes: [], annualBudgets: [], ledger: null, recovery: null, ...p,
 });
 
 const ioFor = (db: Firestore, uid: string): RestoreIO => ({

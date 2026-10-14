@@ -530,6 +530,40 @@ export interface CategoryBudget {
   updatedAt: string;
 }
 
+/** 달 번호 '01' ~ '12'. 연간 예산의 월별 배분 열쇠다. */
+export type MonthNo = '01' | '02' | '03' | '04' | '05' | '06' | '07' | '08' | '09' | '10' | '11' | '12';
+
+/**
+ * 연간 카테고리 예산 (Financial Core P2) — 미용 · 여행 · 명절처럼 특정 달에 몰리는 지출을 한 해 단위로 계획한다.
+ *
+ * **소비 계획이다. 돈이 나가는 사건이 아니다.** 잔고 · 예상 잔고 · 가용 한도 · 생활비 · 세이브 어느 계산에도
+ * 들어가지 않는다. 미래 특정 날에 실제로 돈이 나가면 그것은 예정 거래로 따로 적는다.
+ *
+ *   연간 예산   amountMinor        그 해(1/1 ~ 12/31, 달력 연도) 이 카테고리에 쓰기로 한 총액
+ *   월별 배분   monthAllocations   그 총액을 어느 달에 쓸 계획인지. 선택이고, 합은 총액 이하. 나머지는 미배분
+ *   실제 사용   (원장에서 센다)     그 해의 실제 지출 — `ledgerStats` 의 소비 기준(소비 + 대출 이자)
+ *
+ * 월간 카테고리 예산(`CategoryBudget`)과 **다른 컬렉션**이다(`annualBudgets`). 월간 문서에 범위를 하나 더하면,
+ * 그 값을 모르는 예전 앱이 모르는 범위를 'default' 로 읽어 연간 금액을 매월 예산으로 보여 준다
+ * (`categoryBudgetFromDoc`). 문서 id 는 `카테고리id~연도`(`annualBudgetId`) — 한 해 한 카테고리에 한 장이다.
+ *
+ * 문서가 있는 해에는 그 카테고리를 연간으로 관리한다. 그 해의 월간 예산 문서는 지우지 않고 남겨 두며,
+ * 연간 예산을 지우면(월간으로 되돌리면) 그대로 다시 보인다 — `annualBudget.ts` 머리 주석.
+ */
+export interface AnnualBudget {
+  id: string;
+  categoryId: string;
+  /** 달력 연도. */
+  year: number;
+  /** 연간 총액. 0 이상의 최소 단위 정수. */
+  amountMinor: number;
+  /** 월별 배분. 키가 없는 달은 배분 없음. 값은 1 이상의 정수이고 합은 `amountMinor` 이하다. */
+  monthAllocations: Partial<Record<MonthNo, number>>;
+  currency: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
 /**
  * 정산 기간 메모 — 분석 화면의 "기간 돌아보기". 그 기간을 돌아보며 적는 글(반성 · 다짐).
  * 기간 하나에 한 장이고 문서 id 가 곧 기간 열쇠다 — 같은 기간에 두 장이 생기면 어느 쪽이
@@ -553,7 +587,7 @@ export interface LedgerSettings {
 /** 백업이 담는 컬렉션. */
 export type BackupCollection =
   | 'entries' | 'accounts' | 'debts' | 'pins' | 'budgets' | 'reserves'
-  | 'categories' | 'categoryBudgets' | 'ledgerNotes';
+  | 'categories' | 'categoryBudgets' | 'ledgerNotes' | 'annualBudgets';
 
 export type ThemePref = 'system' | 'light' | 'dark';
 /** 글씨 크기. 'auto' 는 브라우저·OS 설정을 따른다는 뜻이다. */

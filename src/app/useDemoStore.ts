@@ -5,6 +5,7 @@
  * 저장·편집·삭제를 시도하면 로그인 팝업이 뜬다. 데이터는 오늘 날짜에
  * 상대적이라 언제 열어도 "오늘 잡힌 일" 이 있어 보인다.
  */
+import { newAnnualBudget } from '../domain/annualBudget';
 import { useMemo } from 'react';
 import { tideWindow } from '../data/repo';
 import { defaultCategories, setDefaultBudget } from '../domain/category';
@@ -140,6 +141,10 @@ export function useDemoStore(): StoreState {
       categoryBudgets: [
         setDefaultBudget('default-food', periodOf(today, 1).key, 400_000, ''),
         setDefaultBudget('default-cafe', periodOf(today, 1).key, 50_000, ''),
+      ],
+      // 경조사 · 선물은 올해 연간 예산 — 설 · 추석 달에 몰아 쓰는 지출이다. 계획이라 한도에서 빼지 않는다.
+      annualBudgets: [
+        newAnnualBudget('default-social', Number(today.slice(0, 4)), 600_000, { '02': 300_000, '09': 200_000 }, ''),
       ],
       ledger: { settleDay: 1 },
       ledgerMeta: FEED_DEMO,

@@ -26,6 +26,7 @@
  * | v6 | `version: 6` | v5 + `categories` · `categoryBudgets` **두 배열 모두 필수** + `ledger`(정산 시작일, null 허용) |
  * | v7 | `version: 7` | v6 + `ledgerNotes`(정산 기간 메모) **필수** |
  * | v8 | `version: 8` | v7 과 같은 구조. 세이브에 보호 · 목표 · 보관(P1)이 실릴 수 있다 — 없으면 보호 켬 |
+ * | v9 | `version: 9` | v8 + `annualBudgets`(연간 카테고리 예산, P2) **필수** |
  *
  * 없는 컬렉션을 빈 배열로 넘겨 짚지 않는다. v2·v3 파일에 `debts` 가 없다면 그건
  * 빈 백업이 아니라 깨진 파일이다.
@@ -35,20 +36,21 @@
  * 검사 없이 새어 들어가지 않게. v4 에서는 없으면 잘린 파일로 본다.
  */
 import { COLORS, MONEY_TYPES, STATUSES } from '../domain/constants';
+import { MAX_YEAR, MIN_YEAR, MONTH_NOS } from '../domain/annualBudget';
 import { isValidDate } from '../domain/date';
 import { MONEY_FLOWS, MONEY_STATUSES, OUTFLOW_ONLY_FLOWS } from '../domain/ledger';
 import type { BackupCollection } from '../domain/types';
 import type { BackupData } from './backup';
 import {
   accountFromDoc, budgetFromDoc, categoryBudgetFromDoc, categoryFromDoc, debtFromDoc,
-  entryFromDoc, LEDGER_NOTE_MAX, ledgerNoteFromDoc, ledgerSettingsFromDoc, pinFromDoc, recoveryRuleFromDoc, reserveFromDoc,
+  annualBudgetFromDoc, entryFromDoc, LEDGER_NOTE_MAX, ledgerNoteFromDoc, ledgerSettingsFromDoc, pinFromDoc, recoveryRuleFromDoc, reserveFromDoc,
 } from './converters';
 import { convertLegacyItems } from './migrate';
 
-export const SUPPORTED_VERSIONS = [1, 2, 3, 4, 5, 6, 7, 8] as const;
-export const LATEST_VERSION = 8;
+export const SUPPORTED_VERSIONS = [1, 2, 3, 4, 5, 6, 7, 8, 9] as const;
+export const LATEST_VERSION = 9;
 
-export type BackupFormat = 'legacy' | 'v2' | 'v3' | 'v4' | 'v5' | 'v6' | 'v7' | 'v8';
+export type BackupFormat = 'legacy' | 'v2' | 'v3' | 'v4' | 'v5' | 'v6' | 'v7' | 'v8' | 'v9';
 
 /** 파일 한 곳이 왜 들어갈 수 없는지. */
 export interface FileProblem {
@@ -494,6 +496,44 @@ function checkLedgerNoteRaw(c: Collector, where: string, r: Raw): void {
   }
 }
 
+/**
+ * 연간 카테고리 예산(v9). 규칙이 거절할 모양을 쓰기 전에 말한다 — id 는 `카테고리id~연도`, 금액 · 배분은
+ * 0 이상 정수, 배분 열쇠는 '01' ~ '12', 배분 합은 연간 예산 이하.
+ */
+function checkAnnualBudgetRaw(c: Collector, where: string, r: Raw): void {
+  reqStr(c, `${where}.categoryId`, r.categoryId, LIMITS.categoryId);
+  if (typeof r.categoryId === 'string' && r.categoryId.length === 0) c.add(`${where}.categoryId`, '카테고리가 비어 있습니다.');
+  if (!isIntNum(r.year) || r.year < MIN_YEAR || r.year > MAX_YEAR) {
+    c.add(`${where}.year`, `${MIN_YEAR}~${MAX_YEAR} 의 정수가 아닙니다: ${describe(r.year)}`);
+  }
+  reqInt(c, `${where}.amountMinor`, r.amountMinor);
+  if (isIntNum(r.amountMinor) && r.amountMinor < 0) c.add(`${where}.amountMinor`, `음수입니다: ${r.amountMinor}`);
+  let allocated = 0;
+  if (!isObj(r.monthAllocations)) {
+    c.add(`${where}.monthAllocations`, `객체가 아닙니다: ${describe(r.monthAllocations)}`);
+  } else {
+    for (const [k, v] of Object.entries(r.monthAllocations)) {
+      if (!(MONTH_NOS as readonly string[]).includes(k)) {
+        c.add(`${where}.monthAllocations.${k}`, '달은 01 ~ 12 여야 합니다.');
+        continue;
+      }
+      reqInt(c, `${where}.monthAllocations.${k}`, v);
+      if (isIntNum(v) && v < 1) c.add(`${where}.monthAllocations.${k}`, `1 이상이어야 합니다: ${v}`);
+      if (isIntNum(v)) allocated += v;
+    }
+    if (isIntNum(r.amountMinor) && allocated > r.amountMinor) {
+      c.add(`${where}.monthAllocations`, `월별 배분 합(${allocated})이 연간 예산(${r.amountMinor})을 넘습니다.`);
+    }
+  }
+  reqStr(c, `${where}.currency`, r.currency);
+  optStr(c, `${where}.createdAt`, r.createdAt, LIMITS.checkedAt);
+  optStr(c, `${where}.updatedAt`, r.updatedAt, LIMITS.checkedAt);
+  const expected = `${String(r.categoryId)}~${String(r.year)}`;
+  if (typeof r.id === 'string' && r.id !== expected) {
+    c.add(`${where}.id`, `연간 예산의 id 는 '${expected}' 이어야 합니다: ${r.id}`);
+  }
+}
+
 const CHECKERS: Record<BackupCollection, (c: Collector, where: string, v: Raw) => void> = {
   entries: checkEntryRaw,
   accounts: checkAccountRaw,
@@ -504,6 +544,7 @@ const CHECKERS: Record<BackupCollection, (c: Collector, where: string, v: Raw) =
   categories: checkCategoryRaw,
   categoryBudgets: checkCategoryBudgetRaw,
   ledgerNotes: checkLedgerNoteRaw,
+  annualBudgets: checkAnnualBudgetRaw,
 };
 
 /** 컬렉션 하나를 통째로 본다. 없으면 그 자체가 문제다 (v2·v3 명세). */
@@ -612,11 +653,12 @@ export function readBackupFile(text: string): ReadResult {
     return { ok: false, problems: [{ where: 'version', reason: '버전이 없습니다. 백업 파일이 맞는지 확인해 주세요.' }] };
   }
 
-  const format: BackupFormat = version >= 8 ? 'v8' : version === 7 ? 'v7' : version === 6 ? 'v6' : version === 5 ? 'v5'
+  const format: BackupFormat = version >= 9 ? 'v9' : version === 8 ? 'v8' : version === 7 ? 'v7' : version === 6 ? 'v6' : version === 5 ? 'v5'
     : version === 4 ? 'v4' : version === 3 ? 'v3' : 'v2';
   const hasPockets = version >= 4;
   const hasCategories = version >= 6;
   const hasNotes = version >= 7;
+  const hasAnnual = version >= 9;
 
   // ---- 컬렉션 ----
   const entries = checkCollection(c, 'entries', obj.entries);
@@ -640,6 +682,10 @@ export function readBackupFile(text: string): ReadResult {
   const ledgerNotes = hasNotes
     ? checkCollection(c, 'ledgerNotes', obj.ledgerNotes)
     : checkOptionalCollection(c, 'ledgerNotes', obj.ledgerNotes);
+  // v9 부터 필수다. v8 까지는 연간 예산이 없던 시절이라 없는 것이 정상이다.
+  const annualBudgets = hasAnnual
+    ? checkCollection(c, 'annualBudgets', obj.annualBudgets)
+    : checkOptionalCollection(c, 'annualBudgets', obj.annualBudgets);
   if (obj.ledger !== undefined && obj.ledger !== null) {
     if (!isObj(obj.ledger)) {
       c.add('ledger', `객체가 아닙니다: ${describe(obj.ledger)}`);
@@ -676,6 +722,7 @@ export function readBackupFile(text: string): ReadResult {
         categories: categories.map((r) => categoryFromDoc(r.id as string, r)),
         categoryBudgets: categoryBudgets.map((r) => categoryBudgetFromDoc(r.id as string, r)),
         ledgerNotes: ledgerNotes.map((r) => ledgerNoteFromDoc(r.id as string, r)),
+        annualBudgets: annualBudgets.map((r) => annualBudgetFromDoc(r.id as string, r)),
         ledger: isObj(obj.ledger) ? ledgerSettingsFromDoc(obj.ledger) : null,
         recovery: isObj(obj.recovery) ? recoveryRuleFromDoc(obj.recovery) : null,
       },
@@ -718,6 +765,7 @@ function readLegacy(c: Collector, items: unknown[]): ReadResult {
         categories: [],
         categoryBudgets: [],
         ledgerNotes: [],
+        annualBudgets: [],
         ledger: null,
         recovery: null,
       },

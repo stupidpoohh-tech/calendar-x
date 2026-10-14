@@ -34,7 +34,7 @@ const pin = (p: Partial<Pin> = {}): Pin => ({
 });
 const data = (p: Partial<BackupData> = {}): BackupData => ({
   entries: [], accounts: [], debts: [], pins: [], budgets: [], reserves: [],
-  categories: [], categoryBudgets: [], ledgerNotes: [], ledger: null, recovery: null, ...p,
+  categories: [], categoryBudgets: [], ledgerNotes: [], annualBudgets: [], ledger: null, recovery: null, ...p,
 });
 
 describe('검증 — 온전한 파일은 통과한다', () => {
@@ -276,12 +276,13 @@ function fakeStore(seed: BackupData, opts: { failWrites?: Set<string> } = {}) {
     debts: [...seed.debts], pins: [...seed.pins],
     budgets: [...seed.budgets], reserves: [...seed.reserves],
     categories: [...seed.categories], categoryBudgets: [...seed.categoryBudgets],
-    ledgerNotes: [...seed.ledgerNotes],
+    ledgerNotes: [...seed.ledgerNotes], annualBudgets: [...seed.annualBudgets],
     ledger: seed.ledger, recovery: seed.recovery,
   };
   const log: string[] = [];
   const keys: BackupCollection[] = [
     'entries', 'accounts', 'debts', 'pins', 'budgets', 'reserves', 'categories', 'categoryBudgets', 'ledgerNotes',
+    'annualBudgets',
   ];
 
   const io: RestoreIO = {
@@ -292,7 +293,7 @@ function fakeStore(seed: BackupData, opts: { failWrites?: Set<string> } = {}) {
         debts: [...state.debts], pins: [...state.pins],
         budgets: [...state.budgets], reserves: [...state.reserves],
         categories: [...state.categories], categoryBudgets: [...state.categoryBudgets],
-        ledgerNotes: [...state.ledgerNotes],
+        ledgerNotes: [...state.ledgerNotes], annualBudgets: [...state.annualBudgets],
       };
     },
     createIfAbsent: async (payload) => {

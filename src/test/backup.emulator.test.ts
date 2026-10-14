@@ -26,6 +26,7 @@ import {
   createManyIfAbsent, fetchAll, fetchLedgerSettings, saveLedgerSettings, saveRecoveryRule, writeMany,
 } from '../data/repo';
 import { safeMerge, type RestoreIO } from '../data/restore';
+import { newAnnualBudget } from '../domain/annualBudget';
 import { newBudget, newReserve } from '../domain/budget';
 import { defaultCategories, newCategory, setDefaultBudget, setPeriodBudget } from '../domain/category';
 import { confirmOccurrence } from '../domain/confirm';
@@ -139,6 +140,11 @@ function richAccount(): BackupData {
       setPeriodBudget('default-food', '2026-10', 250_000, '2026-10-01T00:00:00.000Z'),
       setDefaultBudget('pet', '2026-06', null, '2026-10-01T00:00:00.000Z'),
     ],
+    // P2 — 연간 예산 두 해. 월별 배분이 왕복 뒤에도 그대로여야 한다.
+    annualBudgets: [
+      newAnnualBudget('default-shopping', 2026, 600_000, { '04': 400_000, '10': 200_000 }),
+      newAnnualBudget('default-shopping', 2027, 900_000),
+    ],
     ledgerNotes: [{
       id: '2026-09', period: '2026-09', text: '배달을 줄이자.\n외식은 주 1회.',
       createdAt: '2026-09-25T00:00:00.000Z', updatedAt: '2026-09-25T00:00:00.000Z',
@@ -176,7 +182,7 @@ describe('내보내기 → 빈 계정으로 가져오기', () => {
 
     const file = await exportFile(dbA, A);
     const parsed = JSON.parse(file) as { version: number };
-    expect(parsed.version).toBe(8);
+    expect(parsed.version).toBe(9);
     const incoming = readOk(file);
     expect(countBackup(incoming)).toBe(countBackup(original));
     expect(incoming.ledger).toEqual({ settleDay: 25 });
@@ -191,7 +197,7 @@ describe('내보내기 → 빈 계정으로 가져오기', () => {
     await saveLedgerSettings(dbB, B, incoming.ledger!);
 
     const [a, b] = await Promise.all([fetchAll(dbA, A), fetchAll(dbB, B)]);
-    for (const key of ['entries', 'accounts', 'debts', 'pins', 'budgets', 'reserves', 'categories', 'categoryBudgets', 'ledgerNotes'] as const) {
+    for (const key of ['entries', 'accounts', 'debts', 'pins', 'budgets', 'reserves', 'categories', 'categoryBudgets', 'ledgerNotes', 'annualBudgets'] as const) {
       expect(byId(b[key]), key).toEqual(byId(a[key]));
     }
     // 원장 필드가 그대로다 — 실제 거래 · 회차 연결 · 계좌 · 반영 목록.

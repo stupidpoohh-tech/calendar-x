@@ -38,7 +38,7 @@ const DATA: PastPlanData = { entries: ENTRIES, accounts: [acct], budgets: [pocke
 function backupFile(entries: Entry[], name = 'calendarx-backup.json') {
   const text = JSON.stringify(buildBackup({
     entries, accounts: [acct], debts: [], pins: [], budgets: [pocket], reserves: [], categories: [],
-    categoryBudgets: [], ledgerNotes: [], ledger: null, recovery: null,
+    categoryBudgets: [], ledgerNotes: [], annualBudgets: [], ledger: null, recovery: null,
   }));
   return fileOf(text, name);
 }

@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { describeFirestoreError, isPermissionDenied } from '../data/errors';
 import { getFirebase } from '../data/firebase';
 import {
-  monthWindow, subscribeAccounts, subscribeBudgets, subscribeCategories, subscribeCategoryBudgets,
+  monthWindow, subscribeAccounts, subscribeBudgets, subscribeAnnualBudgets, subscribeCategories, subscribeCategoryBudgets,
   subscribeDebts, subscribeEntriesForMonths, subscribeLedgerNotes, subscribeLedgerSettings,
   subscribePins, subscribeRecurringEntries, subscribeReserves, tideWindow, tideWindowReaches,
   earliestAsOfOf,
@@ -10,7 +10,7 @@ import {
 } from '../data/repo';
 import { DEFAULT_SETTLE_DAY } from '../domain/period';
 import type {
-  Account, Budget, Category, CategoryBudget, Debt, Entry, LedgerNote, LedgerSettings, Pin, Reserve, YearMonth,
+  AnnualBudget, Account, Budget, Category, CategoryBudget, Debt, Entry, LedgerNote, LedgerSettings, Pin, Reserve, YearMonth,
 } from '../domain/types';
 
 export interface StoreState {
@@ -47,6 +47,8 @@ export interface StoreState {
    */
   categories: Category[];
   categoryBudgets: CategoryBudget[];
+  /** 연간 카테고리 예산(P2). 결산용이라 한도 계산에 들어가지 않고, 결산 상태(`ledgerMeta`)가 종합한다. */
+  annualBudgets: AnnualBudget[];
   ledger: LedgerSettings;
   ledgerMeta: FeedState;
   /**
@@ -168,7 +170,7 @@ const DEFAULT_LEDGER: LedgerSettings = { settleDay: DEFAULT_SETTLE_DAY };
 const EMPTY: StoreState = {
   entries: [], tideEntries: [], tideMonths: [],
   accounts: [], debts: [], pins: [], budgets: [], reserves: [],
-  categories: [], categoryBudgets: [], ledger: DEFAULT_LEDGER, ledgerMeta: FEED_LOADING,
+  categories: [], categoryBudgets: [], annualBudgets: [], ledger: DEFAULT_LEDGER, ledgerMeta: FEED_LOADING,
   ledgerNotes: [], ledgerNotesFeed: FEED_LOADING,
   display: FEED_LOADING, calc: FEED_LOADING,
   loading: false, error: null, rulesBlocked: false,
@@ -223,6 +225,8 @@ export function useStore(uid: string | null, cursorISO: string, todayISO: string
   const [categoriesFeed, setCategoriesFeed] = useState<FeedState>(FEED_LOADING);
   const [categoryBudgets, setCategoryBudgets] = useState<CategoryBudget[]>([]);
   const [categoryBudgetsFeed, setCategoryBudgetsFeed] = useState<FeedState>(FEED_LOADING);
+  const [annualBudgets, setAnnualBudgets] = useState<AnnualBudget[]>([]);
+  const [annualBudgetsFeed, setAnnualBudgetsFeed] = useState<FeedState>(FEED_LOADING);
   const [ledgerNotes, setLedgerNotes] = useState<LedgerNote[]>([]);
   const [ledgerNotesFeed, setLedgerNotesFeed] = useState<FeedState>(FEED_LOADING);
   const [ledger, setLedger] = useState<LedgerSettings>(DEFAULT_LEDGER);
@@ -252,6 +256,7 @@ export function useStore(uid: string | null, cursorISO: string, todayISO: string
     setReserves([]); setReservesFeed(FEED_LOADING);
     setCategories([]); setCategoriesFeed(FEED_LOADING);
     setCategoryBudgets([]); setCategoryBudgetsFeed(FEED_LOADING);
+    setAnnualBudgets([]); setAnnualBudgetsFeed(FEED_LOADING);
     setLedgerNotes([]); setLedgerNotesFeed(FEED_LOADING);
     setLedger(DEFAULT_LEDGER); setLedgerFeed(FEED_LOADING);
     setError(null); setRulesBlocked(false);
@@ -369,6 +374,11 @@ export function useStore(uid: string | null, cursorISO: string, todayISO: string
         own(uid, (items, meta) => { setCategoryBudgets(items); setCategoryBudgetsFeed(feedFrom(items.length, meta)); }),
         own(uid, (scope, err) => failWith(setCategoryBudgetsFeed, scope, err)),
       ),
+      subscribeAnnualBudgets(
+        db, uid,
+        own(uid, (items, meta) => { setAnnualBudgets(items); setAnnualBudgetsFeed(feedFrom(items.length, meta)); }),
+        own(uid, (scope, err) => failWith(setAnnualBudgetsFeed, scope, err)),
+      ),
       subscribeLedgerNotes(
         db, uid,
         own(uid, (items, meta) => { setLedgerNotes(items); setLedgerNotesFeed(feedFrom(items.length, meta)); }),
@@ -420,8 +430,8 @@ export function useStore(uid: string | null, cursorISO: string, todayISO: string
   );
 
   const ledgerMeta = useMemo(
-    () => combineFeeds([categoriesFeed, categoryBudgetsFeed, ledgerFeed]),
-    [categoriesFeed, categoryBudgetsFeed, ledgerFeed],
+    () => combineFeeds([categoriesFeed, categoryBudgetsFeed, annualBudgetsFeed, ledgerFeed]),
+    [categoriesFeed, categoryBudgetsFeed, annualBudgetsFeed, ledgerFeed],
   );
 
   // 계정이 막 바뀐 렌더에서는 아직 앞 계정의 값이 상태에 남아 있다. 내보내지 않는다.
@@ -430,7 +440,7 @@ export function useStore(uid: string | null, cursorISO: string, todayISO: string
   return {
     entries, tideEntries, tideMonths,
     accounts, debts, pins, budgets, reserves,
-    categories, categoryBudgets, ledger, ledgerMeta, ledgerNotes, ledgerNotesFeed,
+    categories, categoryBudgets, annualBudgets, ledger, ledgerMeta, ledgerNotes, ledgerNotesFeed,
     display, calc,
     loading: !display.ready, error, rulesBlocked,
   };

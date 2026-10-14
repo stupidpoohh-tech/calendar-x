@@ -155,6 +155,30 @@ service cloud.firestore {
         || schemaOf(data()) >= 2;
     }
 
+    /*
+      연간 카테고리 예산의 월별 배분 (P2). 열쇠는 '01' ~ '12' 만, 값은 1 이상의 정수.
+      배분 합은 연간 예산을 넘지 못한다 — 화면이 막지만 다른 길(손으로 고친 백업 · 구버전)도 같은 선에서 막는다.
+    */
+    function allocOf(m, k) {
+      return m.get(k, 0);
+    }
+    function validAlloc(m, k) {
+      return !(k in m) || (m[k] is int && m[k] >= 1);
+    }
+    function allocSum(m) {
+      return allocOf(m, '01') + allocOf(m, '02') + allocOf(m, '03') + allocOf(m, '04')
+        + allocOf(m, '05') + allocOf(m, '06') + allocOf(m, '07') + allocOf(m, '08')
+        + allocOf(m, '09') + allocOf(m, '10') + allocOf(m, '11') + allocOf(m, '12');
+    }
+    function validAllocations(m, total) {
+      return m is map
+        && m.keys().hasOnly(['01', '02', '03', '04', '05', '06', '07', '08', '09', '10', '11', '12'])
+        && validAlloc(m, '01') && validAlloc(m, '02') && validAlloc(m, '03') && validAlloc(m, '04')
+        && validAlloc(m, '05') && validAlloc(m, '06') && validAlloc(m, '07') && validAlloc(m, '08')
+        && validAlloc(m, '09') && validAlloc(m, '10') && validAlloc(m, '11') && validAlloc(m, '12')
+        && allocSum(m) <= total;
+    }
+
     // 한 문서가 지나치게 커지는 것을 막는다. 이전 구조는 대출 목록 전체를
     // 한 문서의 memo 에 JSON 으로 넣었고, 그래서 다중 기기 덮어쓰기가 났다.
     function withinSize() {
@@ -302,6 +326,26 @@ service cloud.firestore {
               || (data().amountMinor is int && data().amountMinor >= 0))
           && data().currency is string
           && budgetId == data().categoryId + '~' + data().scope + '~' + data().period;
+      }
+
+      /*
+        연간 카테고리 예산 (P2). 문서 id 는 `카테고리id~연도` — 한 해 한 카테고리에 한 장이다.
+        소비 계획이라 한도 계산에 들어가지 않는다. 월간 예산(`categoryBudgets`)과 따로 둔 이유는, 그
+        컬렉션에 범위를 더하면 그 값을 모르는 예전 앱이 연간 금액을 매월 기본 예산으로 읽기 때문이다.
+      */
+      match /annualBudgets/{budgetId} {
+        allow read, delete: if isOwner(uid);
+        allow create, update: if isOwner(uid)
+          && withinSize()
+          && data().categoryId is string
+          && data().categoryId.size() > 0 && data().categoryId.size() <= 200
+          && data().year is int && data().year >= 2000 && data().year <= 2100
+          && data().amountMinor is int && data().amountMinor >= 0
+          && validAllocations(data().monthAllocations, data().amountMinor)
+          && data().currency is string
+          && data().createdAt is string
+          && data().updatedAt is string
+          && budgetId == data().categoryId + '~' + string(data().year);
       }
 
       /*

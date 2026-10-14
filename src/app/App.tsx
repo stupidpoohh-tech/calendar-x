@@ -41,7 +41,7 @@ import { balanceViewOn, calcScopeOf } from '../domain/tide';
 import { ymOf } from '../domain/date';
 import { isRecoveryEntry } from '../domain/recovery';
 import type {
-  Account, Budget, Category, CategoryBudget, Entry, Filters, LedgerNote, LedgerTabId, LensId, SharedInvite, SharedNote, SharedTodoItem,
+  AnnualBudget, Account, Budget, Category, CategoryBudget, Entry, Filters, LedgerNote, LedgerTabId, LensId, SharedInvite, SharedNote, SharedTodoItem,
   TaskStatus, ViewId, YearMonth,
 } from '../domain/types';
 import { ConfirmSheet } from '../ui/ConfirmSheet';
@@ -676,6 +676,19 @@ function Workspace({ uid, user, onSignOut }: WorkspaceProps) {
   }, [isAnon, uid, promptLogin, commit]);
 
   /*
+    연간 카테고리 예산(P2). 한 해 한 카테고리 한 장이라 문서 전체를 쓴다. 지우기는 그 해를 월간으로 되돌리는 것이고
+    월간 예산 문서는 건드리지 않는다. 다른 저장과 같은 쓰기 큐 — 거절되면 '저장하지 못한 것' 에 남는다.
+  */
+  const saveAnnualBudget = useCallback((b: AnnualBudget) => {
+    if (isAnon || !uid) { void promptLogin(); return; }
+    commit({ kind: 'annualBudget', label: '연간 예산', summary: `${b.year}년`, payload: b });
+  }, [isAnon, uid, promptLogin, commit]);
+  const deleteAnnualBudget = useCallback((b: AnnualBudget) => {
+    if (isAnon || !uid) { void promptLogin(); return; }
+    commit({ kind: 'annualBudgetDelete', label: '연간 예산 지우기', summary: `${b.year}년`, payload: { id: b.id } });
+  }, [isAnon, uid, promptLogin, commit]);
+
+  /*
     '달력에 표시' — 그 날 셀에 띄울 주요 거래를 직접 고른다. 하루에 한 건만 뜨므로, 켤 때는
     같은 날 켜 둔 다른 거래를 함께 끈다. 여러 문서가 함께 바뀌어야 뜻이 맞는 쓰기라 한 배치다.
   */
@@ -902,7 +915,10 @@ function Workspace({ uid, user, onSignOut }: WorkspaceProps) {
       ...periodsOfYear(Number(ledgerPeriod.slice(0, 4)), settleDay),
     ];
     const p = periodByKey(ledgerPeriod, settleDay);
-    return monthsOfPeriods(p ? [...ps, p] : ps);
+    // 연간 예산(P2)은 달력 연도로 센다 — 정산 연도의 달과 대개 겹치지만, 경계가 달라도 빠지지 않게 열두 달을 함께 받는다.
+    const year = ledgerPeriod.slice(0, 4);
+    const calendar = Array.from({ length: 12 }, (_, i) => `${year}-${String(i + 1).padStart(2, '0')}`);
+    return [...new Set([...monthsOfPeriods(p ? [...ps, p] : ps), ...calendar])].sort();
   }, [ledgerPeriod, settleDay]);
   const ledgerOn = lens === 'money' && !sharedOpen;
   // 필터는 달력 · 리스트에 그리는 항목을 거른다. 가계부에서는 그 달력이 있는 현금흐름에서만 뜻이 있다.
@@ -2077,6 +2093,9 @@ function Workspace({ uid, user, onSignOut }: WorkspaceProps) {
             actions={quickActions}
             onSaveMany={writeLedgerEntries}
             onSaveCategoryBudget={saveCategoryBudget}
+            annualBudgets={store.annualBudgets}
+            onSaveAnnualBudget={saveAnnualBudget}
+            onDeleteAnnualBudget={deleteAnnualBudget}
             ledgerNotes={store.ledgerNotes}
             notesFeed={store.ledgerNotesFeed}
             onSaveLedgerNote={saveLedgerNote}

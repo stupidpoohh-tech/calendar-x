@@ -328,6 +328,55 @@ describe('세이브 — 보호 · 목표 · 보관', () => {
 });
 
 /*
+  연간 카테고리 예산 (P2). id = 카테고리id~연도, 금액 · 배분은 정수, 배분 열쇠는 01~12, 합은 연간 예산 이하.
+*/
+describe('연간 카테고리 예산', () => {
+  const apath = (id = 'beauty~2027') => `users/${ME}/annualBudgets/${id}`;
+  const annual = (over: Record<string, unknown> = {}) => ({
+    categoryId: 'beauty', year: 2027, amountMinor: 600000,
+    monthAllocations: { '04': 400000, '10': 200000 }, currency: 'KRW',
+    createdAt: '2026-10-14T00:00:00.000Z', updatedAt: '2026-10-14T00:00:00.000Z', ...over,
+  });
+
+  it('연간 예산 · 월별 배분을 저장하고, 배분 없이도 저장한다', async () => {
+    await assertSucceeds(setDoc(doc(db(ME), apath()), annual()));
+    await assertSucceeds(setDoc(doc(db(ME), apath()), annual({ monthAllocations: {} })));
+    await assertSucceeds(setDoc(doc(db(ME), apath()), annual({ amountMinor: 0, monthAllocations: {} })));
+  });
+
+  it('배분 합이 연간 예산을 넘으면 거절한다', async () => {
+    await assertFails(setDoc(doc(db(ME), apath()), annual({ monthAllocations: { '04': 400000, '10': 200001 } })));
+  });
+
+  it('형태가 틀리면 거절한다', async () => {
+    await assertFails(setDoc(doc(db(ME), apath()), annual({ amountMinor: -1, monthAllocations: {} })));
+    await assertFails(setDoc(doc(db(ME), apath()), annual({ amountMinor: 1.5 })));
+    await assertFails(setDoc(doc(db(ME), apath()), annual({ monthAllocations: { '13': 1 } })));
+    await assertFails(setDoc(doc(db(ME), apath()), annual({ monthAllocations: { '4': 1 } })));
+    await assertFails(setDoc(doc(db(ME), apath()), annual({ monthAllocations: { '04': 0 } })));
+    await assertFails(setDoc(doc(db(ME), apath()), annual({ monthAllocations: { '04': 1.5 } })));
+    await assertFails(setDoc(doc(db(ME), apath()), annual({ monthAllocations: { '04': '100' } })));
+    await assertFails(setDoc(doc(db(ME), apath()), annual({ monthAllocations: [] })));
+    await assertFails(setDoc(doc(db(ME), apath()), annual({ year: '2027' })));
+    await assertFails(setDoc(doc(db(ME), apath('beauty~1999')), annual({ year: 1999 })));
+    await assertFails(setDoc(doc(db(ME), apath()), annual({ categoryId: '' })));
+  });
+
+  it('id 는 카테고리id~연도여야 한다', async () => {
+    await assertFails(setDoc(doc(db(ME), apath('beauty~2028')), annual()));
+    await assertFails(setDoc(doc(db(ME), apath('other~2027')), annual()));
+  });
+
+  it('남의 연간 예산은 읽지도 쓰지도 지우지도 못한다', async () => {
+    await assertSucceeds(setDoc(doc(db(ME), apath()), annual()));
+    await assertFails(getDoc(doc(db(OTHER), apath())));
+    await assertFails(setDoc(doc(db(OTHER), apath()), annual()));
+    await assertFails(deleteDoc(doc(db(OTHER), apath())));
+    await assertSucceeds(deleteDoc(doc(db(ME), apath())));
+  });
+});
+
+/*
   가계부 원장 (L1).
 
   실제 거래 · 흐름 · 분류 · 결제수단 · 계좌 · 확정한 회차는 모두 선택 필드다. 옛 문서는

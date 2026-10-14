@@ -555,3 +555,26 @@ button.led-cat-n:hover svg { color: var(--accent); }
 /* 분석 · 카테고리의 범위(이 기간 · 최근 1년)와 1년 금액(합계 · 월평균) */
 .led-span { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 .led-span .led-note { margin: 0; flex-basis: 100%; }
+
+/* 연간 카테고리 예산 (P2) — 예산 보기 안의 한 묶음. 월간 줄과 같은 칸을 쓴다. */
+.ab { display: flex; flex-direction: column; gap: 10px; padding-top: 12px; border-top: 1px solid var(--line); }
+.ab-cycle { padding-bottom: 6px; }
+.ab-cycle .seg { align-self: flex-start; }
+.ab-toggle {
+  align-self: flex-start; padding: 4px 0; border: 0; background: none; font: inherit;
+  font-size: 0.75rem; color: var(--ink-3); cursor: pointer; text-decoration: underline; text-underline-offset: 3px;
+}
+.ab-toggle:hover { color: var(--ink); }
+.ab-months { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 6px; }
+@media (max-width: 480px) { .ab-months { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
+.ab-months label { display: flex; flex-direction: column; gap: 2px; font-size: 0.6875rem; color: var(--ink-3); min-width: 0; }
+.ab-months .mod-input { min-width: 0; }
+.ab-bad { color: var(--bad); }
+.ab-detail { display: flex; flex-direction: column; gap: 6px; padding: 6px 4px 8px; }
+.ab-mlist { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 2px; }
+.ab-mlist li { display: flex; gap: 10px; font-size: 0.75rem; color: var(--ink-2); }
+.ab-m { flex: none; width: 2.5em; color: var(--ink-3); }
+.ab-mlist .minus { color: var(--bad); font-weight: 600; }
+.ab-cycle { flex-direction: row; align-items: center; flex-wrap: wrap; gap: 8px; }
+.ab-cycle .led-note { flex-basis: 100%; }
+.ab-cycle-l { font-size: 0.75rem; color: var(--ink-3); font-weight: 600; }

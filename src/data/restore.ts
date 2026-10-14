@@ -30,9 +30,11 @@
  * 그 사이 다른 탭이 같은 id 를 만들었을 때 덮어쓴다. 그래서 실제 쓰기도 트랜잭션 안에서
  * 존재를 확인한다 (`createManyIfAbsent`). 이미 있는 문서는 충돌로 남기고 건드리지 않는다.
  */
+import { annualBudgetId, annualBudgetProblem } from '../domain/annualBudget';
 import { conflictingConfirmations } from '../domain/confirm';
 import { isValidDate, normalizeDate } from '../domain/date';
 import type {
+  AnnualBudget,
   Account, BackupCollection, Budget, Category, CategoryBudget, Debt, Entry, LedgerNote, Pin, RecoveryRule, Reserve,
 } from '../domain/types';
 import type { BackupData } from './backup';
@@ -218,6 +220,20 @@ function checkLedgerNote(n: LedgerNote): string | null {
   return null;
 }
 
+function checkAnnualBudget(b: AnnualBudget): string | null {
+  if (!b.categoryId) return '카테고리가 비어 있습니다.';
+  if (b.id !== annualBudgetId(b.categoryId, b.year)) return `id 가 '${annualBudgetId(b.categoryId, b.year)}' 가 아닙니다.`;
+  switch (annualBudgetProblem(b)) {
+    case 'year': return `연도가 범위 밖입니다: ${b.year}`;
+    case 'amount': return '연간 예산이 0 이상의 정수가 아닙니다.';
+    case 'allocation': return '월별 배분이 1 이상의 정수가 아닙니다.';
+    case 'over-allocated': return '월별 배분 합이 연간 예산을 넘습니다.';
+    case null: break;
+  }
+  if (!b.currency) return '통화가 비어 있습니다.';
+  return null;
+}
+
 function scan<T extends { id: string }>(
   collection: BackupCollection, list: readonly T[],
   check: (v: T) => string | null, out: BackupProblem[],
@@ -255,6 +271,7 @@ export function validateBackup(data: BackupData): BackupProblem[] {
   scan('categories', data.categories, checkCategory, out);
   scan('categoryBudgets', data.categoryBudgets, checkCategoryBudget, out);
   scan('ledgerNotes', data.ledgerNotes, checkLedgerNote, out);
+  scan('annualBudgets', data.annualBudgets, checkAnnualBudget, out);
   return out;
 }
 
@@ -285,6 +302,8 @@ export function planMerge(current: BackupData, incoming: BackupData): BackupData
     categoryBudgets: only(current.categoryBudgets, incoming.categoryBudgets),
     // 같은 기간의 메모가 이미 있으면 지금 글을 남긴다 — 다른 계정의 옛 글로 덮지 않는다.
     ledgerNotes: only(current.ledgerNotes, incoming.ledgerNotes),
+    // 같은 해 같은 카테고리의 연간 예산이 이미 있으면 지금 것을 남긴다 — 금액 · 배분을 파일 값으로 덮지 않는다.
+    annualBudgets: only(current.annualBudgets, incoming.annualBudgets),
     // 정산 시작일도 설정이다. 회복 규칙과 같은 이유로 병합이 적용하지 않는다.
     ledger: current.ledger ?? incoming.ledger,
     /*
@@ -342,7 +361,7 @@ export function mergeSkipsLedger(fileDay: number, currentDay: number): string {
 export function countDocs(d: Omit<BackupData, 'recovery' | 'ledger'>): number {
   return d.entries.length + d.accounts.length + d.debts.length + d.pins.length
     + d.budgets.length + d.reserves.length + d.categories.length + d.categoryBudgets.length
-    + d.ledgerNotes.length;
+    + d.ledgerNotes.length + d.annualBudgets.length;
 }
 
 // ---------- 실행 순서 ----------

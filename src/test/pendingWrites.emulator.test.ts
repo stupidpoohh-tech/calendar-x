@@ -22,7 +22,8 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import {
   freshnessOf, isOfflineError, sendPending, type CommitInput, type PendingOp, type ReservePatchPayload,
 } from '../data/pendingWrites';
-import { reserveFromDoc } from '../data/converters';
+import { annualBudgetFromDoc, reserveFromDoc } from '../data/converters';
+import { newAnnualBudget } from '../domain/annualBudget';
 import { newEntry } from '../domain/entry';
 import type { Entry, Reserve } from '../domain/types';
 
@@ -275,5 +276,38 @@ describe('세이브 — 보호 · 목표 · 보관', () => {
       name: '비상금', amountMinor: 10, currency: 'KRW', createdAt: '', updatedAt: '2026-10-05T00:00:00.000Z',
     })).rejects.toThrow();
     expect(await readSave(db)).toEqual(base);
+  });
+});
+
+describe('연간 카테고리 예산 (P2)', () => {
+  const b = newAnnualBudget('beauty', 2027, 600_000, { '04': 400_000, '10': 200_000 }, '2026-10-14T00:00:00.000Z');
+  const read = async (db: Firestore) => {
+    const snap = await getDoc(doc(db, 'users', ME, 'annualBudgets', b.id));
+    return snap.exists() ? annualBudgetFromDoc(b.id, snap.data()) : null;
+  };
+
+  it('저장 · 다시 읽기 · 지우기가 실제로 나가고, 월별 배분이 그대로 돌아온다', async () => {
+    const db = dbOf(ME);
+    await sendPending(db, ME, { kind: 'annualBudget', label: '연간 예산', summary: '', payload: b });
+    expect(await read(db)).toEqual(b);
+    await sendPending(db, ME, { kind: 'annualBudgetDelete', label: '연간 예산', summary: '', payload: { id: b.id } });
+    expect(await read(db)).toBeNull();
+  });
+
+  it('배분 합이 넘는 쓰기는 거절되고, 이미 있던 연간 예산은 그대로 남는다', async () => {
+    const db = dbOf(ME);
+    await sendPending(db, ME, { kind: 'annualBudget', label: '연간 예산', summary: '', payload: b });
+    const over = { ...b, monthAllocations: { '04': 500_000, '10': 200_000 }, updatedAt: '2026-10-15T00:00:00.000Z' };
+    await expect(sendPending(db, ME, { kind: 'annualBudget', label: '연간 예산', summary: '', payload: over })).rejects.toThrow();
+    expect(await read(db)).toEqual(b);
+  });
+
+  it('실패한 쓰기 뒤에 더 새로운 저장이 있으면 stale 이다', async () => {
+    const db = dbOf(ME);
+    await sendPending(db, ME, { kind: 'annualBudget', label: '', summary: '', payload: { ...b, updatedAt: '2026-10-16T00:00:00.000Z' } });
+    const failed: PendingOp = {
+      id: 'op', kind: 'annualBudget', label: '', summary: '', payload: b, at: b.updatedAt, reason: '', tries: 0,
+    };
+    expect(await freshnessOf(db, ME, failed)).toBe('stale');
   });
 });

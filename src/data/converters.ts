@@ -8,8 +8,9 @@ import { DEFAULT_COLOR, DEFAULT_CURRENCY, MONEY_TYPE_BY_ID, STATUS_BY_ID } from 
 import { normalizeDate, todayISO, ymOf, ymRange } from '../domain/date';
 import { MONEY_FLOWS, moneyFlowOf, moneyStatusOf } from '../domain/ledger';
 import { clampSettleDay } from '../domain/period';
+import { MONTH_NOS } from '../domain/annualBudget';
 import type {
-  Account, Budget, Category, CategoryBudget, ColorId, Debt, Entry, EntryKind, LedgerNote, LedgerSettings,
+  AnnualBudget, MonthNo, Account, Budget, Category, CategoryBudget, ColorId, Debt, Entry, EntryKind, LedgerNote, LedgerSettings,
   MoneyFields, MoneyFlow, MoneyType, Pin, PlannedRef, Reserve, ReservePatch,
   RecoveryFields, RecoveryOption, RecoveryRule, RecoveryWindowId,
   Recurrence, RepeatFreq, TaskStatus,
@@ -506,6 +507,39 @@ export function categoryBudgetToDoc(b: CategoryBudget): Raw {
   return {
     categoryId: b.categoryId, scope: b.scope, period: b.period,
     amountMinor: b.amountMinor, currency: b.currency,
+    createdAt: b.createdAt, updatedAt: b.updatedAt,
+  };
+}
+
+/**
+ * 연간 카테고리 예산. 읽기는 방어적이다 — 배분에서 모르는 달 · 0 이하 · 정수가 아닌 값은 버린다(그 달은
+ * "배분 없음"). 금액이 깨졌으면 0. 쓰기는 담긴 값을 그대로 — 저장 전 검사는 `annualBudgetProblem` 과 규칙이 한다.
+ */
+export function annualBudgetFromDoc(id: string, raw: Raw): AnnualBudget {
+  const months = obj(raw.monthAllocations) ?? {};
+  const monthAllocations: Partial<Record<MonthNo, number>> = {};
+  for (const k of MONTH_NOS) {
+    const v = months[k];
+    if (typeof v === 'number' && Number.isSafeInteger(v) && v > 0) monthAllocations[k] = v;
+  }
+  const amount = raw.amountMinor;
+  const year = raw.year;
+  return {
+    id,
+    categoryId: str(raw.categoryId),
+    year: typeof year === 'number' && Number.isSafeInteger(year) ? year : 0,
+    amountMinor: typeof amount === 'number' && Number.isSafeInteger(amount) && amount >= 0 ? amount : 0,
+    monthAllocations,
+    currency: str(raw.currency, DEFAULT_CURRENCY),
+    createdAt: str(raw.createdAt),
+    updatedAt: str(raw.updatedAt),
+  };
+}
+
+export function annualBudgetToDoc(b: AnnualBudget): Raw {
+  return {
+    categoryId: b.categoryId, year: b.year, amountMinor: b.amountMinor,
+    monthAllocations: { ...b.monthAllocations }, currency: b.currency,
     createdAt: b.createdAt, updatedAt: b.updatedAt,
   };
 }

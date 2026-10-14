@@ -17,7 +17,7 @@ import { newEntry } from '../domain/entry';
 import type { SnapMeta } from '../data/repo';
 
 type Kind = 'entries' | 'recurring' | 'accounts' | 'debts' | 'pins' | 'budgets' | 'reserves'
-  | 'categories' | 'categoryBudgets' | 'ledgerNotes' | 'ledger';
+  | 'categories' | 'categoryBudgets' | 'annualBudgets' | 'ledgerNotes' | 'ledger';
 
 interface Sub {
   kind: Kind;
@@ -65,6 +65,8 @@ vi.mock('../data/repo', async (importOriginal) => {
       record('categories', uid, [], cb, onError),
     subscribeCategoryBudgets: (_db: unknown, uid: string, cb: unknown, onError: unknown) =>
       record('categoryBudgets', uid, [], cb, onError),
+    subscribeAnnualBudgets: (_db: unknown, uid: string, cb: unknown, onError: unknown) =>
+      record('annualBudgets', uid, [], cb, onError),
     subscribeLedgerNotes: (_db: unknown, uid: string, cb: unknown, onError: unknown) =>
       record('ledgerNotes', uid, [], cb, onError),
     subscribeLedgerSettings: (_db: unknown, uid: string, cb: unknown, onError: unknown) =>
@@ -540,6 +542,7 @@ describe('가계부 결산 자료 — 카테고리 · 카테고리 예산 · 정
     act(() => {
       one('categories').push([{ id: 'food', kind: 'expense', name: '식비', order: 0, archived: false }], LIVE);
       one('categoryBudgets').push([], LIVE);
+      one('annualBudgets').push([], LIVE);
     });
     expect(result.current.ledgerMeta.ready).toBe(false);
     act(() => { (one('ledger').push as unknown as (s: unknown, m: SnapMeta) => void)({ settleDay: 25 }, LIVE); });
@@ -547,6 +550,20 @@ describe('가계부 결산 자료 — 카테고리 · 카테고리 예산 · 정
     expect(result.current.ledger.settleDay).toBe(25);
     expect(result.current.categories.map((c) => c.id)).toEqual(['food']);
     // 한도 계산의 준비 상태에 섞이지 않는다.
+    expect(result.current.calc.ready).toBe(false);
+  });
+
+  it('연간 예산 구독이 아직이면 결산은 준비되지 않았다 — 계산 상태와는 무관하다', () => {
+    const { result } = renderHook(() => useStore('u1', '2026-09-15', TODAY));
+    act(() => {
+      one('categories').push([], LIVE);
+      one('categoryBudgets').push([], LIVE);
+      (one('ledger').push as unknown as (s: unknown, m: SnapMeta) => void)({ settleDay: 1 }, LIVE);
+    });
+    expect(result.current.ledgerMeta.ready).toBe(false);
+    act(() => { one('annualBudgets').push([{ id: 'beauty~2027', categoryId: 'beauty', year: 2027, amountMinor: 1 }] as never, LIVE); });
+    expect(result.current.ledgerMeta.ready).toBe(true);
+    expect(result.current.annualBudgets.map((b) => b.id)).toEqual(['beauty~2027']);
     expect(result.current.calc.ready).toBe(false);
   });
 
