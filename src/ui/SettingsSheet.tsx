@@ -36,6 +36,8 @@ interface Props {
   onImportLedger: () => void | Promise<void>;
   /** 지난 예정 정리 창을 연다. 로그인했을 때만 준다. */
   onCleanPastPlans?: () => void;
+  /** 예전 '대출' 카테고리 지출 정리 창을 연다. 로그인했을 때만 준다. */
+  onCleanLoanCategory?: () => void;
   onMigrate: () => void | Promise<void>;
   onSignOut: () => void;
   onClose: () => void;
@@ -51,7 +53,7 @@ const FONT_SCALES: Array<[FontScale, string]> = [
 export function SettingsSheet({
   user, theme, fontScale, weekStart, entryCount, legacyCount, migratedAt,
   recoveryRule, onRecoveryRule, ledger,
-  onTheme, onFontScale, onWeekStart, onExport, onImport, onImportLedger, onCleanPastPlans, onMigrate, onSignOut, onClose,
+  onTheme, onFontScale, onWeekStart, onExport, onImport, onImportLedger, onCleanPastPlans, onCleanLoanCategory, onMigrate, onSignOut, onClose,
 }: Props) {
   const [showRedo, setShowRedo] = useState(false);
   const [busy, setBusy] = useState<string | null>(null);
@@ -194,6 +196,15 @@ export function SettingsSheet({
                 <span className="set-row-b">
                   <span className="set-row-t">지난 예정 정리</span>
                   <span className="set-row-s">날짜가 지났는데 확정하지 않은 한 번짜리 예정을 골라 지웁니다. 백업을 확인하고 숫자가 그대로일 때만 지웁니다.</span>
+                </span>
+              </button>
+            )}
+            {onCleanLoanCategory && (
+              <button className="set-row" disabled={busy != null} onClick={onCleanLoanCategory}>
+                <span className="set-ico"><Icon.Repeat size={16} /></span>
+                <span className="set-row-b">
+                  <span className="set-row-t">예전 '대출' 카테고리 정리</span>
+                  <span className="set-row-s">'대출' 카테고리로 적은 지출을 흐름 대출로 한꺼번에 옮깁니다. 잔고 · 한도는 그대로이고 소비에서 빠집니다.</span>
                 </span>
               </button>
             )}

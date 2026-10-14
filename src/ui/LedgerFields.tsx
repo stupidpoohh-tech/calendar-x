@@ -97,7 +97,7 @@ export function LedgerFields({
       </div>}
       {!isLoan && picked && isLoanCategory(picked) && (
         <p className="mod-hint">
-          예전에 '대출' 카테고리로 적은 거래입니다. 지금은 지출로 셉니다 — 빚을 갚은 돈이면 흐름에서 대출을 고르세요.
+          예전에 '대출' 카테고리로 적은 거래입니다. 지금은 지출로 셉니다 — 빚을 갚은 돈이면 흐름에서 대출을 고르세요. 여러 건은 설정 &gt; 데이터 &gt; '예전 대출 카테고리 정리' 로 한꺼번에 옮깁니다.
         </p>
       )}
 

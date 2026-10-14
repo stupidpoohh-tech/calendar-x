@@ -44,6 +44,7 @@ import type {
 import { ConfirmSheet } from '../ui/ConfirmSheet';
 import { LedgerScreen, type SubscribeAll } from '../ui/LedgerScreen';
 import { PocketSheet } from '../ui/PocketSheet';
+import { LoanCategorySheet } from '../ui/LoanCategorySheet';
 import { PastPlanSheet } from '../ui/PastPlanSheet';
 import type { PocketFocus } from '../ui/BudgetPanel';
 import { LedgerImportPreview, LedgerImportProblems } from '../ui/LedgerImport';
@@ -128,6 +129,7 @@ function Workspace({ uid, user, onSignOut }: WorkspaceProps) {
   const [daySheet, setDaySheet] = useState<string | null>(null);
   // 지난 예정 정리 창 — 설정 > 데이터에서만 연다.
   const [pastPlanOpen, setPastPlanOpen] = useState(false);
+  const [loanCatOpen, setLoanCatOpen] = useState(false);
   // 생활비 · 세이브 창. 카드의 확보 줄 · 달력의 생활비 막대 · '+ 생활비' 가 모두 이 하나를 연다.
   const [pocketFocus, setPocketFocus] = useState<PocketFocus | null>(null);
   const [modal, setModal] = useState<{
@@ -1162,6 +1164,26 @@ function Workspace({ uid, user, onSignOut }: WorkspaceProps) {
   }, [isAnon, uid, promptLogin, commit]);
 
   /**
+   * 고친 거래를 묶음으로 쓴다(일괄 정리 · 입력 리스트). 기존 쓰기 큐 그대로 — 거절된 묶음은
+   * '저장하지 못한 것' 목록에 남는다. 서버가 받은 건수와 거절된 건수를 돌려준다.
+   */
+  const writeLedgerEntries = useCallback(async (list: Entry[], label: string) => {
+    if (isAnon || !uid) { void promptLogin(); return { ok: 0, failed: list.length }; }
+    const CHUNK = 400;
+    const results = await Promise.all(Array.from({ length: Math.ceil(list.length / CHUNK) }, (_, i) => {
+      const part = list.slice(i * CHUNK, (i + 1) * CHUNK);
+      return commit({
+        kind: 'ledgerBatch', label, summary: `${part.length.toLocaleString('ko-KR')}건`,
+        payload: { entries: part, deleteIds: [], accounts: [] },
+      }).then((ok) => ({ ok, n: part.length }));
+    }));
+    return {
+      ok: results.filter((r) => r.ok).reduce((t, r) => t + r.n, 0),
+      failed: results.filter((r) => !r.ok).reduce((t, r) => t + r.n, 0),
+    };
+  }, [isAnon, uid, promptLogin, commit]);
+
+  /**
    * 백업 가져오기.
    *
    * 순서: 파일 읽기·검증 → (병합만) 없는 것만 만들기 → 결과 보고.
@@ -1985,6 +2007,7 @@ function Workspace({ uid, user, onSignOut }: WorkspaceProps) {
             onSeedCategories={seedCategories}
             onEntryClick={openLedgerEntry}
             actions={quickActions}
+            onSaveMany={writeLedgerEntries}
             onSaveCategoryBudget={saveCategoryBudget}
             ledgerNotes={store.ledgerNotes}
             notesFeed={store.ledgerNotesFeed}
@@ -2115,6 +2138,15 @@ function Workspace({ uid, user, onSignOut }: WorkspaceProps) {
           onBackup={handleExport}
           onDelete={deletePastPlans}
           onClose={() => setPastPlanOpen(false)}
+        />
+      )}
+      {loanCatOpen && uid && !isAnon && (
+        <LoanCategorySheet
+          categories={store.categories}
+          load={() => fetchLedgerFromServer(db, uid).then((d) => d.entries)}
+          onBackup={handleExport}
+          onApply={writeLedgerEntries}
+          onClose={() => setLoanCatOpen(false)}
         />
       )}
       {pocketFocus && ledgerOn && (
@@ -2322,6 +2354,7 @@ function Workspace({ uid, user, onSignOut }: WorkspaceProps) {
           recoveryRule={recovery.rule}
           onRecoveryRule={recovery.saveRule}
           onCleanPastPlans={isAnon || !uid ? undefined : () => { setShowSettings(false); setPastPlanOpen(true); }}
+          onCleanLoanCategory={isAnon || !uid ? undefined : () => { setShowSettings(false); setLoanCatOpen(true); }}
           ledger={{
             todayISO: today,
             settleDay: store.ledger.settleDay,

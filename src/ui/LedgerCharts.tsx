@@ -10,7 +10,8 @@
  */
 import { useMemo, useState } from 'react';
 import {
-  actualsIn, averagedPeriods, categoryTrends, periodSeries, pieSlices, totalsOf, type PeriodSeries, type PieSlice,
+  actualsIn, averagedPeriods, categoryTrends, onSide, periodSeries, pieSlices, totalsOf, UNCATEGORIZED,
+  type PeriodSeries, type PieSlice, type Side,
 } from '../domain/ledgerStats';
 import { compactAmount, formatAmount, formatSigned } from '../domain/money';
 import {
@@ -220,13 +221,33 @@ const pct = (v: number, total: number) => `${total > 0 ? Math.round((v / total) 
  * 쓴 적이 있는 카테고리는 접어 둔 묶음으로 남긴다 — 줄이 끝없이 길어지지 않게, 그러나 "이번에는
  * 안 썼다" 가 보이게. 수입원도 여기서 본다(예산 보기에는 없다).
  */
-export function LedgerStats({ entries, settleDay, todayISO, period, categories }: {
+export function LedgerStats({ entries, settleDay, todayISO, period, categories, onEntryClick }: {
   entries: readonly Entry[];
   settleDay: number;
   todayISO: string;
   period: Period;
   categories: readonly Category[];
+  /** 펼친 카드의 거래를 누르면 그 거래 창을 연다. */
+  onEntryClick?: (e: Entry) => void;
 }) {
+  /*
+    카테고리 줄을 누르면 그 줄 아래에 이 기간의 거래가 카드로 펼쳐진다 — 합계가 무엇으로 이루어졌는지
+    다른 보기로 옮겨 가지 않고 본다. 한 번에 하나만 펼친다. 기간을 옮기면 접는다(다른 기간의 줄이다).
+  */
+  const [open, setOpen] = useState<{ period: string; key: string } | null>(null);
+  const openKey = open?.period === period.key ? open.key : null;
+  const nowActuals = useMemo(() => actualsIn(entries, period.start, period.end), [entries, period.start, period.end]);
+  const detail = (side: Side, categoryId: string | null) => {
+    const key = `${side}:${categoryId ?? '*'}`;
+    return {
+      open: openKey === key,
+      onToggle: () => setOpen(openKey === key ? null : { period: period.key, key }),
+      entries: openKey === key
+        ? nowActuals.filter((e) => onSide(e, side) && (categoryId === null || (e.money?.categoryId || UNCATEGORIZED) === categoryId))
+        : [],
+      onEntryClick,
+    };
+  };
   // 고른 기간까지 열두 기간 — 막대와 월평균의 창이다. 월별 추이와 같은 창이라 두 화면의 평균이 맞는다.
   const periods = useMemo(
     () => periodsBetween(shiftPeriodKey(period.key, -11), period.key, settleDay),
@@ -320,6 +341,7 @@ export function LedgerStats({ entries, settleDay, todayISO, period, categories }
                   key={key} name={t.name} slot={slotOf.has(key) ? (slotOf.get(key) ?? 'rest') : 'rest'}
                   now={t.now} prev={t.prev} share={totals.consumption > 0 ? t.now / totals.consumption : 0}
                   average={t.average} perPeriod={t.perPeriod} peak={peak} periods={periods}
+                  detail={detail('consumption', t.categoryId)}
                 />
               );
             })}
@@ -328,6 +350,7 @@ export function LedgerStats({ entries, settleDay, todayISO, period, categories }
                 name="금융비용 (대출 이자)" now={financeNow} prev={last > 0 ? financePer[last - 1] ?? 0 : null}
                 share={null} average={financeAvg}
                 perPeriod={financePer} peak={Math.max(1, ...financePer)} periods={periods} finance
+                detail={detail('finance', null)}
               />
             )}
           </ul>
@@ -357,6 +380,7 @@ export function LedgerStats({ entries, settleDay, todayISO, period, categories }
               key={t.categoryId || '__none'} name={t.name} now={t.now} prev={t.prev}
               share={totals.income > 0 ? t.now / totals.income : null} shareOf="수입"
               average={t.average} perPeriod={t.perPeriod} peak={incomePeak} periods={periods}
+              detail={detail('income', t.categoryId)}
             />
           ))}
         </ul>
@@ -377,13 +401,27 @@ function Delta({ now, prev }: { now: number; prev: number }) {
   );
 }
 
-function StatRow({ name, slot, now, prev = null, share, shareOf = '소비', average, perPeriod, peak, periods, finance = false }: {
+interface StatDetail {
+  open: boolean;
+  onToggle: () => void;
+  /** 펼쳤을 때만 채운다. */
+  entries: readonly Entry[];
+  onEntryClick?: (e: Entry) => void;
+}
+
+const dayOf = (iso: string) => {
+  const d = new Date(`${iso}T00:00:00`);
+  return `${Number(iso.slice(5, 7))}월 ${Number(iso.slice(8, 10))}일 (${'일월화수목금토'[d.getDay()]})`;
+};
+
+function StatRow({ name, slot, now, prev = null, share, shareOf = '소비', average, perPeriod, peak, periods, finance = false, detail }: {
   name: string; slot?: number | 'rest'; now: number; prev?: number | null; share: number | null; shareOf?: string;
   average: number | null; perPeriod: readonly number[]; peak: number; periods: readonly Period[]; finance?: boolean;
+  detail?: StatDetail;
 }) {
   const last = perPeriod.length - 1;
-  return (
-    <li className={'led-stat' + (finance ? ' finance' : '')}>
+  const head = (
+    <>
       <div className="led-stat-h">
         <span className="led-stat-n">{slot != null && <i className="sw" data-slot={slot} />}{name}</span>
         <span className="num">{formatAmount(now)}</span>
@@ -393,6 +431,15 @@ function StatRow({ name, slot, now, prev = null, share, shareOf = '소비', aver
         {prev != null && <span>{deltaText(now, prev)}</span>}
         <span>월평균 {average == null ? '—' : formatAmount(average)}</span>
       </div>
+    </>
+  );
+  return (
+    <li className={'led-stat' + (finance ? ' finance' : '') + (detail?.open ? ' open' : '')}>
+      {detail ? (
+        <button className="led-stat-b" aria-expanded={detail.open} onClick={detail.onToggle} aria-label={`${name} 거래 ${detail.open ? '접기' : '보기'}`}>
+          {head}
+        </button>
+      ) : head}
       {/* 열두 기간 막대. 고른 기간(맨 오른쪽)만 진하게 — 한 계열이라 범례가 없다. */}
       <svg className="led-spark" viewBox="0 0 120 24" preserveAspectRatio="none" role="img"
            aria-label={`${name} 기간별 소비`}>
@@ -406,6 +453,27 @@ function StatRow({ name, slot, now, prev = null, share, shareOf = '소비', aver
           );
         })}
       </svg>
+      {detail?.open && (
+        <div className="led-stat-d" role="region" aria-label={`${name} 거래`}>
+          <div className="led-stat-dh num">
+            <span>이 기간 {detail.entries.length.toLocaleString('ko-KR')}건</span>
+            <span>합계 {formatAmount(detail.entries.reduce((a, e) => a + Math.abs(e.money?.amountMinor ?? 0), 0))}</span>
+          </div>
+          <ul>
+            {[...detail.entries]
+              .sort((a, b) => b.startDate.localeCompare(a.startDate) || Math.abs(b.money?.amountMinor ?? 0) - Math.abs(a.money?.amountMinor ?? 0))
+              .map((e) => (
+                <li key={e.id}>
+                  <button className="led-stat-dr" onClick={() => detail.onEntryClick?.(e)} disabled={!detail.onEntryClick}>
+                    <span className="led-stat-dd num">{dayOf(e.startDate)}</span>
+                    <span className="led-stat-dt">{e.title.trim() || name}</span>
+                    <span className="num">{formatAmount(Math.abs(e.money?.amountMinor ?? 0))}</span>
+                  </button>
+                </li>
+              ))}
+          </ul>
+        </div>
+      )}
     </li>
   );
 }

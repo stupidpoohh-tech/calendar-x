@@ -196,6 +196,8 @@ button.led-cat-n:hover svg { color: var(--accent); }
 
 .led-search { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; }
 .led-search .mod-input { flex: 1 1 200px; min-width: 0; }
+.led-sort { align-self: flex-start; }
+.led-flat { list-style: none; margin: 0; padding: 0; }
 
 /* 일자 머리 아래 거래는 들여 쓰고 왼쪽 줄로 묶는다 — 날짜가 바뀌는 자리가 한눈에 보인다. */
 .led-days { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 18px; }
@@ -301,6 +303,30 @@ button.led-cat-n:hover svg { color: var(--accent); }
 .led-spark { grid-column: 2; grid-row: 1 / span 2; width: 120px; height: 24px; }
 .led-spark .bar.seq { fill: var(--led-in); }
 .led-stat.finance .led-stat-n { color: var(--ink-2); font-style: italic; }
+/* 카테고리 줄을 누르면 그 아래 이 기간의 거래가 카드로 펼쳐진다. */
+.led-stat-b {
+  grid-column: 1; grid-row: 1 / span 2; display: flex; flex-direction: column; gap: 2px; min-width: 0;
+  padding: 0; background: none; border: 0; font: inherit; text-align: left; cursor: pointer; color: inherit;
+}
+.led-stat-b:hover .led-stat-n { color: var(--accent); }
+.led-stat-b:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 4px; }
+.led-stat-b .led-stat-n::after { content: ' ›'; color: var(--ink-4); }
+.led-stat.open .led-stat-b .led-stat-n::after { content: ' ⌄'; }
+.led-stat-d {
+  grid-column: 1 / -1; margin-top: 8px; padding: 8px 10px; background: var(--bg-soft);
+  border: 1px solid var(--line); border-radius: var(--radius-sm);
+}
+.led-stat-dh { display: flex; justify-content: space-between; font-size: 0.6875rem; color: var(--ink-3); padding-bottom: 4px; }
+.led-stat-d ul { list-style: none; margin: 0; padding: 0; }
+.led-stat-dr {
+  display: flex; align-items: center; gap: 10px; width: 100%; min-height: 36px; padding: 6px 2px;
+  background: none; border: 0; border-top: 1px solid var(--line); font: inherit; font-size: 0.8125rem;
+  color: var(--ink); text-align: left; cursor: pointer;
+}
+.led-stat-dr:hover { background: var(--accent-soft); }
+.led-stat-dr:disabled { cursor: default; }
+.led-stat-dd { flex: none; width: 88px; font-size: 0.75rem; color: var(--ink-3); }
+.led-stat-dt { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
 @media (max-width: 480px) {
   .led-totals b { font-size: 0.875rem; }
@@ -472,4 +498,31 @@ button.led-cat-n:hover svg { color: var(--accent); }
 .pp-result {
   display: flex; flex-direction: column; gap: 2px; padding: 10px 12px; font-size: 0.8125rem;
   border: 1px solid var(--line); border-radius: var(--radius); background: var(--bg-soft);
+}
+
+/* ---------- 입력 리스트 ---------- */
+.led-dot { display: inline-block; width: 6px; height: 6px; margin-left: 5px; border-radius: 50%; background: var(--accent); vertical-align: middle; }
+.bi { display: flex; flex-direction: column; gap: 8px; }
+.bi-rows { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+.bi-row {
+  display: grid; grid-template-columns: 9.5rem 5.5rem minmax(7rem, 1fr) minmax(8rem, 2fr) 9rem 32px; gap: 6px; align-items: center;
+  padding: 6px; border: 1px solid var(--line); border-radius: var(--radius-sm); background: var(--bg);
+}
+.bi-row.bad { border-color: var(--bad); }
+.bi-row .mod-input { min-width: 0; padding: 6px 8px; font-size: 0.8125rem; }
+.bi-amt { text-align: right; }
+.bi-amt.plus { color: var(--good); }
+.bi-amt.minus { color: var(--bad); }
+.bi-err { grid-column: 1 / -1; font-size: 0.71875rem; color: var(--bad); }
+.bi-add { align-self: flex-start; display: inline-flex; align-items: center; gap: 4px; }
+.bi-foot { display: flex; align-items: center; justify-content: space-between; gap: 8px; flex-wrap: wrap; font-size: 0.8125rem; color: var(--ink-2); }
+.bi-foot b.plus { color: var(--good); }
+.bi-foot b.minus { color: var(--bad); }
+/* 좁은 화면 — 한 줄을 두 줄로: 날짜 · 흐름 · 금액 / 내역 · 카테고리 · 지우기 */
+@media (max-width: 720px) {
+  .bi-row { grid-template-columns: minmax(0, 1.25fr) minmax(0, 0.8fr) minmax(0, 1.2fr); }
+  .bi-title { grid-column: 1 / span 2; }
+  .bi-cat { grid-column: 3; }
+  .bi-x { position: absolute; right: -6px; top: -6px; background: var(--bg-elev); border: 1px solid var(--line); border-radius: 50%; width: 22px; height: 22px; }
+  .bi-row { position: relative; }
 }

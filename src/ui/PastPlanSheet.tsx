@@ -66,6 +66,10 @@ export function PastPlanSheet({ todayISO, load, onBackup, onDelete, onClose }: P
     try {
       const d = await load();
       setData(d);
+      // 처음에는 후보만 골라 둔다. 확인 필요는 사용자가 직접 고른다. 막힘은 고를 수 없다.
+      // 자료와 같은 순간에 정한다 — 그린 뒤 effect 로 고르면, 그 사이에 누른 '전체 선택' 을 덮는다.
+      const sc = scanPastPlanned(d.entries, d.accounts, todayISO, { budgets: d.budgets, reserves: d.reserves });
+      setSelected(new Set(sc.items.filter((i) => i.group === 'candidate').map((i) => i.entry.id)));
       setPhase('ready');
       return d;
     } catch {
@@ -83,10 +87,6 @@ export function PastPlanSheet({ todayISO, load, onBackup, onDelete, onClose }: P
     () => (data ? scanPastPlanned(data.entries, data.accounts, todayISO, res) : null),
     [data, todayISO, res],
   );
-  // 처음에는 후보만 골라 둔다. 확인 필요는 사용자가 직접 고른다. 막힘은 고를 수 없다.
-  useEffect(() => {
-    if (scan) setSelected(new Set(scan.items.filter((i) => i.group === 'candidate').map((i) => i.entry.id)));
-  }, [scan]);
 
   const byId = useMemo(() => new Map((scan?.items ?? []).map((i) => [i.entry.id, i])), [scan]);
   const picked = useMemo(() => [...selected].map((id) => byId.get(id)).filter((x): x is PastPlanItem => !!x), [selected, byId]);

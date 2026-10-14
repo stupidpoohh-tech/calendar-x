@@ -69,6 +69,29 @@ describe('내역', () => {
     expect(screen.getByText('9.25 – 10.24')).toBeInTheDocument();
   });
 
+  it('입력 리스트 — 내역의 하위 보기. 적던 줄은 목록을 다녀와도 남는다', () => {
+    mount({ entries, onSaveMany: vi.fn(() => Promise.resolve({ ok: 0, failed: 0 })) });
+    fireEvent.click(screen.getByRole('radio', { name: /입력 리스트/ }));
+    expect(screen.getByRole('region', { name: '입력 리스트' })).toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText('1번째 줄 금액'), { target: { value: '7000' } });
+    fireEvent.click(screen.getByRole('radio', { name: '목록' }));
+    expect(screen.getByLabelText('적던 줄 있음')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('radio', { name: /입력 리스트/ }));
+    expect(screen.getByLabelText('1번째 줄 금액')).toHaveValue('7000');
+  });
+
+  it('날짜순(일자로 묶음)과 큰 금액순(묶지 않고 날짜를 줄에) 사이를 바꾼다', () => {
+    mount({ entries });
+    expect(screen.getByRole('radio', { name: '날짜순' })).toHaveAttribute('aria-checked', 'true');
+    expect(document.querySelectorAll('.led-day').length).toBeGreaterThan(1);
+    fireEvent.click(screen.getByRole('radio', { name: '큰 금액순' }));
+    const flat = screen.getByRole('list', { name: '큰 금액순 거래' });
+    const rows = within(flat).getAllByRole('button');
+    expect(rows.map((r) => r.querySelector('.led-row-a')!.textContent)).toEqual(['+3,000,000', '−300,000', '−50,000', '−12,000']);
+    expect(rows[3]!.textContent).toContain('10월 1일');
+    expect(document.querySelectorAll('.led-day')).toHaveLength(0);
+  });
+
   it('합계는 실제 거래만, 원금은 지출이 아니라 대금 — 수지 = 수입 − 지출 − 대금', () => {
     mount({ entries });
     const totals = document.querySelector('.led-totals')! as HTMLElement;
@@ -315,6 +338,35 @@ describe('분석 · 카테고리 — 정산 기간 하나', () => {
     const legend = screen.getByRole('list', { name: '소비 비중' });
     expect(legend.textContent).toContain('식비75%');
     expect(legend.textContent).toContain('카페25%');
+  });
+
+  it('카테고리 줄을 누르면 이 기간의 그 카테고리 거래가 아래 카드로 펼쳐진다 — 하나만, 다시 누르면 접힌다', () => {
+    const p = mount({
+      tab: 'stats', settleDay: 1,
+      entries: [
+        tx('c', '2026-10-05', 300_000, { categoryId: 'food' }, { title: '장보기' }),
+        tx('e', '2026-10-07', 20_000, { categoryId: 'food' }, { title: '점심' }),
+        tx('old', '2026-09-07', 9_000, { categoryId: 'food' }, { title: '지난달 점심' }),
+        tx('d', '2026-10-06', 100_000, { categoryId: 'cafe' }, { title: '원두' }),
+      ],
+    });
+    fireEvent.click(screen.getByRole('radio', { name: '카테고리' }));
+    const food = screen.getByRole('button', { name: '식비 거래 보기' });
+    expect(food).toHaveAttribute('aria-expanded', 'false');
+    fireEvent.click(food);
+    const card = screen.getByRole('region', { name: '식비 거래' });
+    expect(card.textContent).toContain('이 기간 2건');
+    expect(card.textContent).toContain('합계 320,000');
+    const rows = within(card).getAllByRole('button');
+    expect(rows.map((r) => r.textContent)).toEqual(['10월 7일 (수)점심20,000', '10월 5일 (월)장보기300,000']);
+    fireEvent.click(rows[1]!);
+    expect(p.onEntryClick).toHaveBeenCalledWith(expect.objectContaining({ id: 'c' }));
+    // 다른 줄을 펼치면 앞 카드는 접힌다.
+    fireEvent.click(screen.getByRole('button', { name: '카페 거래 보기' }));
+    expect(screen.queryByRole('region', { name: '식비 거래' })).toBeNull();
+    expect(screen.getByRole('region', { name: '카페 거래' }).textContent).toContain('원두');
+    fireEvent.click(screen.getByRole('button', { name: '카페 거래 접기' }));
+    expect(screen.queryByRole('region', { name: '카페 거래' })).toBeNull();
   });
 
   it('기간을 옮기면 그 기간을 본다', () => {

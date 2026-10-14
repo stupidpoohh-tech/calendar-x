@@ -48,6 +48,8 @@ import { LEDGER_NOTE_MAX } from '../data/converters';
 import type { FeedState } from '../app/useStore';
 import { Icon } from './Icon';
 import { isComposingEnter } from './ime';
+import { blankRow, type BatchRow } from './batchRows';
+import { LedgerBatchInput } from './LedgerBatchInput';
 import { LedgerMonthly, LedgerStats } from './LedgerCharts';
 import { dayLabel, feedVerdict } from './ledgerView';
 
@@ -77,6 +79,8 @@ export interface LedgerScreenProps {
   categoriesReady: boolean;
   onSeedCategories: () => void;
   onEntryClick: (e: Entry) => void;
+  /** 입력 리스트의 저장 — 여러 거래를 묶음으로 쓴다. 없으면 입력 리스트를 띄우지 않는다. */
+  onSaveMany?: (entries: Entry[], label: string) => Promise<{ ok: number; failed: number }>;
   /** 좁은 화면의 추가(+) · 더보기(···). 기간 도구 옆에 둔다 — 머리에 한 줄을 따로 쓰지 않게. */
   actions?: ReactNode;
   onSaveCategoryBudget: (b: CategoryBudget) => void;
@@ -95,6 +99,10 @@ export function LedgerScreen(props: LedgerScreenProps) {
   const current = periodOf(todayISO, settleDay);
   const verdict = feedVerdict(feed);
   const [statsView, setStatsView] = useState<'trend' | 'category'>('trend');
+  /** 내역의 하위 보기 — 목록 · 입력 리스트. 적던 줄은 보기를 오가도 남는다(가계부를 나가면 사라진다). */
+  const [historyView, setHistoryView] = useState<'list' | 'input'>('list');
+  const addDate = todayISO >= period.start && todayISO <= period.end ? todayISO : period.end;
+  const [draft, setDraft] = useState<BatchRow[]>(() => [blankRow(addDate), blankRow(addDate), blankRow(addDate)]);
 
   const periodNav = (
     <PeriodNav
@@ -128,7 +136,23 @@ export function LedgerScreen(props: LedgerScreenProps) {
             {periodNav}
             {props.actions}
           </div>
-          {gated(<LedgerHistory {...props} period={period} />)}
+          {props.onSaveMany && (
+            <div className="seg led-subview" role="radiogroup" aria-label="내역 보기">
+              {([['list', '목록'], ['input', '입력 리스트']] as const).map(([id, label]) => (
+                <button key={id} role="radio" aria-checked={historyView === id}
+                  className={'seg-btn' + (historyView === id ? ' on' : '')} onClick={() => setHistoryView(id)}>
+                  {label}
+                  {id === 'input' && draft.some((r) => r.amount.trim() || r.title.trim()) && <span className="led-dot" aria-label="적던 줄 있음" />}
+                </button>
+              ))}
+            </div>
+          )}
+          {historyView === 'input' && props.onSaveMany ? (
+            <LedgerBatchInput
+              rows={draft} onRows={setDraft} todayISO={todayISO} defaultDate={addDate}
+              categories={props.categories} categoriesReady={props.categoriesReady} onSave={props.onSaveMany}
+            />
+          ) : gated(<LedgerHistory {...props} period={period} />)}
         </>
       )}
 
@@ -166,7 +190,7 @@ export function LedgerScreen(props: LedgerScreenProps) {
           {statsView === 'category' && gated(
             <LedgerStats
               entries={props.entries} settleDay={settleDay} todayISO={todayISO}
-              period={period} categories={props.categories}
+              period={period} categories={props.categories} onEntryClick={props.onEntryClick}
             />,
           )}
           {/* 두 하위 보기가 같은 기간을 본다 — 돌아보기는 그 아래 한 번만 그린다. */}
@@ -229,6 +253,8 @@ function LedgerHistory({
 }: LedgerScreenProps & { period: Period }) {
   const [q, setQ] = useState('');
   const [scope, setScope] = useState<Scope>('period');
+  /** 날짜순(일자로 묶음) · 큰 금액순(묶지 않고 금액 큰 것부터). 큰 지출을 먼저 찾을 때 쓴다. */
+  const [sort, setSort] = useState<'date' | 'amount'>('date');
   const [all, setAll] = useState<{ state: 'loading' | 'ready' | 'error'; items: Entry[] }>({ state: 'loading', items: [] });
   const [retry, setRetry] = useState(0);
 
@@ -262,8 +288,38 @@ function LedgerHistory({
   }, [scope, all.items, entries, period, q, categories, yearRange]);
 
   const groups = useMemo(() => groupByDay(items), [items]);
+  const byAmount = useMemo(
+    () => (sort === 'amount' ? [...items].sort((a, b) => b.amount - a.amount || b.date.localeCompare(a.date)) : []),
+    [items, sort],
+  );
   const catName = (id: string | null | undefined) => (id ? categories.find((c) => c.id === id)?.name ?? '알 수 없는 카테고리' : null);
   const searching = q.trim().length > 0 || scope !== 'period';
+  /** 거래 한 줄. 큰 금액순에서는 일자로 묶지 않으므로 날짜를 줄 안에 적는다. */
+  const row = (it: HistoryItem, withDate: boolean) => {
+    const badge = flowBadge(it.entry);
+    const cat = catName(it.entry.money?.categoryId);
+    const method = it.entry.money?.method;
+    return (
+      <li key={it.key}>
+        <button className={'led-row' + (it.planned ? ' planned' : '')} onClick={() => onEntryClick(it.entry)}>
+          <span className="led-row-m">
+            <span className="led-row-t">
+              {it.planned && <span className="led-badge muted">예정</span>}
+              {it.entry.title.trim() || cat || (it.sign > 0 ? '수입' : '지출')}
+            </span>
+            <span className="led-row-s">
+              {[withDate ? dayLabel(it.date) : null, cat, method, badge].filter(Boolean).join(' · ')}
+              {it.entry.money?.plannedRef && ' · 예정 확정'}
+            </span>
+          </span>
+          {/* 들어온 돈 · 나간 돈을 색으로 먼저 가른다. 예정도 같다 — 예정은 배지와 옅은 줄로 따로 읽힌다. */}
+          <span className={'led-row-a num ' + (it.sign > 0 ? 'plus' : 'minus')}>
+            {it.sign > 0 ? '+' : '−'}{formatAmount(it.amount)}
+          </span>
+        </button>
+      </li>
+    );
+  };
 
   return (
     <div className="led-body">
@@ -287,6 +343,17 @@ function LedgerHistory({
           ))}
         </div>
       </div>
+      <div className="seg led-sort" role="radiogroup" aria-label="정렬">
+        {([['date', '날짜순'], ['amount', '큰 금액순']] as const).map(([id, label]) => (
+          <button
+            key={id} role="radio" aria-checked={sort === id}
+            className={'seg-btn' + (sort === id ? ' on' : '')}
+            onClick={() => setSort(id)}
+          >
+            {label}
+          </button>
+        ))}
+      </div>
       {scope === 'year' && (
         <p className="led-note led-scope">{year}년 정산 연도 · {periodRange({ key: period.key, start: yearRange.start, end: yearRange.end })}</p>
       )}
@@ -303,6 +370,10 @@ function LedgerHistory({
         <p className="led-empty">
           {searching ? '찾는 거래가 없습니다.' : '이 기간에 기록한 거래가 없습니다.'}
         </p>
+      ) : sort === 'amount' ? (
+        <ul className="led-flat" aria-label="큰 금액순 거래">
+          {byAmount.map((it) => row(it, true))}
+        </ul>
       ) : (
         <ol className="led-days">
           {groups.map((g) => (
@@ -315,31 +386,7 @@ function LedgerHistory({
                 </span>
               </div>
               <ul>
-                {g.items.map((it) => {
-                  const badge = flowBadge(it.entry);
-                  const cat = catName(it.entry.money?.categoryId);
-                  const method = it.entry.money?.method;
-                  return (
-                    <li key={it.key}>
-                      <button className={'led-row' + (it.planned ? ' planned' : '')} onClick={() => onEntryClick(it.entry)}>
-                        <span className="led-row-m">
-                          <span className="led-row-t">
-                            {it.planned && <span className="led-badge muted">예정</span>}
-                            {it.entry.title.trim() || cat || (it.sign > 0 ? '수입' : '지출')}
-                          </span>
-                          <span className="led-row-s">
-                            {[cat, method, badge].filter(Boolean).join(' · ')}
-                            {it.entry.money?.plannedRef && ' · 예정 확정'}
-                          </span>
-                        </span>
-                        {/* 들어온 돈 · 나간 돈을 색으로 먼저 가른다. 예정도 같다 — 예정은 배지와 옅은 줄로 따로 읽힌다. */}
-                        <span className={'led-row-a num ' + (it.sign > 0 ? 'plus' : 'minus')}>
-                          {it.sign > 0 ? '+' : '−'}{formatAmount(it.amount)}
-                        </span>
-                      </button>
-                    </li>
-                  );
-                })}
+                {g.items.map((it) => row(it, false))}
               </ul>
             </li>
           ))}
