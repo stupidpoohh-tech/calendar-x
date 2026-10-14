@@ -144,9 +144,22 @@ service cloud.firestore {
       );
     }
 
+    // 내 캘린더 구성(가계부 · 노트 · 스위처 표시, 달력 금액 기준). 화면 설정이라 권한 · 자료와 무관하다.
+    function validLayout(d) {
+      return !('layout' in d) || (
+        d.layout is map
+        && d.layout.keys().hasOnly(['ledger', 'notes', 'sharedSwitcher', 'calendarAmount'])
+        && (!('ledger' in d.layout) || d.layout.ledger is bool)
+        && (!('notes' in d.layout) || d.layout.notes is bool)
+        && (!('sharedSwitcher' in d.layout) || d.layout.sharedSwitcher is bool)
+        && (!('calendarAmount' in d.layout)
+            || d.layout.calendarAmount in ['balance', 'projected', 'available', 'pocket'])
+      );
+    }
+
     match /users/{uid} {
       allow read, delete: if isOwner(uid);
-      allow create, update: if isOwner(uid) && validLedgerSettings(data());
+      allow create, update: if isOwner(uid) && validLedgerSettings(data()) && validLayout(data());
 
       match /entries/{entryId} {
         allow read, delete: if isOwner(uid);

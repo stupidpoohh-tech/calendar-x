@@ -2,6 +2,7 @@ import { useState } from 'react';
 import type { User } from 'firebase/auth';
 import type { Category, FontScale, RecoveryRule, ThemePref, WeekStart } from '../domain/types';
 import { Icon } from './Icon';
+import { LayoutSettings, type LayoutSettingsProps } from './LayoutSettings';
 import { LedgerSettings } from './LedgerSettings';
 import { RecoverySettings } from './RecoverySettings';
 
@@ -16,6 +17,10 @@ interface Props {
   migratedAt: string | null;
   recoveryRule: RecoveryRule;
   onRecoveryRule: (next: RecoveryRule) => void;
+  onRecoveryPause: () => void;
+  onRecoveryResume: () => void;
+  /** 내 캘린더 구성 · 캘린더 표시. 가계부를 숨기면 아래 가계부 설정 · 가계부 도구도 빠진다. */
+  layout: LayoutSettingsProps;
   /** 가계부 — 정산 시작일 · 카테고리. */
   ledger: {
     todayISO: string;
@@ -52,7 +57,7 @@ const FONT_SCALES: Array<[FontScale, string]> = [
 
 export function SettingsSheet({
   user, theme, fontScale, weekStart, entryCount, legacyCount, migratedAt,
-  recoveryRule, onRecoveryRule, ledger,
+  recoveryRule, onRecoveryRule, onRecoveryPause, onRecoveryResume, layout, ledger,
   onTheme, onFontScale, onWeekStart, onExport, onImport, onImportLedger, onCleanPastPlans, onCleanLoanCategory, onMigrate, onSignOut, onClose,
 }: Props) {
   const [showRedo, setShowRedo] = useState(false);
@@ -115,6 +120,8 @@ export function SettingsSheet({
             </div>
           )}
 
+          <LayoutSettings {...layout} />
+
           <div className="set-grp">
             <h3 className="set-gt">표시</h3>
             <div className="set-row-inline">
@@ -163,9 +170,15 @@ export function SettingsSheet({
             </div>
           </div>
 
-          <LedgerSettings {...ledger} />
+          {/* 가계부를 숨기면 가계부 설정 · 도구도 숨긴다 — 자료는 그대로이고 백업에도 그대로 실린다. */}
+          {layout.layout.ledger && <LedgerSettings {...ledger} />}
 
-          <RecoverySettings rule={recoveryRule} onChange={onRecoveryRule} />
+          <RecoverySettings
+            rule={recoveryRule}
+            onChange={onRecoveryRule}
+            onPause={onRecoveryPause}
+            onResume={onRecoveryResume}
+          />
 
           <div className="set-grp">
             <h3 className="set-gt">데이터</h3>
@@ -183,14 +196,14 @@ export function SettingsSheet({
                 <span className="set-row-s">기존 데이터에 더합니다. 같은 항목은 지금 것을 남깁니다. 예전 형식도 받습니다.</span>
               </span>
             </button>
-            <button className="set-row" disabled={busy != null} onClick={() => run('ledger-import', onImportLedger)}>
+            {layout.layout.ledger && <button className="set-row" disabled={busy != null} onClick={() => run('ledger-import', onImportLedger)}>
               <span className="set-ico"><Icon.Upload size={16} /></span>
               <span className="set-row-b">
                 <span className="set-row-t">{busy === 'ledger-import' ? '가져오는 중…' : '가계부 내역 가져오기 (엑셀 · CSV)'}</span>
                 <span className="set-row-s">다른 가계부에서 내보낸 일자 · 구분 · 금액 표를 실제 거래로 더합니다. 여러 파일을 한 번에 고를 수 있습니다.</span>
               </span>
-            </button>
-            {onCleanPastPlans && (
+            </button>}
+            {layout.layout.ledger && onCleanPastPlans && (
               <button className="set-row" disabled={busy != null} onClick={onCleanPastPlans}>
                 <span className="set-ico"><Icon.X size={16} /></span>
                 <span className="set-row-b">
@@ -199,7 +212,7 @@ export function SettingsSheet({
                 </span>
               </button>
             )}
-            {onCleanLoanCategory && (
+            {layout.layout.ledger && onCleanLoanCategory && (
               <button className="set-row" disabled={busy != null} onClick={onCleanLoanCategory}>
                 <span className="set-ico"><Icon.Repeat size={16} /></span>
                 <span className="set-row-b">

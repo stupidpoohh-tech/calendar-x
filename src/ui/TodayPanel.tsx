@@ -49,6 +49,11 @@ interface Props {
   onPromote: (e: Entry) => void;
   onQuickIdea: (e: Entry) => void;
   onSaveAccount: (a: Account) => void;
+  /**
+   * 가계부 칸을 그리는가(설정 > 내 캘린더 구성). 숨기면 칸만 빠진다 — 잔고 · 계산은 그대로다.
+   * 가계부 항목을 요약 · 이번 주에서 빼는 것은 부르는 쪽이 `entries` 를 걸러서 한다.
+   */
+  showMoney?: boolean;
 }
 
 const NO_BUDGETS: readonly Budget[] = [];
@@ -62,7 +67,7 @@ export function TodayPanel({
   todayISO, entries, tideEntries, tideFrom, calcState = CALC_READY, accounts,
   budgets = NO_BUDGETS, reserves = NO_RESERVES, hasBalance,
   collapsed, onToggleCollapsed, moneyCollapsed, onToggleMoneyCollapsed,
-  onEntryClick, onStatusChange, onPromote, onQuickIdea, onSaveAccount,
+  onEntryClick, onStatusChange, onPromote, onQuickIdea, onSaveAccount, showMoney = true,
 }: Props) {
   const [idea, setIdea] = useState('');
   // 정산은 계산이다. 원본을 넘긴다.
@@ -134,7 +139,7 @@ export function TodayPanel({
 
       {!collapsed && (
         <>
-          <div className="tp-cols">
+          <div className="tp-cols" data-cols={showMoney ? 3 : 2}>
             {/* ---- 할 일 ---- */}
             <div className="tp-col" data-axis="task">
               <h3 className="tp-ct">할 일</h3>
@@ -189,7 +194,7 @@ export function TodayPanel({
             </div>
 
             {/* ---- 가계부 ---- */}
-            <div className={'tp-col' + (moneyCollapsed ? ' collapsed' : '')} data-axis="money">
+            {showMoney && <div className={'tp-col' + (moneyCollapsed ? ' collapsed' : '')} data-axis="money">
               <button
                 type="button"
                 className="tp-ct tp-ct-toggle"
@@ -249,7 +254,7 @@ export function TodayPanel({
                   </ul>
                 </>
               )}
-            </div>
+            </div>}
           </div>
 
           {upcoming.length > 0 && (

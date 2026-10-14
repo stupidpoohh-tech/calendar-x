@@ -418,7 +418,8 @@
 .tp-sum { font-size: 0.75rem; color: var(--ink-3); margin-left: auto; font-variant-numeric: tabular-nums; }
 
 .tp-cols { display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; }
-@media (max-width: 860px) { .tp-cols { grid-template-columns: 1fr; gap: 16px; } }
+.tp-cols[data-cols="2"] { grid-template-columns: repeat(2, 1fr); }
+@media (max-width: 860px) { .tp-cols, .tp-cols[data-cols="2"] { grid-template-columns: 1fr; gap: 16px; } }
 
 .tp-col { display: flex; flex-direction: column; gap: 7px; min-width: 0; }
 .tp-col[data-axis="task"] { --axis: var(--lens-task); }
@@ -902,6 +903,21 @@
 .set-row-b { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
 .set-row-t { font-size: 0.84375rem; font-weight: 500; }
 .set-row-s { font-size: 0.71875rem; color: var(--ink-3); }
+
+/* 내 캘린더 구성 — 끄는 자리가 없는 기능의 이름표, 달력 금액 고르기. */
+.set-fixed { font-size: 0.75rem; color: var(--ink-3); padding: 4px 10px; border: 1px dashed var(--line); border-radius: 999px; }
+.set-choices { display: flex; flex-direction: column; gap: 2px; }
+.set-choice {
+  display: flex; gap: 10px; align-items: flex-start; padding: 9px 10px; width: 100%; text-align: left;
+  background: transparent; border: 1px solid transparent; border-radius: var(--radius-sm); cursor: pointer;
+}
+.set-choice:hover { background: var(--bg-soft); border-color: var(--line); }
+.set-choice.on { border-color: var(--line); background: var(--bg-soft); }
+.set-choice-dot {
+  flex-shrink: 0; width: 14px; height: 14px; margin-top: 2px; border-radius: 50%;
+  border: 1.5px solid var(--ink-4); box-sizing: border-box;
+}
+.set-choice.on .set-choice-dot { border: 4px solid var(--ink); }
 
 .set-migrate {
   padding: 14px; border-radius: var(--radius-sm);

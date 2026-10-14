@@ -16,7 +16,8 @@ import { subscribeRecoveryRule } from '../data/repo';
 import { displayTitle } from '../domain/entry';
 import {
   canUndoComplete, completeRecovery, defaultRecoveryRule, generateRecovery, moveRecovery,
-  primeRule, scheduleDebtRecovery, skipRecovery, undoCompleteRecovery,
+  pauseRecovery, pauseReleases, primeRule, resumeRecovery, scheduleDebtRecovery, skipRecovery,
+  undoCompleteRecovery,
   type RecoveryTransition,
 } from '../domain/recovery';
 import type { Entry, RecoveryRule, TimeHM } from '../domain/types';
@@ -36,6 +37,12 @@ export interface RecoveryApi {
   move: (entry: Entry, toDate: string, toTime: TimeHM | null) => void;
   skip: (entry: Entry) => void;
   scheduleDebt: (dateISO: string, time: TimeHM | null) => void;
+  /** 일시중지하면 오늘 · 앞날에 잡힌 회차가 풀리는가. 그때만 확인창을 띄운다. */
+  pauseReleases: boolean;
+  /** 일시중지. 앞날 회차는 빚 없이 풀고, 규칙 · 기록 · 빚은 남긴다. */
+  pause: () => void;
+  /** 활성화 · 다시 활성화. 빚이 없으면 오늘 + 간격, 있으면 다시 잡기로. */
+  resume: () => void;
   /** 항목이 통째로 사라지는 경로(전체 교체 가져오기)에서 매달린 참조를 끊는다. */
   clearActive: () => void;
 }
@@ -159,6 +166,21 @@ export function useRecovery({ uid, todayISO, onError, commit }: Options): Recove
       push(scheduleDebtRecovery(rule, dateISO, time));
     },
 
+    pauseReleases: pauseReleases(rule, todayISO),
+
+    // 규칙과 풀리는 회차는 한 배치다 — 회차만 지워지고 규칙이 그것을 가리키면 다음 접속이 헤맨다.
+    pause: () => {
+      if (!uid || !rule.enabled) return;
+      const p = pauseRecovery(rule, todayISO);
+      push({ rule: p.rule, entry: null }, p.removeEntryId ?? undefined);
+    },
+
+    resume: () => {
+      if (!uid || rule.enabled) return;
+      generatedFor.current = null;
+      push({ rule: resumeRecovery(rule, todayISO), entry: null });
+    },
+
     clearActive: () => {
       if (!uid || !rule.activeEntryId) return;
       generatedFor.current = null;
@@ -167,5 +189,5 @@ export function useRecovery({ uid, todayISO, onError, commit }: Options): Recove
         summary: '진행 중 회차 지우기', payload: { activeEntryId: null },
       });
     },
-  }), [uid, rule, push, commit]);
+  }), [uid, rule, todayISO, push, commit]);
 }

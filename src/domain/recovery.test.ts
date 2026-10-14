@@ -12,7 +12,7 @@ import { describe, expect, it } from 'vitest';
 import {
   addOptionFromEntry, addRecoveryOption, buildRecoveryEntry, canUndoComplete,
   completeRecovery, defaultRecoveryRule, undoCompleteRecovery,
-  generateRecovery, moveRecovery, moveRecoveryOption, nextDueFrom, primeRule,
+  generateRecovery, isFirstActivation, moveRecovery, pauseRecovery, pauseReleases, resumeRecovery, moveRecoveryOption, nextDueFrom, primeRule,
   recoveryOptionChoices, removeRecoveryOption, renameRecoveryOption,
   scheduleDebtRecovery, setEntryMemo, setRecoveryInterval, shouldGenerate,
   skipRecovery, snapshotOptions, toggleDefaultOption, toggleEntryOption,
@@ -607,5 +607,108 @@ describe('완료 되돌리기', () => {
     const done = completedOnce();
     const plain = newEntry('task', { id: done.entry!.id, title: '보통 할 일' });
     expect(canUndoComplete(done.rule, { ...plain, task: { status: 'done', important: false, urgent: false, order: 0 } })).toBe(false);
+  });
+});
+
+describe('일시중지 · 다시 활성화 — 기록과 빚은 그대로, 멈춘 기간은 빚이 아니다', () => {
+  // 10/14 에 10/15 회차가 잡혀 있다.
+  const scheduled = () => {
+    const start = rule({ nextDueAt: '2026-10-15', debtCount: 0, lastCompletedAt: '2026-10-12', defaultMemo: '쉰다' });
+    return generateRecovery(start, '2026-10-14')!;
+  };
+
+  it('앞날에 잡힌 회차는 빚 없이 풀리고, 메모 · 옵션 · 완료 기록 · 빚은 남는다', () => {
+    const made = scheduled();
+    expect(pauseReleases(made.rule, '2026-10-14')).toBe(true);
+    const p = pauseRecovery({ ...made.rule, debtCount: 2 }, '2026-10-14');
+    expect(p.removeEntryId).toBe(made.entry!.id);
+    expect(p.rule.enabled).toBe(false);
+    expect(p.rule.activeEntryId).toBe(null);
+    expect(p.rule.nextDueAt).toBe(null);
+    expect(p.rule.debtCount).toBe(2);
+    expect(p.rule.lastCompletedAt).toBe('2026-10-12');
+    expect(p.rule.defaultMemo).toBe('쉰다');
+    expect(p.rule.options).toEqual(made.rule.options);
+    expect(p.rule.defaultOptionIds).toEqual(made.rule.defaultOptionIds);
+  });
+
+  it('오늘 잡힌 회차도 풀린다', () => {
+    const made = scheduled();
+    expect(pauseReleases(made.rule, '2026-10-15')).toBe(true);
+  });
+
+  it('지난 날짜의 회차는 남긴다 — 놓친 사실이 빚도 없이 사라지지 않는다', () => {
+    const made = scheduled();
+    expect(pauseReleases(made.rule, '2026-10-16')).toBe(false);
+    const p = pauseRecovery(made.rule, '2026-10-16');
+    expect(p.removeEntryId).toBe(null);
+    expect(p.rule.activeEntryId).toBe(made.entry!.id);
+    expect(p.rule.debtCount).toBe(0);
+  });
+
+  it('잡힌 회차가 없으면 풀 것도 없다 — 확인창 없이 멈춘다', () => {
+    const r = rule({ nextDueAt: '2026-10-20' });
+    expect(pauseReleases(r, '2026-10-14')).toBe(false);
+    const p = pauseRecovery(r, '2026-10-14');
+    expect(p.removeEntryId).toBe(null);
+    expect(p.rule.nextDueAt).toBe(null);
+  });
+
+  it('멈춘 동안에는 생성 · 예정 채우기가 돌지 않는다', () => {
+    const p = pauseRecovery(scheduled().rule, '2026-10-14').rule;
+    expect(primeRule(p, '2026-10-20')).toBe(p);
+    expect(shouldGenerate({ ...p, nextDueAt: '2026-10-20' }, '2026-10-20')).toBe(false);
+    expect(generateRecovery(p, '2026-10-30')).toBe(null);
+  });
+
+  it('빚 0 으로 다시 켜면 켠 날 + 간격 — 11/1, 3일 간격이면 11/4. 소급하지 않는다', () => {
+    const p = pauseRecovery(scheduled().rule, '2026-10-14').rule;
+    const r = resumeRecovery(p, '2026-11-01');
+    expect(r.enabled).toBe(true);
+    expect(r.nextDueAt).toBe('2026-11-04');
+    expect(r.debtCount).toBe(0);
+    expect(r.lastCompletedAt).toBe('2026-10-12');
+    // 지평선(1일 전)인 11/3 에 한 건, 그 전에는 없다.
+    expect(generateRecovery(r, '2026-11-02')).toBe(null);
+    expect(generateRecovery(r, '2026-11-03')?.entry?.startDate).toBe('2026-11-04');
+  });
+
+  it('빚이 있으면 빚은 그대로, 예정은 잡지 않는다 — 다시 잡기로 간다', () => {
+    const p = pauseRecovery({ ...scheduled().rule, debtCount: 2 }, '2026-10-14').rule;
+    const r = resumeRecovery(p, '2026-11-01');
+    expect(r.enabled).toBe(true);
+    expect(r.debtCount).toBe(2);
+    expect(r.nextDueAt).toBe(null);
+    expect(primeRule(r, '2026-11-01')).toBe(r);
+    expect(generateRecovery(r, '2026-11-01')).toBe(null);
+  });
+
+  it('남겨 둔 지난 회차가 있으면 그것을 잇는다 — 새 회차를 하나 더 만들지 않는다', () => {
+    const made = scheduled();
+    const p = pauseRecovery(made.rule, '2026-10-16').rule;
+    const r = resumeRecovery(p, '2026-11-01');
+    expect(r.activeEntryId).toBe(made.entry!.id);
+    expect(generateRecovery(r, '2026-11-01')).toBe(null);
+  });
+
+  it('예전 OFF 가 남긴 지난 예정일로 곧바로 회차를 만들지 않는다', () => {
+    const legacyOff = rule({ enabled: false, nextDueAt: '2026-08-01', lastCompletedAt: '2026-07-29' });
+    const r = resumeRecovery(legacyOff, '2026-10-14');
+    expect(r.nextDueAt).toBe('2026-10-17');
+  });
+
+  it('첫 활성화와 다시 활성화를 가른다 — 계산은 같다', () => {
+    const fresh = defaultRecoveryRule();
+    expect(isFirstActivation(fresh)).toBe(true);
+    expect(resumeRecovery(fresh, '2026-11-01').nextDueAt).toBe('2026-11-04');
+    const p = pauseRecovery(scheduled().rule, '2026-10-14').rule;
+    expect(isFirstActivation(p)).toBe(false);
+  });
+
+  it('이미 켜져 있거나 이미 멈춘 규칙은 그대로다', () => {
+    const on = rule({ nextDueAt: '2026-10-20' });
+    expect(resumeRecovery(on, '2026-10-14')).toBe(on);
+    const off = rule({ enabled: false });
+    expect(pauseRecovery(off, '2026-10-14').rule).toBe(off);
   });
 });

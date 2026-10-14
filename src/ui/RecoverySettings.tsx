@@ -7,7 +7,7 @@
  */
 import { useEffect, useState } from 'react';
 import {
-  addRecoveryOption, describeRecoveryRule, horizonLabel,
+  addRecoveryOption, describeRecoveryRule, horizonLabel, isFirstActivation,
   RECOVERY_HORIZON_CHOICES, RECOVERY_INTERVAL_CHOICES, RECOVERY_WINDOWS,
   setRecoveryInterval, toggleDefaultOption,
 } from '../domain/recovery';
@@ -18,9 +18,17 @@ import { RecoveryOptionAdd, RecoveryOptionManager } from './RecoveryOptionManage
 interface Props {
   rule: RecoveryRule;
   onChange: (next: RecoveryRule) => void;
+  /**
+   * 활성화 · 일시중지. 규칙을 통째로 쓰는 `onChange` 와 다른 길이다 — 일시중지는 앞날 회차를
+   * 빚 없이 풀고, 다시 활성화는 오늘 + 간격으로 예정을 다시 잡는다(`pauseRecovery` · `resumeRecovery`).
+   * 확인창은 부르는 쪽이 띄운다.
+   */
+  onPause: () => void;
+  onResume: () => void;
 }
 
-export function RecoverySettings({ rule, onChange }: Props) {
+export function RecoverySettings({ rule, onChange, onPause, onResume }: Props) {
+  const first = isFirstActivation(rule);
   const [manageOptions, setManageOptions] = useState(false);
   const sorted = [...rule.options].sort((a, b) => a.order - b.order);
 
@@ -45,23 +53,34 @@ export function RecoverySettings({ rule, onChange }: Props) {
 
       <div className="set-row-inline">
         <span>
-          Recovery 사용
-          <span className="set-row-s rec-sum">{describeRecoveryRule(rule)}</span>
+          Recovery
+          <span className="set-row-s rec-sum">
+            {rule.enabled
+              ? describeRecoveryRule(rule)
+              : first
+                ? '켜면 간격마다 회복 일정 한 건을 잡습니다.'
+                : '일시중지 중 — 규칙 · 메모 · OFF 항목 · 지난 기록 · 밀린 회복은 그대로 있습니다.'}
+          </span>
         </span>
-        <div className="seg">
-          {([true, false] as const).map((on) => (
-            <button
-              key={String(on)}
-              className={'seg-btn' + (rule.enabled === on ? ' on' : '')}
-              onClick={() => onChange({ ...rule, enabled: on })}
-            >
-              {on ? 'ON' : 'OFF'}
-            </button>
-          ))}
+        <div className="seg" role="group" aria-label="Recovery 활성화">
+          <button
+            className={'seg-btn' + (rule.enabled ? ' on' : '')}
+            aria-pressed={rule.enabled}
+            onClick={() => { if (!rule.enabled) onResume(); }}
+          >
+            {first || rule.enabled ? '활성화' : '다시 활성화'}
+          </button>
+          <button
+            className={'seg-btn' + (!rule.enabled ? ' on' : '')}
+            aria-pressed={!rule.enabled}
+            onClick={() => { if (rule.enabled) onPause(); }}
+          >
+            일시중지
+          </button>
         </div>
       </div>
 
-      {rule.enabled && (
+      {(rule.enabled || !first) && (
         <>
           <div className="set-row-inline">
             <span>간격</span>
@@ -167,7 +186,9 @@ export function RecoverySettings({ rule, onChange }: Props) {
 
           <p className="set-row-s rec-state">
             {rule.debtCount > 0
-              ? `밀린 회복 ${rule.debtCount}회 — 다시 잡으면 하나씩 갚습니다.`
+              ? `밀린 회복 ${rule.debtCount}회 — ${rule.enabled ? '다시 잡으면 하나씩 갚습니다.' : '일시중지 중에도 그대로 남고, 다시 활성화하면 다시 잡기로 갚습니다.'}`
+              : !rule.enabled
+                ? `다시 활성화하면 그날부터 ${rule.intervalDays}일 뒤로 잡습니다. 멈춘 기간은 밀린 회복으로 세지 않습니다.`
               : rule.nextDueAt
                 ? `다음 예정 ${rule.nextDueAt}`
                 : '다음 예정을 계산하는 중입니다.'}

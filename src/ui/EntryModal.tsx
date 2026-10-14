@@ -57,6 +57,11 @@ interface Props {
   onSave: (e: Entry, opts?: SaveOptions) => void;
   onDelete: (e: Entry) => void;
   onClose: () => void;
+  /**
+   * 가계부 종류 칸을 띄우는가(설정 > 내 캘린더 구성). 숨겨도 이미 가계부인 항목을 열면 칸이
+   * 남는다 — 그 항목이 무엇인지 보여야 하고, 숨김이 저장 동작을 바꾸지 않는다.
+   */
+  ledgerVisible?: boolean;
 }
 
 export interface SaveOptions {
@@ -100,7 +105,7 @@ export function EntryModal({
   open, mode, initial, allTags, linkableTasks, budgets, debts, sharedActive = false,
   categories = NO_CATEGORIES, categoriesReady = true, onSeedCategories,
   accounts = NO_ACCOUNTS, occurrenceDate = null, onConfirm, onUnconfirm,
-  onSave, onDelete, onClose,
+  onSave, onDelete, onClose, ledgerVisible = true,
 }: Props) {
   const [form, setForm] = useState<Entry>(() => initial ?? newEntry('task'));
   const [amountText, setAmountText] = useState('');
@@ -287,7 +292,9 @@ export function EntryModal({
       <div className="mod" role="dialog" aria-modal="true" aria-label={mode === 'edit' ? '항목 편집' : '새 항목'} onClick={(e) => e.stopPropagation()}>
         <header className="mod-head">
           <div className="mod-kinds" role="tablist" aria-label="항목 종류">
-            {(['task', 'idea', 'money'] as EntryKind[]).map((k) => (
+            {(['task', 'idea', 'money'] as EntryKind[])
+              .filter((k) => k !== 'money' || ledgerVisible || initial?.kind === 'money')
+              .map((k) => (
               <button
                 key={k}
                 role="tab"

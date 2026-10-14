@@ -3,7 +3,8 @@ import { colorHex, MONEY_TYPE_BY_ID } from '../domain/constants';
 import { isWeekend, monthGrid, normalizeDate, toISO, weekdayLabels, ymOf } from '../domain/date';
 import { displayTitle, effectiveEndDate, isDone } from '../domain/entry';
 import { compactAmount, formatAmount } from '../domain/money';
-import { calcScopeOf, projectedBalanceOn } from '../domain/tide';
+import { calendarAmountOn, type CalendarAmount } from '../domain/layout';
+import { calcScopeOf, type Reservations } from '../domain/tide';
 import type { Account, Budget, Entry, LensId, WeekStart, YearMonth } from '../domain/types';
 import { Icon } from './Icon';
 import { isRecoveryEntry } from '../domain/recovery';
@@ -53,7 +54,17 @@ interface Props {
    */
   pockets?: readonly Budget[];
   onPocketClick?: (budgetId: string) => void;
+  /**
+   * 셀에 적는 금액의 기준(설정 > 캘린더 표시). 주지 않으면 예상 잔고다. 계산은 바뀌지 않고
+   * 어느 숫자를 보여 줄지만 고른다(`calendarAmountOn`). 가용 · 생활비 잔여는 `reservations` 를 본다.
+   */
+  amountMode?: CalendarAmount;
+  reservations?: Reservations;
 }
+
+const AMOUNT_NAME: Record<CalendarAmount, string> = {
+  balance: '전체 보유액', projected: '예상 잔고', available: '가용 잔액', pocket: '생활비 잔여',
+};
 
 /** 한 주에 놓는 막대 하나 — 입출금 · 할 일(`Entry`) 또는 생활비 주머니(`Budget`). */
 type BarItem =
@@ -147,6 +158,7 @@ export function MonthCalendar({
   cursor, onCursorChange, entries, tideEntries,
   tideMonths, accounts, hasBalance, lens, weekStart, todayISO,
   onEntryClick, onDayOpen, onDayCreate, ledgerSummary, pockets, onPocketClick,
+  amountMode = 'projected', reservations,
 }: Props) {
   const grid = useMemo(() => monthGrid(cursor, weekStart), [cursor, weekStart]);
   const weeks = useMemo(
@@ -165,6 +177,9 @@ export function MonthCalendar({
     것처럼 읽혔다. 쓸 수 있는 돈은 카드와 날짜 상세가 따로 적는다.
 
     오늘 이전은 적지 않는다(지난 날은 현금흐름 요약이 차지한다).
+
+    설정에서 기준을 바꾸면(`amountMode`) 같은 자리에 전체 보유액 · 가용 잔액 · 생활비 잔여를 적는다.
+    셋 다 카드 · 날짜 상세가 쓰는 함수 그대로라 새 숫자를 지어내지 않는다. 기본은 예상 잔고다.
   */
   /*
     통화가 섞이면 최소 단위가 달라 애초에 더할 수 없다. 카드가 숫자를 내지 않는 상태에서
@@ -183,10 +198,12 @@ export function MonthCalendar({
       const iso = toISO(d);
       if (iso < todayISO) continue;
       if (!covered.has(ymOf(iso))) continue;
-      map.set(iso, projectedBalanceOn(accounts, tideEntries, iso, todayISO));
+      const v = calendarAmountOn(amountMode, accounts, tideEntries, iso, todayISO, reservations);
+      if (v !== null) map.set(iso, v);
     }
     return map;
-  }, [showLimits, grid, accounts, tideEntries, tideMonths, todayISO]);
+  }, [showLimits, grid, accounts, tideEntries, tideMonths, todayISO, amountMode, reservations]);
+  const amountName = AMOUNT_NAME[amountMode];
 
   /*
     가계부 요약 모드. 지난 날 · 오늘의 실제 거래와 지난 날의 예정은 막대가 아니라 요약 칸이다.
@@ -314,7 +331,7 @@ export function MonthCalendar({
                     {limits?.has(iso) && (
                       <span
                         className={'cal-limit num' + ((limits.get(iso) ?? 0) < 0 ? ' bad' : '')}
-                        aria-label={`${iso} 예상 잔고 ${(limits.get(iso) ?? 0).toLocaleString('ko-KR')}원`}
+                        aria-label={`${iso} ${amountName} ${(limits.get(iso) ?? 0).toLocaleString('ko-KR')}원`}
                       >
                         {compactAmount(limits.get(iso) ?? 0)}
                       </span>

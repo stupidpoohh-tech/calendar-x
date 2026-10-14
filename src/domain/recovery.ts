@@ -315,6 +315,69 @@ export function scheduleDebtRecovery(
   };
 }
 
+// ---------- 활성화 · 일시중지 ----------
+
+/**
+ * 한 번도 쓴 적 없는 규칙인가. 첫 활성화와 다시 활성화를 화면에서 가르는 데만 쓴다 —
+ * 계산은 같다(오늘 + 간격). 규칙은 사용자 문서에 하나뿐이라 어느 쪽이든 새 규칙을 만들지 않는다.
+ */
+export function isFirstActivation(rule: RecoveryRule): boolean {
+  return !rule.enabled && rule.lastCompletedAt === null && rule.debtCount === 0
+    && rule.activeEntryId === null && rule.completedEntryId === null;
+}
+
+/**
+ * 일시중지하면 풀리는 회차가 있는가 — 오늘이나 앞날에 잡혀 있는 진행 중 회차.
+ * 이것이 있을 때만 확인창을 띄운다.
+ *
+ * 활성 회차의 날짜는 `nextDueAt` 이 들고 있다(옮기기도 둘을 함께 바꾼다).
+ */
+export function pauseReleases(rule: RecoveryRule, todayISO: DateISO): boolean {
+  return rule.activeEntryId !== null && rule.nextDueAt !== null && rule.nextDueAt >= normalizeDate(todayISO);
+}
+
+/**
+ * 일시중지. 생성 · 간격 진행 · 새 빚이 멈춘다.
+ *
+ * 오늘 · 앞날에 잡힌 회차는 **빚 없이** 지운다 — 건너뛰기가 아니다. 지난 날짜의 회차는
+ * 이미 놓친 것이라 그대로 둔다(지우면 놓친 사실이 빚도 없이 사라진다). 규칙 · 기본 메모 ·
+ * OFF 항목 · 완료 기록 · 빚은 하나도 건드리지 않는다.
+ *
+ * `removeEntryId` 가 있으면 규칙과 같은 배치로 그 항목을 지운다.
+ */
+export function pauseRecovery(
+  rule: RecoveryRule, todayISO: DateISO,
+): { rule: RecoveryRule; removeEntryId: string | null } {
+  if (!rule.enabled) return { rule, removeEntryId: null };
+  if (pauseReleases(rule, todayISO)) {
+    return {
+      rule: { ...rule, enabled: false, nextDueAt: null, activeEntryId: null },
+      removeEntryId: rule.activeEntryId,
+    };
+  }
+  // 활성 회차가 없으면 예정일도 비운다 — 멈춘 동안 그 날짜를 향해 가지 않는다.
+  return {
+    rule: { ...rule, enabled: false, nextDueAt: rule.activeEntryId ? rule.nextDueAt : null },
+    removeEntryId: null,
+  };
+}
+
+/**
+ * 활성화 · 다시 활성화.
+ *
+ * - 남은 회차(일시중지 때 남긴 지난 회차)가 있으면 그것을 그대로 잇는다.
+ * - 빚이 있으면 예정을 잡지 않는다 — "다시 잡기" 가 갚는다(빚은 그대로).
+ * - 빚이 없으면 **오늘 + 간격**. 11/1 에 3일 간격으로 켜면 11/4 다. 멈춘 기간을 소급해
+ *   채우지도, 그 사이를 빚으로 세지도 않는다. 예전에는 끌 때 남은 예정일을 다시 켤 때
+ *   그대로 써서, 한참 지난 날짜로 회차가 곧바로 생겼다.
+ */
+export function resumeRecovery(rule: RecoveryRule, todayISO: DateISO): RecoveryRule {
+  if (rule.enabled) return rule;
+  if (rule.activeEntryId) return { ...rule, enabled: true };
+  if (rule.debtCount > 0) return { ...rule, enabled: true, nextDueAt: null };
+  return { ...rule, enabled: true, nextDueAt: nextDueFrom(todayISO, rule.intervalDays) };
+}
+
 // ---------- 옵션 관리 ----------
 
 /** 화면에 보이는 이름을 정리한다. 저장되는 값이 곧 이 값이다. */

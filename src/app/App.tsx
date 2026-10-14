@@ -19,6 +19,7 @@ import {
   MERGE_SKIPS_RECOVERY, mergeSkipsLedger, recoveryDiffers, REPLACE_DISABLED_REASON, safeMerge, type RestoreIO,
 } from '../data/restore';
 import { LENSES, LENS_BY_ID, SHARED_TABS } from '../domain/constants';
+import { calendarAmountCaption, lensVisible } from '../domain/layout';
 import { endOfMonth, fmtMonthTitle, startOfMonth, toISO } from '../domain/date';
 import { convertKind, displayTitle, effectiveEndDate, newEntry, uid as newId, withDerived } from '../domain/entry';
 import {
@@ -76,6 +77,7 @@ import { useDialog } from '../ui/Dialog';
 import { useAuth } from './useAuth';
 import { usePrefs } from './usePrefs';
 import { useDemoStore } from './useDemoStore';
+import { useLayout } from './useLayout';
 import { useRecovery } from './useRecovery';
 import { useSharedBoard } from './useSharedBoard';
 import { useWriteQueue } from './useWriteQueue';
@@ -177,6 +179,13 @@ function Workspace({ uid, user, onSignOut }: WorkspaceProps) {
   */
   const writes = useWriteQueue(uid);
   const commit = writes.commit;
+  /*
+    내 캘린더 구성(`users/{uid}.layout`). 보이는가만 정한다 — 숨겨도 자료 · 계산 · 권한은 그대로다.
+    로그아웃 데모는 늘 전부 보인다(`LEGACY_LAYOUT`).
+  */
+  const layoutApi = useLayout({ uid, commit });
+  const layout = layoutApi.layout;
+  const setLayout = layoutApi.set;
   const cursorISO = toISO(cursor);
   const isAnon = uid === null;
   // 훅은 조건부 호출이 안 된다. 둘 다 부르고 로그인 상태에 따라 결과를 고른다.
@@ -198,6 +207,23 @@ function Workspace({ uid, user, onSignOut }: WorkspaceProps) {
   });
 
   /*
+    Recovery 일시중지. 오늘 · 앞날에 잡힌 회차가 풀릴 때만 묻는다 — 풀 것이 없으면 확인창 없이
+    멈춘다(토글마다 확인을 받지 않는다). 기록과 빚은 그대로다(`pauseRecovery`).
+  */
+  const pauseRecovery = useCallback(async () => {
+    if (recovery.pauseReleases) {
+      const ok = await dialog.confirm({
+        title: 'Recovery를 일시중지할까요?',
+        body: 'Recovery를 일시중지하면 예정된 회복 일정이 해제됩니다. 기존 기록과 회복 부채는 유지됩니다.',
+        confirmLabel: '일시중지',
+      });
+      if (!ok) return;
+    }
+    recovery.pause();
+    dialog.toast('Recovery를 일시중지했습니다.');
+  }, [recovery, dialog]);
+
+  /*
     같이 보기. 보드 문서만 늘 구독하고, 항목·고정메모·D-Day 는 화면이 열려 있을 때만
     받는다 (`open`). 이 훅이 들고 있는 보드가 "TODO 저장을 공유에도 보낼지" 를 정한다.
   */
@@ -206,7 +232,8 @@ function Workspace({ uid, user, onSignOut }: WorkspaceProps) {
     uid,
     todayISO: today,
     accountName,
-    open: wantsShared,
+    // 스위처를 숨기면 공유 화면도 열지 않는다 — 보드 문서 구독(저장을 공유에도 보낼지)은 그대로다.
+    open: wantsShared && layout.sharedSwitcher,
     onError: (message) => dialog.toast(message, 'bad'),
     commit,
   });
@@ -217,7 +244,7 @@ function Workspace({ uid, user, onSignOut }: WorkspaceProps) {
     보드 구독이 아직 안 왔으면(`ready === false`) "없음" 을 확정할 수 없으므로 물러나지
     않는다 — 그때 되돌리면 새로고침마다 공유에 있던 사람이 내 공간으로 튕긴다.
   */
-  const sharedOpen = wantsShared && !!uid && !!shared.board;
+  const sharedOpen = wantsShared && layout.sharedSwitcher && !!uid && !!shared.board;
 
   /*
     보드가 사라졌으면(나가기 · 삭제 · 계정 변경) 기억해 둔 공간도 되돌린다. 남겨 두면
@@ -226,6 +253,15 @@ function Workspace({ uid, user, onSignOut }: WorkspaceProps) {
   useEffect(() => {
     if (wantsShared && shared.ready && !shared.board) set('space', 'me');
   }, [wantsShared, shared.ready, shared.board, set]);
+
+  /*
+    스위처를 숨겼으면 내 공간으로 돌아간다. 연결 · 자료 · 권한은 그대로이고, 다시 표시하면
+    👥 로 돌아갈 수 있다. 구독이 확인한 구성에서만 기억을 고친다 — 기기에 남긴 옛 값으로
+    공간 기억을 지우지 않는다(그 사이 화면은 위 `sharedOpen` 이 이미 내 공간을 그린다).
+  */
+  useEffect(() => {
+    if (wantsShared && layoutApi.ready && !layout.sharedSwitcher) set('space', 'me');
+  }, [wantsShared, layoutApi.ready, layout.sharedSwitcher, set]);
 
   // 저장·편집 시도 시 로그인 유도 팝업. 사용자가 실제 앱을 만져 보다가
   // 남기려는 순간에만 계정이 필요하다는 것을 자연스럽게 전달한다.
@@ -241,7 +277,14 @@ function Workspace({ uid, user, onSignOut }: WorkspaceProps) {
     return ok;
   }, [dialog]);
 
-  const lens = prefs.lens;
+  /*
+    숨긴 렌즈(가계부 · 노트)를 기억하고 있으면 캘린더로 연다 — 직접 · 낡은 링크도 같다. 기억 자체는
+    구독이 확인한 구성으로만 고친다(아래 effect). 다시 표시하면 그 렌즈 탭이 그대로 돌아온다.
+  */
+  const lens: LensId = lensVisible(prefs.lens, layout) ? prefs.lens : 'task';
+  useEffect(() => {
+    if (layoutApi.ready && !lensVisible(prefs.lens, layout)) set('lens', 'task');
+  }, [layoutApi.ready, prefs.lens, layout, set]);
   const view = prefs.view;
   const rangeFrom = toISO(startOfMonth(cursor));
   const rangeTo = toISO(endOfMonth(cursor));
@@ -263,9 +306,17 @@ function Workspace({ uid, user, onSignOut }: WorkspaceProps) {
     [store.entries, rangeFrom, rangeTo],
   );
 
+  /*
+    가계부를 숨기면 전체 렌즈에서도 가계부 항목을 그리지 않는다. 화면용 목록만 거르므로 한도 ·
+    정산(계산용 원본)은 그대로다.
+  */
+  const shownEntries = useMemo(
+    () => (layout.ledger ? materialized : materialized.filter((e) => e.kind !== 'money')),
+    [materialized, layout.ledger],
+  );
   const visible = useMemo(
-    () => applyFilters(materialized, lens, filters, today),
-    [materialized, lens, filters, today],
+    () => applyFilters(shownEntries, lens, filters, today),
+    [shownEntries, lens, filters, today],
   );
 
   const allTags = useMemo(() => collectTags(store.entries), [store.entries]);
@@ -346,13 +397,15 @@ function Workspace({ uid, user, onSignOut }: WorkspaceProps) {
     const result = await shared.accept(code);
     if (result === 'ok') {
       setJoin(null);
+      // 같이 보기를 고른 순간이므로 숨겨 둔 공간 전환을 다시 띄운다 — 안 그러면 들어갈 길이 없다.
+      if (!layout.sharedSwitcher) setLayout({ sharedSwitcher: true });
       setSharedOpen(true);
       dialog.toast('초대를 수락했습니다. 같이 보기가 열렸습니다.');
       return;
     }
     // 실패해도 창을 닫지 않는다 — 무엇이 막혔는지 읽고 다시 시도할 수 있어야 한다.
     setJoin((j) => (j ? { ...j, state: result === 'not-found' ? 'not-found' : 'ready' } : j));
-  }, [join, shared, dialog, setSharedOpen]);
+  }, [join, shared, dialog, setSharedOpen, layout.sharedSwitcher, setLayout]);
 
   const startShare = useCallback((name: string) => {
     const created = shared.createBoard(name);
@@ -361,8 +414,9 @@ function Workspace({ uid, user, onSignOut }: WorkspaceProps) {
     setInvite(created);
     setInvitesReady(true);
     setSharedSheet('settings');
+    if (!layout.sharedSwitcher) setLayout({ sharedSwitcher: true });
     setSharedOpen(true);
-  }, [shared, setSharedOpen]);
+  }, [shared, setSharedOpen, layout.sharedSwitcher, setLayout]);
 
   // 이관 전 컬렉션이 남아 있는지, 이미 옮겼는지 한 번만 확인한다.
   const checkedLegacy = useRef(false);
@@ -1628,6 +1682,11 @@ function Workspace({ uid, user, onSignOut }: WorkspaceProps) {
     비어 있어 없음을 확정할 수 없거나 아직 받는 중이면 셀 · 상세 모두 합계를 적지 않는다.
   */
   const ledgerDayReady = store.display.ready && !(store.display.empty && store.display.fromCache);
+  // 달력 칸의 가용 · 생활비 잔여가 보는 예약. 카드 · 날짜 상세와 같은 값이다.
+  const reservations = useMemo(
+    () => ({ budgets: store.budgets, reserves: store.reserves }),
+    [store.budgets, store.reserves],
+  );
   const ledgerSummary = useMemo(
     () => ({ entries: store.entries, ready: ledgerDayReady }),
     [store.entries, ledgerDayReady],
@@ -1716,7 +1775,11 @@ function Workspace({ uid, user, onSignOut }: WorkspaceProps) {
           공간 전환. 탭보다 **위**이지만 자리는 작다 — 머리가 한 줄 더 늘면 모바일에서
           캘린더가 그만큼 밀린다. 로그인해야 공유가 뜻이 있으므로 그 전에는 띄우지 않는다.
         */}
-        {!isAnon && (
+        {/*
+          연결이 있으면 설정의 '같이보기 공간 전환' 을 따른다. 연결이 없으면 고를 것이 없으므로 지금처럼
+          시작하는 칸(👥+)이 남는다.
+        */}
+        {!isAnon && (layout.sharedSwitcher || !shared.board) && (
           <div className="space-context"><SpaceSwitch
             space={sharedOpen ? 'shared' : 'me'}
             hasBoard={!!shared.board}
@@ -1768,7 +1831,7 @@ function Workspace({ uid, user, onSignOut }: WorkspaceProps) {
           </nav>
         ) : (
           <nav className="lenses" role="tablist" aria-label="렌즈">
-            {LENSES.map((l) => (
+            {LENSES.filter((l) => lensVisible(l.id, layout)).map((l) => (
               <button
                 key={l.id}
                 role="tab"
@@ -1949,7 +2012,8 @@ function Workspace({ uid, user, onSignOut }: WorkspaceProps) {
           사라지면 안 되기 때문이다.
         */}
         <div className="utility-strip">
-        {!isAnon && (
+        {/* 일시중지 중에는 빚을 세지 않고 다시 잡기도 띄우지 않는다. 빚은 규칙에 그대로 남아 있다. */}
+        {!isAnon && recovery.rule.enabled && (
           <RecoveryDebtBar
             rule={recovery.rule}
             todayISO={today}
@@ -1966,7 +2030,8 @@ function Workspace({ uid, user, onSignOut }: WorkspaceProps) {
         {lens === 'all' && (
           <TodayPanel
             todayISO={today}
-            entries={materialized}
+            entries={shownEntries}
+            showMoney={layout.ledger}
             tideEntries={store.tideEntries}
             tideFrom={tideFrom}
             calcState={calcState}
@@ -2065,7 +2130,7 @@ function Workspace({ uid, user, onSignOut }: WorkspaceProps) {
             />
           </TideBar>
           <p className="led-note cal-legend">
-            {hasBalance && <>날짜 아래 숫자는 <b>예상 잔고</b>(생활비 · 세이브는 빼지 않음). </>}
+            {hasBalance && <>{calendarAmountCaption(layout.calendarAmount)}. </>}
             날짜 숫자 → 그 날 상세 · 빈 칸 → 그 날짜로 거래 입력 · 점선 막대 → 생활비.
           </p>
           <MonthCalendar
@@ -2086,6 +2151,8 @@ function Workspace({ uid, user, onSignOut }: WorkspaceProps) {
             ledgerSummary={ledgerSummary}
             pockets={store.budgets}
             onPocketClick={(id) => setPocketFocus({ kind: 'budget', id })}
+            amountMode={layout.calendarAmount}
+            reservations={reservations}
           />
               </div>
             )}
@@ -2245,6 +2312,7 @@ function Workspace({ uid, user, onSignOut }: WorkspaceProps) {
         onSave={handleSave}
         onDelete={(e) => void handleDelete(e)}
         onClose={closeModal}
+        ledgerVisible={layout.ledger}
       />
 
       {confirming && (
@@ -2353,6 +2421,23 @@ function Workspace({ uid, user, onSignOut }: WorkspaceProps) {
           migratedAt={legacy?.migratedAt ?? null}
           recoveryRule={recovery.rule}
           onRecoveryRule={recovery.saveRule}
+          onRecoveryPause={() => void pauseRecovery()}
+          onRecoveryResume={() => {
+            recovery.resume();
+            dialog.toast(recovery.rule.debtCount > 0
+              ? `Recovery를 다시 활성화했습니다. 밀린 회복 ${recovery.rule.debtCount}회는 '다시 잡기'로 갚습니다.`
+              : `Recovery를 활성화했습니다. ${recovery.rule.intervalDays}일 뒤로 잡습니다.`);
+          }}
+          layout={{
+            layout,
+            onLayout: setLayout,
+            shared: {
+              connected: !!shared.board,
+              ready: shared.ready,
+              onStart: () => { setShowSettings(false); setSharedSheet('start'); },
+              onManage: () => { setShowSettings(false); setSharedSheet('settings'); },
+            },
+          }}
           onCleanPastPlans={isAnon || !uid ? undefined : () => { setShowSettings(false); setPastPlanOpen(true); }}
           onCleanLoanCategory={isAnon || !uid ? undefined : () => { setShowSettings(false); setLoanCatOpen(true); }}
           ledger={{

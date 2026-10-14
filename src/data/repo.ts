@@ -15,6 +15,7 @@ import {
 } from 'firebase/firestore';
 import { normalizeDate, ymOf } from '../domain/date';
 import { describeFirestoreError } from './errors';
+import { layoutFrom, type Layout } from '../domain/layout';
 import type {
   Account, Budget, Category, CategoryBudget, Debt, Entry, LedgerNote, LedgerSettings, Pin, RecoveryRule, Reserve, YearMonth,
 } from '../domain/types';
@@ -338,6 +339,24 @@ export function subscribeLedgerSettings(
     }),
     (err) => onError('ledger', err),
   );
+}
+
+/** 내 캘린더 구성. 같은 사용자 문서의 `layout` 필드 — 없으면 지금까지 보던 구성이다(`layoutFrom`). */
+export function subscribeLayout(
+  db: Firestore, uid: string, cb: (l: Layout, meta: SnapMeta) => void, onError: ErrorSink,
+): Unsubscribe {
+  return onSnapshot(
+    userDoc(db, uid), WITH_META,
+    (snap) => cb(layoutFrom(snap.data()?.layout), {
+      fromCache: snap.metadata.fromCache, hasPendingWrites: snap.metadata.hasPendingWrites,
+    }),
+    (err) => onError('layout', err),
+  );
+}
+
+/** 가입하는 순간 새 사용자의 구성을 적는다. 실패해도 지금까지의 구성(예상 잔고)으로 돌 뿐이다. */
+export function saveLayout(db: Firestore, uid: string, layout: Layout): Promise<void> {
+  return setDoc(userDoc(db, uid), { layout }, { merge: true });
 }
 
 /**

@@ -10,7 +10,10 @@ import {
   sendPasswordResetEmail, signInWithEmailAndPassword,
 } from 'firebase/auth';
 import { useEffect, useRef, useState, type FormEvent } from 'react';
+import { rememberLayout } from '../app/useLayout';
 import { getFirebase } from '../data/firebase';
+import { saveLayout } from '../data/repo';
+import { NEW_USER_LAYOUT } from '../domain/layout';
 import { Icon } from './Icon';
 
 type Mode = 'signin' | 'signup' | 'reset';
@@ -105,6 +108,13 @@ export function Auth({ onBack }: AuthProps = {}) {
         const cred = await createUserWithEmailAndPassword(auth, email.trim(), pw);
         // 인증 메일은 실패해도 가입 자체를 막지 않는다.
         void sendEmailVerification(cred.user).catch(() => {});
+        /*
+          새 사용자의 구성. 달력 칸 기준만 가용 잔액으로 시작한다(필드가 없는 기존 사용자는 예상 잔고
+          그대로). 기기에 먼저 남겨 첫 화면부터 그 값으로 그린다. 쓰기가 실패하면 구독이 서버 값(필드
+          없음 → 예전 기준)으로 되돌린다 — 저장되지 않은 값이 저장된 것처럼 남지 않는다.
+        */
+        rememberLayout(cred.user.uid, NEW_USER_LAYOUT);
+        void saveLayout(getFirebase().db, cred.user.uid, NEW_USER_LAYOUT).catch((e) => console.error('[layout]', e));
       } else {
         await signInWithEmailAndPassword(auth, email.trim(), pw);
       }

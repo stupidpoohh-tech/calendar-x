@@ -26,6 +26,7 @@
 import {
   deleteDoc, doc, getDoc, setDoc, writeBatch, type Firestore,
 } from 'firebase/firestore';
+import { layoutFrom, type Layout } from '../domain/layout';
 import type {
   Account, Budget, Category, CategoryBudget, Debt, Entry, LedgerNote, LedgerSettings, Pin, RecoveryRule, Reserve,
   SharedBoard, SharedCollection, SharedCollectionItem, SharedDday, SharedInvite,
@@ -52,6 +53,8 @@ export type PendingKind =
   | 'recoveryRule' | 'recoveryPatch' | 'recoveryCommit'
   // 가계부 결산. 카테고리 여럿(기본 카테고리 만들기 · 순서 바꾸기)은 한 배치로 쓴다.
   | 'category' | 'categories' | 'categoryBudget' | 'ledgerSettings' | 'ledgerNote'
+  // 내 캘린더 구성(가계부 · 노트 · 스위처 표시, 달력 금액 기준). 사용자 문서의 `layout` 필드.
+  | 'layout'
   // 가계부 원장 — 여러 문서가 함께 바뀌어야 숫자가 맞는 쓰기(예정 + 확정 거래 다시 잇기,
   // 거래 + 잔고 반영 목록). 한 배치라 반쯤 들어간 상태가 없다.
   | 'ledgerBatch'
@@ -68,7 +71,7 @@ const KINDS: readonly PendingKind[] = [
   'entry', 'entryDelete', 'entryPrivate', 'account', 'debt', 'debtDelete',
   'pin', 'pinDelete', 'budget', 'budgetDelete', 'reserve', 'reserveDelete',
   'taskOrder', 'recoveryRule', 'recoveryPatch', 'recoveryCommit',
-  'category', 'categories', 'categoryBudget', 'ledgerSettings', 'ledgerNote', 'ledgerBatch',
+  'category', 'categories', 'categoryBudget', 'ledgerSettings', 'ledgerNote', 'ledgerBatch', 'layout',
   'sharedBoard', 'sharedInvite', 'sharedInviteDelete',
   'sharedSource', 'sharedItem', 'sharedItemDelete',
   'sharedPin', 'sharedPinDelete', 'sharedDday', 'sharedDdayDelete',
@@ -126,7 +129,7 @@ export interface SharedSourcePayload {
 
 export type PendingPayload =
   | Entry | Account | Debt | Pin | Budget | Reserve | RecoveryRule
-  | Category | { items: Category[] } | CategoryBudget | LedgerSettings | LedgerNote
+  | Category | { items: Category[] } | CategoryBudget | LedgerSettings | LedgerNote | Layout
   | { id: string }
   | { id: string; keepPrivate: boolean }
   | { ordered: { id: string; order: number }[] }
@@ -264,6 +267,10 @@ export function sendPending(db: Firestore, uid: string, op: CommitInput): Promis
     /* 이웃 필드(recovery · migratedAt)를 지우지 않도록 merge 로 쓴다. */
     case 'ledgerSettings':
       return setDoc(userDoc(db, uid), { ledger: ledgerSettingsToDoc(op.payload as LedgerSettings) }, { merge: true });
+
+    // 구성은 네 칸을 통째로 쓴다(이웃 필드 recovery · ledger 는 merge 로 남긴다).
+    case 'layout':
+      return setDoc(userDoc(db, uid), { layout: layoutFrom(op.payload) }, { merge: true });
 
     /*
       같이 보기. 경로가 `users/{uid}` 밖이라 uid 를 쓰지 않는다 — 보드 id 가 자리를 정하고,
