@@ -10,7 +10,7 @@ import { MONEY_FLOWS, moneyFlowOf, moneyStatusOf } from '../domain/ledger';
 import { clampSettleDay } from '../domain/period';
 import type {
   Account, Budget, Category, CategoryBudget, ColorId, Debt, Entry, EntryKind, LedgerNote, LedgerSettings,
-  MoneyFields, MoneyFlow, MoneyType, Pin, PlannedRef, Reserve,
+  MoneyFields, MoneyFlow, MoneyType, Pin, PlannedRef, Reserve, ReservePatch,
   RecoveryFields, RecoveryOption, RecoveryRule, RecoveryWindowId,
   Recurrence, RepeatFreq, TaskStatus,
 } from '../domain/types';
@@ -411,19 +411,57 @@ export function reserveFromDoc(id: string, raw: Raw): Reserve {
     name: str(raw.name),
     amountMinor: Math.trunc(num(raw.amountMinor)),
     currency: str(raw.currency, DEFAULT_CURRENCY),
+    // P1 필드. 예전 문서에는 없다 — 보호는 켜진 것(예전 그대로 한도에서 빠진다), 나머지는 없음.
+    protected: raw.protected !== false,
+    targetAmountMinor: asTargetAmount(raw.targetAmountMinor),
+    targetDate: normalizeDate(str(raw.targetDate)) || null,
+    archivedAt: optStr(raw.archivedAt),
     createdAt: str(raw.createdAt),
     updatedAt: str(raw.updatedAt),
   };
 }
 
+/** 목표 금액. 0 이상의 안전한 정수만 — 그 밖은 "목표 없음" 으로 읽는다(표시용 값이다). */
+function asTargetAmount(v: unknown): number | null {
+  return typeof v === 'number' && Number.isSafeInteger(v) && v >= 0 ? v : null;
+}
+
+/**
+ * 저장 형태. P1 필드를 **늘 채워서** 쓰고 판 번호(`schema`)를 붙인다.
+ *
+ * 그 필드를 모르는 예전 앱은 세이브를 고칠 때 문서 전체를 덮어써(`setDoc`) 보호 해제 · 목표 ·
+ * 보관을 지운다 — 보호가 없으면 "켜짐" 으로 읽으므로 꺼 둔 세이브가 조용히 다시 한도에서
+ * 빠진다. 규칙이 "P1 값이 실린 문서에 판 번호 없는 쓰기" 를 거절한다 (`keepsReserve`).
+ */
 export function reserveToDoc(r: Reserve): Raw {
   return {
     name: r.name,
     amountMinor: r.amountMinor,
     currency: r.currency,
+    ...reservePatchToDoc({
+      protected: r.protected !== false,
+      targetAmountMinor: r.targetAmountMinor ?? null,
+      targetDate: r.targetDate ?? null,
+      archivedAt: r.archivedAt ?? null,
+    }),
     createdAt: r.createdAt,
     updatedAt: r.updatedAt,
   };
+}
+
+/**
+ * 부분 쓰기의 본문 — 담긴 칸과 판 번호만. merge 로 쓰므로 담지 않은 칸은 서버 값이 남는다.
+ * `undefined` 는 Firestore 가 받지 않으므로 담지 않은 칸은 아예 빠진다.
+ */
+export function reservePatchToDoc(p: ReservePatch): Raw {
+  const out: Raw = { schema: LEDGER_SCHEMA };
+  if (p.name !== undefined) out.name = p.name;
+  if (p.amountMinor !== undefined) out.amountMinor = p.amountMinor;
+  if (p.protected !== undefined) out.protected = p.protected !== false;
+  if (p.targetAmountMinor !== undefined) out.targetAmountMinor = p.targetAmountMinor ?? null;
+  if (p.targetDate !== undefined) out.targetDate = p.targetDate ?? null;
+  if (p.archivedAt !== undefined) out.archivedAt = p.archivedAt ?? null;
+  return out;
 }
 
 // ---------- 가계부 결산 ----------

@@ -29,12 +29,13 @@ import {
 import { layoutFrom, type Layout } from '../domain/layout';
 import type {
   Account, Budget, Category, CategoryBudget, Debt, Entry, LedgerNote, LedgerSettings, Pin, RecoveryRule, Reserve,
+  ReservePatch,
   SharedBoard, SharedCollection, SharedCollectionItem, SharedDday, SharedInvite,
   SharedNote, SharedPin, SharedSource, SharedTodoItem,
 } from '../domain/types';
 import {
   accountToDoc, budgetToDoc, categoryBudgetToDoc, categoryToDoc, debtToDoc, entryToDoc,
-  ledgerNoteToDoc, ledgerSettingsToDoc, pinToDoc, recoveryRuleToDoc, reserveToDoc,
+  ledgerNoteToDoc, ledgerSettingsToDoc, pinToDoc, recoveryRuleToDoc, reservePatchToDoc, reserveToDoc,
 } from './converters';
 import {
   sharedBoardToDoc, sharedCollectionItemToDoc, sharedCollectionToDoc, sharedDdayToDoc,
@@ -49,6 +50,8 @@ export type PendingKind =
   | 'pin' | 'pinDelete'
   | 'budget' | 'budgetDelete'
   | 'reserve' | 'reserveDelete'
+  // 이미 있는 세이브의 바꾼 칸만. merge 로 써서 바꾸지 않은 칸(다른 기기의 수정)을 덮지 않는다.
+  | 'reservePatch'
   | 'taskOrder'
   | 'recoveryRule' | 'recoveryPatch' | 'recoveryCommit'
   // 가계부 결산. 카테고리 여럿(기본 카테고리 만들기 · 순서 바꾸기)은 한 배치로 쓴다.
@@ -69,7 +72,7 @@ export type PendingKind =
 
 const KINDS: readonly PendingKind[] = [
   'entry', 'entryDelete', 'entryPrivate', 'account', 'debt', 'debtDelete',
-  'pin', 'pinDelete', 'budget', 'budgetDelete', 'reserve', 'reserveDelete',
+  'pin', 'pinDelete', 'budget', 'budgetDelete', 'reserve', 'reserveDelete', 'reservePatch',
   'taskOrder', 'recoveryRule', 'recoveryPatch', 'recoveryCommit',
   'category', 'categories', 'categoryBudget', 'ledgerSettings', 'ledgerNote', 'ledgerBatch', 'layout',
   'sharedBoard', 'sharedInvite', 'sharedInviteDelete',
@@ -79,6 +82,13 @@ const KINDS: readonly PendingKind[] = [
   'sharedCollectionItem', 'sharedCollectionItemDelete',
   'sharedNote', 'sharedNoteDelete',
 ];
+
+/** 세이브 부분 쓰기. `updatedAt` 은 고친 순간이고, 다시 보낼 때 서버 값과 견주는 기준이다. */
+export interface ReservePatchPayload {
+  id: string;
+  patch: ReservePatch;
+  updatedAt: string;
+}
 
 /** 회복은 항목과 규칙을 한 배치로 쓴다. 그 한 벌이 payload 다. */
 export interface RecoveryCommitPayload {
@@ -136,6 +146,7 @@ export type PendingPayload =
   | Partial<RecoveryRule>
   | RecoveryCommitPayload
   | LedgerBatchPayload
+  | ReservePatchPayload
   | SharedBoard | SharedInvite
   | SharedSourcePayload
   | { boardId: string; item: SharedTodoItem }
@@ -223,6 +234,19 @@ export function sendPending(db: Firestore, uid: string, op: CommitInput): Promis
     }
     case 'reserveDelete':
       return deleteDoc(docIn(db, uid, COL.reserves, asId(op.payload)));
+    /*
+      바꾼 칸만 merge 로 쓴다. 문서 전체를 다시 쓰면, 다른 기기에서 방금 고친 칸을 이 기기의
+      옛 값으로 덮는다. 지워진 세이브에 쓰면 이름 없는 문서가 되므로 규칙이 거절하고,
+      그 거절은 다른 쓰기처럼 '저장하지 못한 것' 에 남는다.
+    */
+    case 'reservePatch': {
+      const p = op.payload as ReservePatchPayload;
+      return setDoc(
+        docIn(db, uid, COL.reserves, p.id),
+        { ...reservePatchToDoc(p.patch), updatedAt: p.updatedAt },
+        { merge: true },
+      );
+    }
     case 'taskOrder':
       return sendTaskOrder(db, uid, (op.payload as { ordered: { id: string; order: number }[] }).ordered);
     case 'recoveryRule':
@@ -449,6 +473,10 @@ function targetOf(op: PendingOp, uid: string): { path: string[]; base: string } 
       return mine(COL.ledgerNotes, n.id, n.updatedAt);
     }
     case 'reserveDelete': return mine(COL.reserves, asId(op.payload), op.at);
+    case 'reservePatch': {
+      const p = op.payload as ReservePatchPayload;
+      return mine(COL.reserves, p.id, p.updatedAt);
+    }
 
     /*
       같이 보기. 보드 문서는 두 사람이 함께 쓰는 자리라 견주는 일이 더 중요하다 —

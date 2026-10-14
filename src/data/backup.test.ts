@@ -8,6 +8,7 @@ import { newEntry } from '../domain/entry';
 import { defaultRecoveryRule } from '../domain/recovery';
 import { readBackupFile } from './backupFile';
 import { BACKUP_VERSION, buildBackup, countBackup, mergeBackup } from './backup';
+import { planMerge } from './restore';
 import { newBudget, newReserve } from '../domain/budget';
 import type { Account } from '../domain/types';
 
@@ -62,7 +63,7 @@ describe('buildBackup', () => {
     })));
     expect(r.ok).toBe(true);
     if (r.ok) {
-      expect(r.file.format).toBe('v7');
+      expect(r.file.format).toBe('v8');
       expect(r.file.data.budgets[0]).toEqual(budget);
       expect(r.file.data.reserves[0]).toEqual(reserve);
       // 건수는 파일 총계와 맞아떨어져야 한다.
@@ -102,12 +103,72 @@ describe('v6 — 결산 자료도 한 파일에', () => {
     })));
     expect(r.ok).toBe(true);
     if (r.ok) {
-      expect(r.file.version).toBe(7);
+      expect(r.file.version).toBe(8);
       expect(r.file.data.categories).toEqual(categories);
       expect(r.file.data.categoryBudgets).toEqual(categoryBudgets);
       expect(r.file.data.ledger).toEqual({ settleDay: 25 });
       // 건수에 결산 자료가 들어간다. 설정은 세지 않는다.
       expect(countBackup(r.file.data)).toBe(2);
     }
+  });
+});
+
+describe('v8 — 세이브 보호 · 목표 · 보관 (P1)', () => {
+  const empty = {
+    entries: [], accounts: [], debts: [], pins: [], budgets: [], categories: [], categoryBudgets: [], ledgerNotes: [],
+    ledger: null, recovery: null,
+  };
+  const off = newReserve({
+    id: 'r1', name: '비상금', amountMinor: 300_000, protected: false,
+    targetAmountMinor: 1_000_000, targetDate: '2027-03-01', archivedAt: null,
+  });
+  const archived = newReserve({ id: 'r2', name: '옛 적금', amountMinor: 70_000, archivedAt: '2026-10-01T00:00:00.000Z' });
+
+  it('보호 끔 · 목표 · 보관이 내보내기 → 가져오기 뒤에도 그대로다', () => {
+    const r = readBackupFile(JSON.stringify(buildBackup({ ...empty, reserves: [off, archived] })));
+    expect(r.ok).toBe(true);
+    if (r.ok) {
+      expect(r.file.version).toBe(8);
+      expect(r.file.data.reserves).toEqual([off, archived]);
+      expect(r.file.data.reserves[0]?.protected).toBe(false);
+    }
+  });
+
+  it('예전 판(v7 · v4)의 세이브는 보호 켬 · 목표 없음 · 보관 안 함으로 읽는다', () => {
+    const legacy = { id: 'r1', name: '비상금', amountMinor: 300_000, currency: 'KRW', createdAt: '', updatedAt: '' };
+    for (const version of [4, 7]) {
+      const file = {
+        app: 'Dada Calendar', version, exportedAt: '', ...empty, reserves: [legacy],
+      };
+      const r = readBackupFile(JSON.stringify(file));
+      expect(r.ok).toBe(true);
+      if (r.ok) {
+        expect(r.file.data.reserves[0]).toMatchObject({
+          protected: true, targetAmountMinor: null, targetDate: null, archivedAt: null, amountMinor: 300_000,
+        });
+      }
+    }
+  });
+
+  it('보호 · 목표 · 보관의 형태가 틀리면 아무것도 넣지 않고 그 자리를 짚는다', () => {
+    const bad = [
+      { protected: 'false' }, { targetAmountMinor: -1 }, { targetAmountMinor: 1.5 }, { targetAmountMinor: '100' },
+      { targetDate: '2027-13-01' }, { targetDate: 20270301 }, { archivedAt: '' }, { archivedAt: 3 },
+    ];
+    for (const over of bad) {
+      const file = { ...buildBackup({ ...empty, reserves: [off] }) } as Record<string, unknown>;
+      file.reserves = [{ ...off, ...over }];
+      const r = readBackupFile(JSON.stringify(file));
+      expect(r.ok, JSON.stringify(over)).toBe(false);
+      if (!r.ok) expect(r.problems[0]?.where).toMatch(/^reserves\[0\]\./);
+    }
+  });
+
+  it('병합은 이미 있는 세이브의 금액 · 보호를 덮지 않는다 — 없는 것만 더한다', () => {
+    const current = { ...empty, reserves: [{ ...off, amountMinor: 500_000, protected: true }] };
+    const merged = mergeBackup(current, { ...empty, reserves: [off, archived] });
+    expect(merged.reserves).toEqual([{ ...off, amountMinor: 500_000, protected: true }, archived]);
+    // 실제 쓰기 계획도 같다 — 이미 있는 id 는 후보에서 빠진다.
+    expect(planMerge(current, { ...empty, reserves: [off, archived] }).reserves).toEqual([archived]);
   });
 });

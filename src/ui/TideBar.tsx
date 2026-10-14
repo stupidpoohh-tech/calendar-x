@@ -15,7 +15,7 @@
  * 고치는 자리는 확인 잔고 줄 하나다. 생활비 · 세이브로 확보된 몫은 접힌 줄에서 펼쳐 본다.
  */
 import { useMemo, type ReactNode } from 'react';
-import { budgetEnded, budgetStates } from '../domain/budget';
+import { activeReserves, budgetEnded, budgetStates, reserveProtects } from '../domain/budget';
 import { MONEY_TYPE_BY_ID } from '../domain/constants';
 import { daysBetween, fmtDayShort } from '../domain/date';
 import { formatAmount, formatSigned } from '../domain/money';
@@ -78,7 +78,9 @@ export function TideBar({
   const editor = useBalanceEditor(accounts, entries, onSaveAccount, tideFrom, todayISO);
 
   // 통화가 섞이면 최소 단위가 달라 애초에 더할 수 없다. 숫자를 내지 않는다.
-  const scope = useMemo(() => calcScopeOf(accounts, entries), [accounts, entries]);
+  const scope = useMemo(
+    () => calcScopeOf(accounts, entries, { budgets, reserves }), [accounts, entries, budgets, reserves],
+  );
 
   const res = useMemo(() => ({ budgets, reserves }), [budgets, reserves]);
 
@@ -233,7 +235,7 @@ export function TideBar({
             <BalanceNote editor={editor} />
           </div>
         )}
-        {(view.held !== 0 || (onOpenPockets && (pockets.length > 0 || reserves.length > 0))) ? (
+        {(view.held !== 0 || (onOpenPockets && (pockets.length > 0 || activeReserves(reserves).length > 0))) ? (
           <details className="tide-held">
             <summary className="num">
               생활비 · 세이브로 확보 <b>₩ {formatAmount(view.held)}</b>
@@ -259,16 +261,29 @@ export function TideBar({
                   </li>
                 );
               })}
-              {reserves.filter((r) => onOpenPockets || r.amountMinor > 0).map((r) => (
-                <li key={r.id} className="num">
-                  {onOpenPockets ? (
-                    <button className="tide-pk" onClick={() => onOpenPockets({ kind: 'reserve', id: r.id })}
-                      aria-label={`세이브 ${r.name} 열기`}>
-                      <span>{r.name} <i>세이브</i></span><span>{formatAmount(r.amountMinor)}</span>
-                    </button>
-                  ) : <><span>{r.name} <i>세이브</i></span><span>{formatAmount(r.amountMinor)}</span></>}
-                </li>
-              ))}
+              {/*
+                보관한 세이브는 싣지 않는다. 자물쇠를 푼 세이브는 확보 합계에 들어가지 않으므로, 관리하는
+                창이 있을 때만 '한도에 포함' 으로 적어 둔다 — 금액을 확보 몫처럼 늘어놓지 않는다.
+              */}
+              {activeReserves(reserves)
+                .filter((r) => (reserveProtects(r) ? onOpenPockets || r.amountMinor > 0 : !!onOpenPockets))
+                .map((r) => {
+                  const locked = reserveProtects(r);
+                  const body = (
+                    <>
+                      <span>{r.name} <i>{locked ? '세이브' : '세이브 · 한도에 포함'}</i></span>
+                      <span className={locked ? undefined : 'tide-pk-off'}>{formatAmount(r.amountMinor)}</span>
+                    </>
+                  );
+                  return (
+                    <li key={r.id} className="num">
+                      {onOpenPockets ? (
+                        <button className="tide-pk" onClick={() => onOpenPockets({ kind: 'reserve', id: r.id })}
+                          aria-label={`세이브 ${r.name} 열기${locked ? '' : ' (가용 한도에 포함)'}`}>{body}</button>
+                      ) : body}
+                    </li>
+                  );
+                })}
             </ul>
             {onOpenPockets && <PocketAdd onOpen={onOpenPockets} />}
             <p className="tide-held-n num">

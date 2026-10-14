@@ -339,11 +339,42 @@ export interface Budget {
 export interface Reserve {
   id: string;
   name: string;
+  /** 지금 실제로 확보하고 있는 금액. 보호를 끄거나 보관해도 이 값은 그대로다. */
   amountMinor: number;
   currency: string;
+  /*
+    ── 아래는 나중에 생긴 필드다 (P1) ───────────────────────────────
+    모두 선택이다. 이 필드가 없던 시절의 문서 · 백업에는 없고, 없으면 지금까지와 똑같이
+    계산돼야 한다. 읽는 쪽은 `budget.ts` 의 `reserveProtects` 를 거친다.
+  */
+  /**
+   * 가용 한도에서 뺄 것인가. **없으면 true** — 예전 세이브는 모두 한도에서 빠지고 있었다.
+   * false 는 "한도에 포함" 이고, 세이브와 금액은 그대로 남는다. 잔고 · 예상 잔고와 무관하다.
+   */
+  protected?: boolean;
+  /** 목표 금액. 표시용이고 어떤 계산에도 들어가지 않는다. */
+  targetAmountMinor?: number | null;
+  /** 목표 날짜. 표시용이고 어떤 계산에도 들어가지 않는다. */
+  targetDate?: DateISO | null;
+  /**
+   * 보관한 순간(ISO). 값이 있으면 일반 목록에서 빠지고 한도 보호도 풀린다. 금액은 지우지 않는다 —
+   * 보관 해제하면 같은 금액 · 같은 보호 설정으로 돌아온다.
+   */
+  archivedAt?: string | null;
   createdAt: string;
   updatedAt: string;
 }
+
+/**
+ * 이미 있는 세이브를 고치는 부분 쓰기 — **바꾼 칸만** 담는다.
+ *
+ * 문서 전체를 다시 쓰면 열어 둔 편집 창의 옛 값이 다른 기기에서 방금 바꾼 칸(보호 · 금액)을
+ * 덮는다. 바꾼 칸만 merge 로 쓰면 바꾸지 않은 칸은 서버 값이 남는다
+ * (`pendingWrites` 의 `reservePatch`). 새 세이브를 만들 때만 문서 전체를 쓴다.
+ */
+export type ReservePatch = Partial<Pick<
+  Reserve, 'name' | 'amountMinor' | 'protected' | 'targetAmountMinor' | 'targetDate' | 'archivedAt'
+>>;
 
 /** 렌즈별 고정 메모. 날짜를 갖지 않으므로 entry 가 아니다. */
 export interface Pin {

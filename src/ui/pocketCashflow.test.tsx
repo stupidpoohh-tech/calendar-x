@@ -10,7 +10,7 @@ import { cleanup, fireEvent, render, screen, within } from '@testing-library/rea
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import { newBudget, newReserve } from '../domain/budget';
 import { newEntry, newMoney } from '../domain/entry';
-import type { Account, Entry } from '../domain/types';
+import type { Account, Entry, Reserve } from '../domain/types';
 import { DialogHost } from './Dialog';
 import { MonthCalendar } from './MonthCalendar';
 import { PocketSheet } from './PocketSheet';
@@ -115,6 +115,23 @@ describe('카드의 확보 줄 — 생활비 · 세이브 창을 연다', () => 
     ]);
   });
 
+  it('풀린 세이브는 확보 합계에 들어가지 않고 "한도에 포함" 으로 적힌다. 보관한 세이브는 싣지 않는다', () => {
+    card({
+      budgets: [],
+      reserves: [
+        newReserve({ id: 'r1', name: '비상금', amountMinor: 30_000 }),
+        newReserve({ id: 'r2', name: '여행', amountMinor: 20_000, protected: false }),
+        newReserve({ id: 'r3', name: '옛 적금', amountMinor: 70_000, archivedAt: '2026-10-01T00:00:00.000Z' }),
+      ],
+    });
+    // 250,000 − 비상금 30,000
+    expect(screen.getByLabelText(/^생활비 외 가용/)).toHaveTextContent('220,000');
+    expect(screen.getByText(/생활비 · 세이브로 확보/).textContent).toContain('30,000');
+    const list = screen.getByRole('list', { name: '생활비 · 세이브' });
+    expect(within(list).getByRole('button', { name: '세이브 여행 열기 (가용 한도에 포함)' }).textContent).toContain('한도에 포함');
+    expect(within(list).queryByRole('button', { name: /옛 적금/ })).toBeNull();
+  });
+
   it('생활비 · 세이브가 없으면 만들기 두 개만 얇게', () => {
     const open = card({ budgets: [] });
     expect(screen.queryByRole('list', { name: '생활비 · 세이브' })).toBeNull();
@@ -167,7 +184,10 @@ describe('생활비 · 세이브 창', () => {
     const p = sheet({ kind: 'reserve', id: 'r1' });
     fireEvent.change(screen.getByDisplayValue('비상금'), { target: { value: '여행 적립' } });
     fireEvent.click(screen.getByRole('button', { name: '저장' }));
-    expect(p.onSaveReserve).toHaveBeenCalledWith(expect.objectContaining({ id: 'r1', name: '여행 적립', amountMinor: 30_000 }));
+    expect(p.onSaveReserve).toHaveBeenCalledWith(
+      expect.objectContaining({ id: 'r1', name: '여행 적립', amountMinor: 30_000 }),
+      expect.objectContaining({ id: 'r1', name: '비상금' }),
+    );
   });
 
   it('Esc 와 닫기로 닫는다', () => {
@@ -175,5 +195,89 @@ describe('생활비 · 세이브 창', () => {
     fireEvent.keyDown(window, { key: 'Escape' });
     fireEvent.click(screen.getByRole('button', { name: '닫기' }));
     expect(p.onClose).toHaveBeenCalledTimes(2);
+  });
+});
+
+describe('세이브 보호 · 목표 · 보관 (P1)', () => {
+  const save = (p: Partial<Reserve> = {}) => newReserve({ id: 'r1', name: '비상금', amountMinor: 300_000, ...p });
+  function sheet(reserves: Reserve[], focus: Parameters<typeof PocketSheet>[0]['focus'] = { kind: 'list' }) {
+    const props = {
+      onClose: vi.fn(), onSaveBudget: vi.fn(), onDeleteBudget: vi.fn(), onSaveReserve: vi.fn(), onDeleteReserve: vi.fn(),
+    };
+    render(
+      <PocketSheet focus={focus} budgets={[]} reserves={reserves} entries={[]} accounts={[acct(1_000_000)]} todayISO={TODAY} {...props} />,
+    );
+    return props;
+  }
+
+  it('자물쇠가 보호 상태를 말한다 — 잠김: 가용 한도에서 제외, 눌러 풀면 포함으로 저장한다', () => {
+    const p = sheet([save()]);
+    const lock = screen.getByRole('button', { name: /비상금 보호/ });
+    expect(lock).toHaveAttribute('aria-pressed', 'true');
+    expect(screen.getByRole('dialog').textContent).toContain('가용 한도에서 제외');
+    fireEvent.click(lock);
+    expect(p.onSaveReserve).toHaveBeenCalledWith(
+      expect.objectContaining({ id: 'r1', protected: false, amountMinor: 300_000 }),
+      expect.objectContaining({ id: 'r1', protected: true }),
+    );
+  });
+
+  it('필드가 없는 예전 세이브도 잠긴 것으로 보인다', () => {
+    sheet([{ id: 'r1', name: '비상금', amountMinor: 300_000, currency: 'KRW', createdAt: '', updatedAt: '' }]);
+    expect(screen.getByRole('button', { name: /비상금 보호/ })).toHaveAttribute('aria-pressed', 'true');
+  });
+
+  it('풀린 세이브는 "가용 한도에 포함" 이고, 금액은 그대로 보인다', () => {
+    sheet([save({ protected: false })]);
+    expect(screen.getByRole('button', { name: /비상금 보호/ })).toHaveAttribute('aria-pressed', 'false');
+    expect(screen.getByRole('button', { name: '비상금 고치기' }).textContent).toContain('300,000원 · 가용 한도에 포함');
+  });
+
+  it('편집 창에서 보호 · 목표 금액 · 목표 날짜를 고친다 — 목표는 표시만 한다고 적는다', () => {
+    const p = sheet([save()], { kind: 'reserve', id: 'r1' });
+    const dlg = screen.getByRole('dialog');
+    fireEvent.click(within(dlg).getByRole('button', { name: '가용 한도에서 제외' }));
+    expect(within(dlg).getByRole('button', { name: '가용 한도에 포함' })).toHaveAttribute('aria-pressed', 'false');
+    expect(dlg.textContent).toContain('풀어도 세이브와 금액은 그대로 남습니다');
+    fireEvent.change(within(dlg).getByLabelText('목표 금액 (선택)'), { target: { value: '1,000,000' } });
+    fireEvent.change(within(dlg).getByLabelText('목표 날짜 (선택)'), { target: { value: '2027-03-01' } });
+    expect(dlg.textContent).toContain('목표는 표시만 합니다');
+    fireEvent.click(within(dlg).getByRole('button', { name: '저장' }));
+    expect(p.onSaveReserve).toHaveBeenCalledWith(
+      expect.objectContaining({ protected: false, targetAmountMinor: 1_000_000, targetDate: '2027-03-01', amountMinor: 300_000 }),
+      expect.objectContaining({ id: 'r1' }),
+    );
+  });
+
+  it('목표가 있으면 줄에 진행률을 적는다', () => {
+    sheet([save({ targetAmountMinor: 1_000_000, targetDate: '2027-03-01' })]);
+    expect(screen.getByRole('button', { name: '비상금 고치기' }).textContent).toContain('목표 1,000,000 · 30%');
+  });
+
+  it('보관은 "일반 목록에서 숨김 · 보호 해제" 이고, 보관한 세이브는 접힌 묶음에서 보관을 푼다', () => {
+    const p = sheet([save()], { kind: 'reserve', id: 'r1' });
+    expect(screen.getByRole('dialog').textContent).toContain('보관: 일반 목록에서 숨김 · 보호 해제');
+    fireEvent.click(screen.getByRole('button', { name: '보관' }));
+    const [next, prev] = p.onSaveReserve.mock.calls[0]!;
+    expect(next).toMatchObject({ id: 'r1', amountMinor: 300_000, protected: true });
+    expect(typeof next.archivedAt).toBe('string');
+    expect(prev).toMatchObject({ archivedAt: null });
+    cleanup();
+
+    const q = sheet([save({ archivedAt: '2026-10-14T01:00:00.000Z' })]);
+    expect(screen.queryByRole('button', { name: '비상금 고치기' })).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: '보관한 세이브 1개' }));
+    expect(screen.getByRole('dialog').textContent).toContain('일반 목록에서 숨김 · 보호 해제');
+    fireEvent.click(screen.getByRole('button', { name: '보관 해제' }));
+    expect(q.onSaveReserve).toHaveBeenCalledWith(
+      expect.objectContaining({ id: 'r1', archivedAt: null, amountMinor: 300_000, protected: true }),
+      expect.objectContaining({ archivedAt: '2026-10-14T01:00:00.000Z' }),
+    );
+  });
+
+  it('보관한 세이브로 창을 열면 편집 창 대신 보관 묶음을 펼쳐 둔다', () => {
+    sheet([save({ archivedAt: '2026-10-14T01:00:00.000Z' })], { kind: 'reserve', id: 'r1' });
+    expect(screen.getByRole('button', { name: '보관 해제' })).toBeInTheDocument();
+    expect(screen.queryByLabelText('세이브 금액')).toBeNull();
   });
 });

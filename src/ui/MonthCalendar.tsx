@@ -186,7 +186,9 @@ export function MonthCalendar({
     달력만 셀마다 금액을 적으면, 카드가 거절한 바로 그 숫자를 달력이 지어내는 꼴이 된다.
     계좌를 모르는 실제 거래가 있을 때도 같다 (`calcScopeOf`).
   */
-  const scope = useMemo(() => calcScopeOf(accounts, tideEntries), [accounts, tideEntries]);
+  const scope = useMemo(
+    () => calcScopeOf(accounts, tideEntries, reservations), [accounts, tideEntries, reservations],
+  );
 
   const showLimits = lens === 'money' && hasBalance && scope.ok;
   const limits = useMemo(() => {

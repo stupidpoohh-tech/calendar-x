@@ -20,14 +20,16 @@ export type PocketFocus =
   | { kind: 'newBudget' }
   | { kind: 'newReserve' }
   | { kind: 'list' };
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, type KeyboardEvent } from 'react';
 import {
-  budgetEnded, budgetStates, newBudget, newReserve, spendingIn, unlinkedSpendingFor, type BudgetState,
+  activeReserves, archivedReserves, budgetEnded, budgetStates, newBudget, newReserve, reservedTotal,
+  reserveProtects, spendingIn, unlinkedSpendingFor, type BudgetState,
 } from '../domain/budget';
 import { fmtDayShort } from '../domain/date';
 import { formatAmount, minorToInput, parseAmountToMinor } from '../domain/money';
 import type { Account, Budget, Entry, Reserve } from '../domain/types';
 import { Icon } from './Icon';
+import { isComposingEnter } from './ime';
 import { PICKER } from './pickerField';
 
 interface Props {
@@ -50,7 +52,11 @@ interface Props {
   accounts?: readonly Account[];
   onSaveBudget: (b: Budget) => void;
   onDeleteBudget: (b: Budget) => void;
-  onSaveReserve: (r: Reserve) => void;
+  /**
+   * 세이브 저장. `prev` 가 null 이면 새로 만든 것이고, 아니면 편집 전 값이다 — 부르는 쪽이 둘을
+   * 견줘 **바꾼 칸만** 쓴다(`reservePatchOf`). 보호 전환 · 보관도 이 길로 온다.
+   */
+  onSaveReserve: (next: Reserve, prev: Reserve | null) => void;
   onDeleteReserve: (r: Reserve) => void;
   onEntryClick?: (e: Entry) => void;
   /** 사용처를 정하지 않은 실제 지출을 이 주머니에 건다. 여러 건을 한 번에. */
@@ -70,13 +76,22 @@ export function BudgetPanel({
   const [openId, setOpenId] = useState<string | null>(focus?.kind === 'budget' ? focus.id : null);
   const [reserveDraft, setReserveDraft] = useState<Reserve | null>(() => {
     if (focus?.kind === 'newReserve') return newReserve();
-    if (focus?.kind === 'reserve') return reserves.find((r) => r.id === focus.id) ?? null;
+    // 보관한 세이브는 편집 창 대신 보관 묶음을 펼쳐 보인다(아래 showArchived).
+    if (focus?.kind === 'reserve') return reserves.find((r) => r.id === focus.id && !r.archivedAt) ?? null;
     return null;
   });
   const [reserveText, setReserveText] = useState(() => {
     const r = focus?.kind === 'reserve' ? reserves.find((x) => x.id === focus.id) : null;
     return r?.amountMinor ? minorToInput(r.amountMinor, r.currency) : '';
   });
+  const [targetText, setTargetText] = useState(() => {
+    const r = focus?.kind === 'reserve' ? reserves.find((x) => x.id === focus.id) : null;
+    return r?.targetAmountMinor ? minorToInput(r.targetAmountMinor, r.currency) : '';
+  });
+  // 보관한 세이브를 연 창에서 바로 보이게 한다 — 그 줄로 들어왔으면 펼쳐 둔다.
+  const [showArchived, setShowArchived] = useState(
+    () => focus?.kind === 'reserve' && !!reserves.find((x) => x.id === focus.id)?.archivedAt,
+  );
   const root = useRef<HTMLDivElement>(null);
   // 연 줄로 한 번 스크롤한다 — 생활비가 여럿이면 고른 것이 창 아래에 묻힐 수 있다.
   useEffect(() => {
@@ -87,7 +102,9 @@ export function BudgetPanel({
 
   const collapsed = bare ? false : collapsedPref;
   const states = budgetStates(budgets, entries, { accounts, today: todayISO });
-  const reservedMinor = reserves.reduce((t, r) => t + r.amountMinor, 0);
+  const active = activeReserves(reserves);
+  const archived = archivedReserves(reserves);
+  const reservedMinor = reservedTotal(active);
 
   const startEdit = (b: Budget) => {
     setDraft(b);
@@ -111,17 +128,35 @@ export function BudgetPanel({
   const startReserve = (r: Reserve) => {
     setReserveDraft(r);
     setReserveText(r.amountMinor ? minorToInput(r.amountMinor, r.currency) : '');
+    setTargetText(r.targetAmountMinor ? minorToInput(r.targetAmountMinor, r.currency) : '');
   };
+
+  /** 편집 전 값 — 없으면 새 세이브다. 같은 id 가 목록에 있으면 그것과 견준다. */
+  const prevOf = (id: string): Reserve | null => reserves.find((r) => r.id === id) ?? null;
 
   const commitReserve = () => {
     if (!reserveDraft) return;
+    // 목표 금액은 선택이다. 비우거나 0 이면 "목표 없음".
+    const target = Math.abs(parseAmountToMinor(targetText, reserveDraft.currency) ?? 0);
     onSaveReserve({
       ...reserveDraft,
       name: reserveDraft.name.trim() || '세이브',
       amountMinor: Math.abs(parseAmountToMinor(reserveText, reserveDraft.currency) ?? 0),
+      targetAmountMinor: target > 0 ? target : null,
+      targetDate: reserveDraft.targetDate || null,
       updatedAt: new Date().toISOString(),
-    });
+    }, prevOf(reserveDraft.id));
     setReserveDraft(null);
+  };
+
+  /** 보호 · 보관만 바꾼다. 편집 창을 거치지 않으므로 다른 칸은 그대로 간다. */
+  const toggleProtect = (r: Reserve) => {
+    onSaveReserve({ ...r, protected: !reserveProtectsFlag(r), updatedAt: new Date().toISOString() }, r);
+  };
+  const setArchived = (r: Reserve, on: boolean) => {
+    const now = new Date().toISOString();
+    onSaveReserve({ ...r, archivedAt: on ? now : null, updatedAt: now }, r);
+    if (reserveDraft?.id === r.id) setReserveDraft(null);
   };
 
   const summary = [
@@ -191,31 +226,29 @@ export function BudgetPanel({
 
           <hr className="bp-sep" />
 
-          {reserves.map((r) => (
+          {active.map((r) => (
             reserveDraft?.id === r.id ? (
               <ReserveForm
-                key={r.id} focusKey={r.id} draft={reserveDraft} amountText={reserveText}
-                onDraft={setReserveDraft} onAmount={setReserveText}
+                key={r.id} focusKey={r.id} draft={reserveDraft} amountText={reserveText} targetText={targetText}
+                onDraft={setReserveDraft} onAmount={setReserveText} onTarget={setTargetText}
                 onCancel={() => setReserveDraft(null)} onSave={commitReserve}
+                onArchive={() => setArchived(r, true)}
               />
             ) : (
-              <div key={r.id} className="debt-i">
-                <button className="debt-i-main" onClick={() => startReserve(r)}>
-                  <span className="debt-n">{r.name}</span>
-                  <span className="debt-d num">{formatAmount(r.amountMinor)}원 · 한도에서 빠짐</span>
-                </button>
-                <button className="debt-x" onClick={() => onDeleteReserve(r)} aria-label={`${r.name} 삭제`}>
-                  <Icon.X size={12} />
-                </button>
-              </div>
+              <ReserveRow
+                key={r.id} reserve={r} focusKey={r.id}
+                onEdit={() => startReserve(r)}
+                onToggleProtect={() => toggleProtect(r)}
+                onDelete={() => onDeleteReserve(r)}
+              />
             )
           ))}
 
           {reserveDraft && !reserves.some((r) => r.id === reserveDraft.id) ? (
             <ReserveForm
               focusKey="newReserve"
-              draft={reserveDraft} amountText={reserveText}
-              onDraft={setReserveDraft} onAmount={setReserveText}
+              draft={reserveDraft} amountText={reserveText} targetText={targetText}
+              onDraft={setReserveDraft} onAmount={setReserveText} onTarget={setTargetText}
               onCancel={() => setReserveDraft(null)} onSave={commitReserve}
             />
           ) : (
@@ -224,8 +257,38 @@ export function BudgetPanel({
             </button>
           )}
 
+          {/*
+            보관한 세이브는 일반 목록에서 빠지고 한도 보호도 풀린다. 금액은 그대로라 여기 접어 두고,
+            보관을 풀면 같은 금액 · 같은 보호 설정으로 목록에 돌아온다.
+          */}
+          {archived.length > 0 && (
+            <div className="rv-arch">
+              <button
+                className="rv-arch-h" onClick={() => setShowArchived((v) => !v)} aria-expanded={showArchived}
+              >
+                <Icon.Chevron size={12} dir={showArchived ? 'down' : 'right'} />
+                보관한 세이브 {archived.length}개
+              </button>
+              {showArchived && (
+                <>
+                  <p className="bp-note">일반 목록에서 숨김 · 보호 해제 — 금액은 그대로 남아 있습니다.</p>
+                  {archived.map((r) => (
+                    <div key={r.id} className="debt-i" data-focus={r.id}>
+                      <span className="debt-i-main rv-arch-i">
+                        <span className="debt-n">{r.name}</span>
+                        <span className="debt-d num">{formatAmount(r.amountMinor)}원 · 가용 한도에 포함</span>
+                      </span>
+                      <button className="chip" onClick={() => setArchived(r, false)}>보관 해제</button>
+                    </div>
+                  ))}
+                </>
+              )}
+            </div>
+          )}
+
           <p className="bp-note">
-            세이브는 잔고에서 빠지지 않습니다. 통장에는 그대로 있고, 쓸 수 있는 한도에서만 빠집니다.
+            세이브는 잔고에서 빠지지 않습니다. 통장에는 그대로 있고, 자물쇠를 잠근 세이브만 쓸 수 있는 한도에서 빠집니다.
+            자물쇠를 풀어도 세이브와 금액은 그대로입니다.
           </p>
         </div>
       )}
@@ -437,34 +500,131 @@ function BudgetForm({
   );
 }
 
+/** 보호 상태를 그대로 읽는다 — 필드가 없는 예전 세이브는 잠긴 것이다. 보관과는 따로 본다. */
+function reserveProtectsFlag(r: Pick<Reserve, 'protected'>): boolean {
+  return r.protected !== false;
+}
+
+/** 목표가 있으면 한 줄로: "목표 1,000,000 · 30% · 3/1까지". 계산에는 쓰지 않는 표시값이다. */
+function targetLine(r: Reserve): string | null {
+  const t = r.targetAmountMinor ?? null;
+  const parts: string[] = [];
+  if (t !== null && t > 0) {
+    parts.push(`목표 ${formatAmount(t)}`);
+    parts.push(`${Math.floor((Math.max(0, r.amountMinor) / t) * 100)}%`);
+  }
+  if (r.targetDate) parts.push(`${fmtDayShort(r.targetDate)}까지`);
+  return parts.length > 0 ? parts.join(' · ') : null;
+}
+
+/**
+ * 세이브 한 줄. 자물쇠가 보호 상태다 — 잠김: 가용 한도에서 제외, 열림: 가용 한도에 포함.
+ *
+ * 눈 그림을 쓰지 않는다. 이것은 화면에서 감추는 것이 아니라 쓸 수 있는 돈을 바꾸는 일이다.
+ */
+function ReserveRow({
+  reserve: r, focusKey, onEdit, onToggleProtect, onDelete,
+}: {
+  reserve: Reserve;
+  focusKey?: string;
+  onEdit: () => void;
+  onToggleProtect: () => void;
+  onDelete: () => void;
+}) {
+  const locked = reserveProtects(r);
+  const target = targetLine(r);
+  return (
+    <div className="debt-i rv-i" data-focus={focusKey}>
+      <button
+        className={'rv-lock' + (locked ? ' on' : '')} onClick={onToggleProtect}
+        aria-pressed={locked}
+        aria-label={`${r.name} 보호 — ${locked ? '가용 한도에서 제외 중. 누르면 포함' : '가용 한도에 포함 중. 누르면 제외'}`}
+        title={locked ? '가용 한도에서 제외' : '가용 한도에 포함'}
+      >
+        {locked ? <Icon.Lock size={14} /> : <Icon.Unlock size={14} />}
+      </button>
+      <button className="debt-i-main" onClick={onEdit} aria-label={`${r.name} 고치기`}>
+        <span className="debt-n">{r.name}</span>
+        <span className="debt-d num">
+          {formatAmount(r.amountMinor)}원 · {locked ? '가용 한도에서 제외' : '가용 한도에 포함'}
+        </span>
+        {target && <span className="debt-d num rv-target">{target}</span>}
+      </button>
+      <button className="debt-x" onClick={onDelete} aria-label={`${r.name} 삭제`}>
+        <Icon.X size={12} />
+      </button>
+    </div>
+  );
+}
+
 function ReserveForm({
-  draft, amountText, onDraft, onAmount, onCancel, onSave, focusKey,
+  draft, amountText, targetText, onDraft, onAmount, onTarget, onCancel, onSave, onArchive, focusKey,
 }: {
   focusKey?: string;
   draft: Reserve;
   amountText: string;
+  targetText: string;
   onDraft: (r: Reserve) => void;
   onAmount: (v: string) => void;
+  onTarget: (v: string) => void;
   onCancel: () => void;
   onSave: () => void;
+  /** 이미 있는 세이브만. 새로 만드는 중에는 보관할 것이 없다. */
+  onArchive?: () => void;
 }) {
+  const locked = reserveProtectsFlag(draft);
+  const enter = (e: KeyboardEvent<HTMLInputElement>) => { if (!isComposingEnter(e) && e.key === 'Enter') onSave(); };
   return (
     <div className="debt-f" data-focus={focusKey}>
       <input
         className="mod-input" placeholder="이름 (예: 비상금)" value={draft.name} autoFocus
         onChange={(e) => onDraft({ ...draft, name: e.target.value })}
-        onKeyDown={(e) => { if (!e.nativeEvent.isComposing && e.key === 'Enter') onSave(); }}
+        onKeyDown={enter}
       />
       <input
         className="mod-input num" inputMode="numeric" value={amountText} placeholder="0"
         aria-label="세이브 금액"
         onChange={(e) => onAmount(e.target.value)}
-        onKeyDown={(e) => { if (!e.nativeEvent.isComposing && e.key === 'Enter') onSave(); }}
+        onKeyDown={enter}
       />
+      <button
+        type="button" className={'rv-prot' + (locked ? ' on' : '')} aria-pressed={locked}
+        onClick={() => onDraft({ ...draft, protected: !locked })}
+      >
+        {locked ? <Icon.Lock size={14} /> : <Icon.Unlock size={14} />}
+        <span>{locked ? '가용 한도에서 제외' : '가용 한도에 포함'}</span>
+      </button>
+      <p className="bp-note">
+        {locked
+          ? '잠그면 이 금액만큼 쓸 수 있는 한도가 줄어듭니다. 잔고는 그대로입니다.'
+          : '풀어도 세이브와 금액은 그대로 남습니다. 쓸 수 있는 한도에만 다시 포함됩니다.'}
+      </p>
+      <div className="debt-grid">
+        <label>목표 금액 (선택)
+          <input
+            className="mod-input num" inputMode="numeric" value={targetText} placeholder="없음"
+            onChange={(e) => onTarget(e.target.value)}
+            onKeyDown={enter}
+          />
+        </label>
+        <label>목표 날짜 (선택)
+          <input
+            type="date" className="mod-input" {...PICKER} value={draft.targetDate ?? ''}
+            onChange={(e) => onDraft({ ...draft, targetDate: e.target.value || null })}
+          />
+        </label>
+      </div>
+      <p className="bp-note">목표는 표시만 합니다. 한도 계산에는 들어가지 않습니다.</p>
       <div className="debt-f-a">
+        {onArchive && (
+          <button className="btn rv-arch-b" onClick={onArchive} title="일반 목록에서 숨김 · 보호 해제">
+            보관
+          </button>
+        )}
         <button className="btn" onClick={onCancel}>취소</button>
         <button className="btn primary" onClick={onSave}>저장</button>
       </div>
+      {onArchive && <p className="bp-note">보관: 일반 목록에서 숨김 · 보호 해제. 금액은 그대로 남고, 언제든 보관을 풀 수 있습니다.</p>}
     </div>
   );
 }

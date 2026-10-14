@@ -247,6 +247,87 @@ describe('budgets / reserves', () => {
 });
 
 /*
+  세이브 P1 — 보호 · 목표 · 보관.
+
+  새 필드는 모두 선택이다. 옛 문서(필드 없음)는 그대로 통과해야 하고, 있으면 형태를 본다.
+  구버전 앱은 이 필드를 모르고 문서 전체를 덮어쓰므로, 기본값이 아닌 값이 실린 문서에
+  판 번호(schema) 없는 쓰기는 거절한다 — 꺼 둔 보호가 사라지면 그 세이브가 말없이 다시
+  한도에서 빠진다.
+*/
+describe('세이브 — 보호 · 목표 · 보관', () => {
+  const rpath = `users/${ME}/reserves/r1`;
+  const legacy = { name: '비상금', amountMinor: 300000, currency: 'KRW', createdAt: '', updatedAt: '' };
+  const p1 = (over: Record<string, unknown> = {}) => ({
+    ...legacy, protected: true, targetAmountMinor: null, targetDate: null, archivedAt: null, schema: 2, ...over,
+  });
+
+  it('새 필드가 없는 옛 모양도 저장된다', async () => {
+    await assertSucceeds(setDoc(doc(db(ME), rpath), legacy));
+  });
+
+  it('보호 · 목표 · 보관이 실린 모양을 저장한다', async () => {
+    await assertSucceeds(setDoc(doc(db(ME), rpath), p1({
+      protected: false, targetAmountMinor: 1000000, targetDate: '2027-03-01', archivedAt: '2026-10-14T01:00:00.000Z',
+    })));
+  });
+
+  it('형태가 틀리면 거절한다', async () => {
+    await assertFails(setDoc(doc(db(ME), rpath), p1({ protected: 'no' })));
+    await assertFails(setDoc(doc(db(ME), rpath), p1({ targetAmountMinor: -1 })));
+    await assertFails(setDoc(doc(db(ME), rpath), p1({ targetAmountMinor: 1.5 })));
+    await assertFails(setDoc(doc(db(ME), rpath), p1({ targetAmountMinor: '1000' })));
+    await assertFails(setDoc(doc(db(ME), rpath), p1({ targetDate: '2027-3-1' })));
+    await assertFails(setDoc(doc(db(ME), rpath), p1({ archivedAt: '' })));
+    await assertFails(setDoc(doc(db(ME), rpath), p1({ archivedAt: 1 })));
+    await assertFails(setDoc(doc(db(ME), rpath), p1({ schema: '2' })));
+  });
+
+  describe('구버전 덮어쓰기', () => {
+    it('보호를 꺼 둔 세이브를 구버전 모양으로 덮지 못한다', async () => {
+      await assertSucceeds(setDoc(doc(db(ME), rpath), p1({ protected: false })));
+      await assertFails(setDoc(doc(db(ME), rpath), { ...legacy, amountMinor: 310000 }));
+    });
+
+    it('목표 · 보관이 있는 세이브도 같다', async () => {
+      await assertSucceeds(setDoc(doc(db(ME), rpath), p1({ targetAmountMinor: 1000000 })));
+      await assertFails(setDoc(doc(db(ME), rpath), legacy));
+      await assertSucceeds(setDoc(doc(db(ME), rpath), p1({ archivedAt: '2026-10-14T01:00:00.000Z' })));
+      await assertFails(setDoc(doc(db(ME), rpath), legacy));
+    });
+
+    it('판 번호를 낮춰 쓰는 것도 막는다', async () => {
+      await assertSucceeds(setDoc(doc(db(ME), rpath), p1({ protected: false })));
+      await assertFails(setDoc(doc(db(ME), rpath), p1({ protected: false, schema: 1 })));
+    });
+
+    it('기본값만 있는 세이브는 구버전도 지금처럼 고친다', async () => {
+      await assertSucceeds(setDoc(doc(db(ME), rpath), p1()));
+      await assertSucceeds(setDoc(doc(db(ME), rpath), { ...legacy, amountMinor: 310000 }));
+    });
+
+    it('새 앱의 전체 쓰기와 부분 쓰기는 통과하고, 부분 쓰기는 금액을 건드리지 않는다', async () => {
+      await assertSucceeds(setDoc(doc(db(ME), rpath), p1()));
+      await assertSucceeds(setDoc(doc(db(ME), rpath), { protected: false, schema: 2, updatedAt: 'x' }, { merge: true }));
+      const snap = await getDoc(doc(db(ME), rpath));
+      expect(snap.data()?.amountMinor).toBe(300000);
+      expect(snap.data()?.protected).toBe(false);
+      await assertSucceeds(setDoc(doc(db(ME), rpath), p1({ protected: false, amountMinor: 320000 })));
+    });
+
+    it('지워진 세이브에 부분 쓰기를 보내면 이름 없는 문서가 되므로 거절한다', async () => {
+      await assertFails(setDoc(doc(db(ME), rpath), { protected: false, schema: 2, updatedAt: 'x' }, { merge: true }));
+    });
+
+    it('구버전의 부분 갱신(판 번호 없음)도 합쳐진 문서에 판 번호가 남으면 통과한다', async () => {
+      await assertSucceeds(setDoc(doc(db(ME), rpath), p1({ protected: false })));
+      await assertSucceeds(setDoc(doc(db(ME), rpath), { name: '여행' }, { merge: true }));
+      const snap = await getDoc(doc(db(ME), rpath));
+      expect(snap.data()?.protected).toBe(false);
+    });
+  });
+});
+
+/*
   가계부 원장 (L1).
 
   실제 거래 · 흐름 · 분류 · 결제수단 · 계좌 · 확정한 회차는 모두 선택 필드다. 옛 문서는

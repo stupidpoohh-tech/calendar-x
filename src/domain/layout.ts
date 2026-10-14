@@ -40,7 +40,7 @@ export const NEW_USER_LAYOUT: Layout = { ...LEGACY_LAYOUT, calendarAmount: 'avai
 export const CALENDAR_AMOUNTS: readonly { id: CalendarAmount; label: string; hint: string }[] = [
   { id: 'balance', label: '전체 보유액', hint: '계좌에 적은 잔고의 합(확인 잔고). 오늘 칸에만 적습니다' },
   { id: 'projected', label: '예상 잔고', hint: '확인 잔고 + 그 날까지 적어 둔 입출금. 생활비 · 세이브는 빼지 않습니다' },
-  { id: 'available', label: '가용 잔액', hint: '그 날 생활비 · 세이브를 빼고 쓸 수 있는 돈(가용 한도)' },
+  { id: 'available', label: '가용 잔액', hint: '그 날 생활비 · 잠근 세이브를 빼고 쓸 수 있는 돈(가용 한도)' },
   { id: 'pocket', label: '생활비 잔여', hint: '그 날을 품는 생활비의 남은 금액(실제로 쓴 돈 기준)' },
 ];
 

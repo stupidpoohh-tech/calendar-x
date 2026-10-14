@@ -123,6 +123,38 @@ service cloud.firestore {
         || schemaOf(data()) >= 2;
     }
 
+    /*
+      세이브의 보호 · 목표 · 보관 (P1). 전부 선택이다 — 예전 문서에는 없고 그것이 정상이다
+      (보호가 없으면 "켜짐" 으로 읽는다). 있을 때만 형태를 본다.
+    */
+    function validReserveExtras(d) {
+      return (!('protected' in d) || d.protected is bool)
+        && (d.get('targetAmountMinor', null) == null
+            || (d.targetAmountMinor is int && d.targetAmountMinor >= 0))
+        && (d.get('targetDate', null) == null || isDateISO(d.targetDate))
+        && (d.get('archivedAt', null) == null
+            || (d.archivedAt is string && d.archivedAt.size() > 0 && d.archivedAt.size() <= 40));
+    }
+
+    // 기본값이 아닌 P1 값이 실린 세이브인가. 기본값만 있는 문서는 잃을 것이 없다.
+    function hasReserveData(d) {
+      return d.get('protected', true) == false
+        || d.get('targetAmountMinor', null) != null
+        || d.get('targetDate', null) != null
+        || d.get('archivedAt', null) != null;
+    }
+
+    /*
+      구버전 앱이 세이브의 P1 값을 지우지 못하게 한다 — 원장 필드(`keepsLedger`)와 같은 방식.
+      구버전은 이 필드를 모르고 문서 전체를 덮어쓰므로, 꺼 둔 보호가 사라지면(= 켜짐으로 읽힘)
+      그 세이브가 말없이 다시 한도에서 빠진다. 새 앱은 판 번호를 늘 함께 적는다.
+    */
+    function keepsReserve() {
+      return resource == null
+        || !hasReserveData(resource.data)
+        || schemaOf(data()) >= 2;
+    }
+
     // 한 문서가 지나치게 커지는 것을 막는다. 이전 구조는 대출 목록 전체를
     // 한 문서의 memo 에 JSON 으로 넣었고, 그래서 다중 기기 덮어쓰기가 났다.
     function withinSize() {
@@ -233,7 +265,10 @@ service cloud.firestore {
           && withinSize()
           && data().name is string && data().name.size() <= 100
           && data().amountMinor is int
-          && data().currency is string;
+          && data().currency is string
+          && validReserveExtras(data())
+          && (!('schema' in data()) || data().schema is int)
+          && keepsReserve();
       }
 
       /*

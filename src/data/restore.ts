@@ -188,6 +188,9 @@ function checkReserve(r: Reserve): string | null {
   if (!isInt(r.amountMinor)) return '금액이 정수가 아닙니다.';
   if (r.amountMinor < 0) return '금액이 음수입니다.';
   if (!r.currency) return '통화가 비어 있습니다.';
+  if (r.targetAmountMinor != null && (!isInt(r.targetAmountMinor) || r.targetAmountMinor < 0)) {
+    return '목표 금액이 0 이상의 정수가 아닙니다.';
+  }
   return null;
 }
 

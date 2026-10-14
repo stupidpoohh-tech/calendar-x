@@ -29,8 +29,12 @@ import type {
  *
  * 7 부터 `ledgerNotes`(정산 기간 메모)가 **필수**다. 같은 이유로 올렸다 — 메모가 빠진
  * 잘린 파일과 메모가 없던 시절의 파일을 가르기 위해서다.
+ *
+ * 8 은 7 과 구조가 같다. 세이브에 보호 · 목표 · 보관이 실릴 수 있어 올렸다 — 그 필드를 모르는
+ * 예전 앱이 이 파일을 가져오면 꺼 둔 보호가 사라져(= 켬) 세이브가 말없이 다시 한도에서 빠진다.
+ * 예전 앱은 모르는 버전을 거절하므로, 판 번호를 올리는 것이 그 길을 막는 방법이다.
  */
-export const BACKUP_VERSION = 7;
+export const BACKUP_VERSION = 8;
 
 export interface BackupPayload {
   app: 'Dada Calendar';

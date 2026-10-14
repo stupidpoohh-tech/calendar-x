@@ -406,3 +406,72 @@ describe('생활비 · 세이브 배선', () => {
     boom.mockRestore();
   });
 });
+
+/*
+  Financial Core P1 — 캘린더 금액 네 기준의 회귀. 다시 구현하지 않고, 세이브 보호가 '가용 잔액'
+  에만 닿는지와 통화가 섞이면 셀을 비우는지만 본다.
+*/
+describe('캘린더 금액 — 세이브 보호 (P1)', () => {
+  const SAVE = newReserve({ id: 'r1', name: '비상금', amountMinor: 100_000 });
+  const cal = (reserves: ReturnType<typeof newReserve>[], amountMode: 'projected' | 'available', cursor = SEPTEMBER) => wrap(
+    <MonthCalendar
+      cursor={cursor}
+      onCursorChange={() => {}}
+      entries={applyFilters(materialize(RAW, '2026-09-01', '2026-10-31'), 'money', emptyFilters())}
+      tideEntries={RAW}
+      tideMonths={tideWindow(TODAY)}
+      accounts={ACCOUNTS}
+      hasBalance
+      lens="money"
+      weekStart="mon"
+      todayISO={TODAY}
+      onEntryClick={() => {}}
+      onDayOpen={() => {}}
+      onDayCreate={() => {}}
+      amountMode={amountMode}
+      reservations={{ reserves }}
+    />,
+  );
+  const cell = (iso: string, name: string) => screen.getByLabelText(new RegExp(`^${iso} ${name}`)).textContent;
+
+  it('가용 잔액 칸은 잠근 세이브만 뺀다 — 풀거나 보관하면 그만큼 돌아온다', () => {
+    cal([SAVE], 'available');
+    const on = cell('2026-09-14', '가용 잔액');
+    cleanup();
+    cal([{ ...SAVE, protected: false }], 'available');
+    const off = cell('2026-09-14', '가용 잔액');
+    cleanup();
+    cal([{ ...SAVE, archivedAt: '2026-09-01T00:00:00.000Z' }], 'available');
+    const archived = cell('2026-09-14', '가용 잔액');
+    cleanup();
+    cal([], 'available');
+    const none = cell('2026-09-14', '가용 잔액');
+    expect(off).toBe(none);
+    expect(archived).toBe(none);
+    expect(on).not.toBe(none);
+  });
+
+  it('예상 잔고 칸은 보호와 무관하다', () => {
+    cal([SAVE], 'projected');
+    const on = cell('2026-09-14', '예상 잔고');
+    cleanup();
+    cal([{ ...SAVE, protected: false }], 'projected');
+    expect(cell('2026-09-14', '예상 잔고')).toBe(on);
+  });
+
+  it('달을 넘겨도 같은 날의 가용 잔액은 같다', () => {
+    cal([SAVE], 'available');
+    const sep = cell('2026-09-30', '가용 잔액');
+    cleanup();
+    cal([SAVE], 'available', new Date(2026, 9, 1));
+    expect(cell('2026-09-30', '가용 잔액')).toBe(sep);
+  });
+
+  it('잠근 세이브의 통화가 다르면 셀에 적지 않는다 — 풀어 둔 세이브는 따지지 않는다', () => {
+    cal([{ ...SAVE, currency: 'USD' }], 'available');
+    expect(screen.queryByLabelText(/^2026-09-14 가용 잔액/)).toBeNull();
+    cleanup();
+    cal([{ ...SAVE, currency: 'USD', protected: false }], 'available');
+    expect(screen.getByLabelText(/^2026-09-14 가용 잔액/)).toBeInTheDocument();
+  });
+});

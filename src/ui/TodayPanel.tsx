@@ -91,8 +91,8 @@ export function TodayPanel({
   // '오늘 마감 예상' 대신 tide-over 규칙 — 다음 입금까지 남는 한도.
   const horizon = useMemo(() => horizonOf(tideEntries, todayISO), [tideEntries, todayISO]);
   // 통화가 섞이면 최소 단위가 달라 애초에 더할 수 없다.
-  const scope = useMemo(() => calcScopeOf(accounts, tideEntries), [accounts, tideEntries]);
   const res = useMemo(() => ({ budgets, reserves }), [budgets, reserves]);
+  const scope = useMemo(() => calcScopeOf(accounts, tideEntries, res), [accounts, tideEntries, res]);
 
   const tideLimit = useMemo(
     () => hasBalance && calcState.kind === 'ready' && scope.ok

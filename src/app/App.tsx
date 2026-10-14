@@ -33,7 +33,9 @@ import {
   confirmBlockOf, confirmationOf, confirmationsOfPlan, lostConfirmations, planScheduleChanged, reflectedAfterRename, repairLink,
 } from '../domain/confirm';
 import { applyReflectChoice, isActual, reflectChoiceFor } from '../domain/ledger';
-import { movedToPocket, pocketPeriodImpact, unlinkedFromPocket } from '../domain/budget';
+import {
+  movedToPocket, pocketPeriodImpact, reservePatchOf, reservePatchSummary, unlinkedFromPocket,
+} from '../domain/budget';
 import { daySummary } from '../domain/daySummary';
 import { balanceViewOn, calcScopeOf } from '../domain/tide';
 import { ymOf } from '../domain/date';
@@ -1699,8 +1701,9 @@ function Workspace({ uid, user, onSignOut }: WorkspaceProps) {
   const daySheetBalance = useMemo(() => {
     if (!daySheet || !ledgerOn || daySheet < today || !hasBalance || calcState.kind !== 'ready') return null;
     if (!store.tideMonths.includes(ymOf(daySheet))) return null;
-    if (!calcScopeOf(store.accounts, store.tideEntries).ok) return null;
-    return balanceViewOn(store.accounts, store.tideEntries, daySheet, today, { budgets: store.budgets, reserves: store.reserves });
+    const res = { budgets: store.budgets, reserves: store.reserves };
+    if (!calcScopeOf(store.accounts, store.tideEntries, res).ok) return null;
+    return balanceViewOn(store.accounts, store.tideEntries, daySheet, today, res);
   }, [daySheet, ledgerOn, today, hasBalance, calcState.kind, store.tideMonths, store.accounts, store.tideEntries, store.budgets, store.reserves]);
   // 가계부 날짜 상세는 필터와 무관하게 그 날의 가계부 항목을 빠짐없이 보여 준다(소액 포함).
   const ledgerDayEntries = daySheet && ledgerOn
@@ -2227,9 +2230,20 @@ function Workspace({ uid, user, onSignOut }: WorkspaceProps) {
           todayISO={today}
           onSaveBudget={(b) => { void saveBudget(b); }}
           onDeleteBudget={(b) => { void deleteBudget(b); }}
-          onSaveReserve={(r) => {
+          onSaveReserve={(r, prev) => {
             if (isAnon || !uid) { void promptLogin(); return; }
-            commit({ kind: 'reserve', label: '세이브', summary: r.name, payload: r });
+            // 새 세이브만 문서 전체를 쓴다. 이미 있는 세이브는 바꾼 칸만 — 다른 기기에서 바꾼
+            // 보호 · 금액을 열어 둔 창의 옛 값으로 덮지 않는다.
+            if (!prev) {
+              commit({ kind: 'reserve', label: '세이브', summary: r.name, payload: r });
+              return;
+            }
+            const patch = reservePatchOf(prev, r);
+            if (!patch) return;
+            commit({
+              kind: 'reservePatch', label: '세이브', summary: `${prev.name} — ${reservePatchSummary(patch)}`,
+              payload: { id: r.id, patch, updatedAt: r.updatedAt },
+            });
           }}
           onDeleteReserve={async (r) => {
             if (isAnon || !uid) { void promptLogin(); return; }

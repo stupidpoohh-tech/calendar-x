@@ -120,7 +120,16 @@ function richAccount(): BackupData {
     debts: [{ id: 'debt-1', name: '학자금', balanceMinor: 5_000_000, monthlyMinor: 200_000, rate: 3.5, currentRound: 3, totalRounds: 25, order: 0, createdAt: '', updatedAt: '' }],
     pins: [{ id: 'pin-1', lens: 'money', text: '이번 달은 외식 줄이기', order: 0, createdAt: '', updatedAt: '' }],
     budgets: [newBudget({ id: 'pocket', name: '10월 생활비', startDate: '2026-10-01', endDate: '2026-10-31', amountMinor: 700_000 })],
-    reserves: [newReserve({ id: 'rsv', name: '비상금', amountMinor: 100_000 })],
+    reserves: [
+      newReserve({ id: 'rsv', name: '비상금', amountMinor: 100_000 }),
+      // P1 — 보호를 끈 세이브와 목표가 있는 보관 세이브. 왕복 뒤에도 그대로여야 한다(꺼 둔 보호가 켜지면
+      // 가져온 계정의 한도가 말없이 줄어든다).
+      newReserve({ id: 'rsv-off', name: '여행', amountMinor: 200_000, protected: false }),
+      newReserve({
+        id: 'rsv-arch', name: '옛 적금', amountMinor: 70_000, targetAmountMinor: 1_000_000,
+        targetDate: '2027-03-01', archivedAt: '2026-10-01T00:00:00.000Z',
+      }),
+    ],
     categories: [
       ...defaultCategories('2026-10-01T00:00:00.000Z'),
       { ...newCategory('expense', '반려동물', 20, 'pet', '2026-10-01T00:00:00.000Z'), archived: true },
@@ -167,7 +176,7 @@ describe('내보내기 → 빈 계정으로 가져오기', () => {
 
     const file = await exportFile(dbA, A);
     const parsed = JSON.parse(file) as { version: number };
-    expect(parsed.version).toBe(7);
+    expect(parsed.version).toBe(8);
     const incoming = readOk(file);
     expect(countBackup(incoming)).toBe(countBackup(original));
     expect(incoming.ledger).toEqual({ settleDay: 25 });

@@ -88,6 +88,13 @@ export const Icon = {
       <path d="M7 11V7a5 5 0 0 1 10 0v4" />
     </svg>
   ),
+  /** 보호를 푼 상태. 고리가 열린 자물쇠 — 세이브가 가용 한도에 들어간다. */
+  Unlock: (p: Props) => (
+    <svg {...base(p)}>
+      <rect x="3" y="11" width="18" height="11" rx="2" />
+      <path d="M7 11V7a5 5 0 0 1 9.9-1" />
+    </svg>
+  ),
   Download: (p: Props) => (
     <svg {...base(p)}>
       <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />

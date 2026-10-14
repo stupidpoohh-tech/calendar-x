@@ -9,6 +9,7 @@ import { newEntry, newMoney } from '../domain/entry';
 import type { Account } from '../domain/types';
 import {
   LEDGER_SCHEMA, accountFromDoc, accountToDoc, entryFromDoc, entryToDoc,
+  reserveFromDoc, reservePatchToDoc, reserveToDoc,
 } from './converters';
 
 const legacyMoneyDoc = (over: Record<string, unknown> = {}) => ({
@@ -168,5 +169,46 @@ describe('entry — 달력에 표시(highlight)', () => {
     const e = newEntry('money');
     const bare = { ...e, money: { type: 'expense', amountMinor: 1, currency: 'KRW', linkedEntryId: null } } as typeof e;
     expect((entryToDoc(bare).money as Record<string, unknown>).highlight).toBe(false);
+  });
+});
+
+describe('세이브 — 보호 · 목표 · 보관 (P1)', () => {
+  const legacy = { name: '비상금', amountMinor: 300000, currency: 'KRW', createdAt: 'c', updatedAt: 'u' };
+
+  it('필드가 없는 예전 문서는 보호 켬 · 목표 없음 · 보관 안 함으로 읽는다', () => {
+    expect(reserveFromDoc('s1', legacy)).toEqual({
+      id: 's1', ...legacy, protected: true, targetAmountMinor: null, targetDate: null, archivedAt: null,
+    });
+  });
+
+  it('protected 는 false 일 때만 꺼진다 — 모르는 값은 예전처럼 켜진 것으로 읽는다', () => {
+    expect(reserveFromDoc('s1', { ...legacy, protected: false }).protected).toBe(false);
+    expect(reserveFromDoc('s1', { ...legacy, protected: 'no' }).protected).toBe(true);
+    expect(reserveFromDoc('s1', { ...legacy, protected: null }).protected).toBe(true);
+  });
+
+  it('목표 · 보관은 형태가 틀리면 없는 것으로 읽는다', () => {
+    const r = reserveFromDoc('s1', { ...legacy, targetAmountMinor: -5, targetDate: '2027-3-1', archivedAt: '' });
+    expect(r.targetAmountMinor).toBeNull();
+    // 패딩 없는 날짜는 앱 전체 규칙대로 맞춰 읽는다.
+    expect(r.targetDate).toBe('2027-03-01');
+    expect(r.archivedAt).toBeNull();
+    expect(reserveFromDoc('s1', { ...legacy, targetAmountMinor: 1.5 }).targetAmountMinor).toBeNull();
+  });
+
+  it('저장 형태는 P1 필드를 늘 채우고 판 번호를 붙인다 — 왕복해도 같다', () => {
+    const r = reserveFromDoc('s1', {
+      ...legacy, protected: false, targetAmountMinor: 1000000, targetDate: '2027-03-01', archivedAt: '2026-10-14T01:00:00.000Z',
+    });
+    const doc = reserveToDoc(r);
+    expect(doc).toMatchObject({ protected: false, targetAmountMinor: 1000000, targetDate: '2027-03-01', schema: 2 });
+    expect(reserveFromDoc('s1', doc)).toEqual(r);
+    const old = reserveToDoc({ id: 's2', ...legacy });
+    expect(old).toMatchObject({ protected: true, targetAmountMinor: null, targetDate: null, archivedAt: null, schema: 2 });
+  });
+
+  it('부분 쓰기는 담긴 칸과 판 번호만 쓴다', () => {
+    expect(reservePatchToDoc({ protected: false })).toEqual({ protected: false, schema: 2 });
+    expect(reservePatchToDoc({ amountMinor: 10, targetDate: null })).toEqual({ amountMinor: 10, targetDate: null, schema: 2 });
   });
 });

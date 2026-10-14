@@ -25,6 +25,7 @@
  * | v5 | `version: 5` | v4 와 같은 구조. 가계부 원장 필드(실제 거래 · 흐름 · 확정한 회차)가 실릴 수 있다 |
  * | v6 | `version: 6` | v5 + `categories` · `categoryBudgets` **두 배열 모두 필수** + `ledger`(정산 시작일, null 허용) |
  * | v7 | `version: 7` | v6 + `ledgerNotes`(정산 기간 메모) **필수** |
+ * | v8 | `version: 8` | v7 과 같은 구조. 세이브에 보호 · 목표 · 보관(P1)이 실릴 수 있다 — 없으면 보호 켬 |
  *
  * 없는 컬렉션을 빈 배열로 넘겨 짚지 않는다. v2·v3 파일에 `debts` 가 없다면 그건
  * 빈 백업이 아니라 깨진 파일이다.
@@ -44,10 +45,10 @@ import {
 } from './converters';
 import { convertLegacyItems } from './migrate';
 
-export const SUPPORTED_VERSIONS = [1, 2, 3, 4, 5, 6, 7] as const;
-export const LATEST_VERSION = 7;
+export const SUPPORTED_VERSIONS = [1, 2, 3, 4, 5, 6, 7, 8] as const;
+export const LATEST_VERSION = 8;
 
-export type BackupFormat = 'legacy' | 'v2' | 'v3' | 'v4' | 'v5' | 'v6' | 'v7';
+export type BackupFormat = 'legacy' | 'v2' | 'v3' | 'v4' | 'v5' | 'v6' | 'v7' | 'v8';
 
 /** 파일 한 곳이 왜 들어갈 수 없는지. */
 export interface FileProblem {
@@ -419,6 +420,23 @@ function checkReserveRaw(c: Collector, where: string, r: Raw): void {
     c.add(`${where}.amountMinor`, `음수입니다: ${r.amountMinor} — 세이브는 0 이상이어야 합니다.`);
   }
   reqStr(c, `${where}.currency`, r.currency);
+  /*
+    보호 · 목표 · 보관(v8). 없는 것이 정상이다(예전 파일 — 보호 켬으로 읽는다). 있으면 형태를 본다.
+    보호는 뜻이 바뀌는 값이라 모르는 값을 "켬" 으로 떨어뜨리지 않고 거절한다 — 꺼 둔 세이브가
+    가져온 뒤 말없이 한도에서 빠지면 안 된다.
+  */
+  if (r.protected !== undefined && typeof r.protected !== 'boolean') {
+    c.add(`${where}.protected`, `참/거짓이 아닙니다: ${describe(r.protected)}`);
+  }
+  optInt(c, `${where}.targetAmountMinor`, r.targetAmountMinor);
+  if (isIntNum(r.targetAmountMinor) && r.targetAmountMinor < 0) {
+    c.add(`${where}.targetAmountMinor`, `음수입니다: ${r.targetAmountMinor} — 목표 금액은 0 이상이어야 합니다.`);
+  }
+  if (r.targetDate !== undefined && r.targetDate !== null) reqDate(c, `${where}.targetDate`, r.targetDate);
+  if (r.archivedAt !== undefined && r.archivedAt !== null) {
+    reqStr(c, `${where}.archivedAt`, r.archivedAt, LIMITS.checkedAt);
+    if (r.archivedAt === '') c.add(`${where}.archivedAt`, '보관 시각이 비어 있습니다.');
+  }
   optStr(c, `${where}.createdAt`, r.createdAt, LIMITS.checkedAt);
   optStr(c, `${where}.updatedAt`, r.updatedAt, LIMITS.checkedAt);
 }
@@ -594,7 +612,7 @@ export function readBackupFile(text: string): ReadResult {
     return { ok: false, problems: [{ where: 'version', reason: '버전이 없습니다. 백업 파일이 맞는지 확인해 주세요.' }] };
   }
 
-  const format: BackupFormat = version >= 7 ? 'v7' : version === 6 ? 'v6' : version === 5 ? 'v5'
+  const format: BackupFormat = version >= 8 ? 'v8' : version === 7 ? 'v7' : version === 6 ? 'v6' : version === 5 ? 'v5'
     : version === 4 ? 'v4' : version === 3 ? 'v3' : 'v2';
   const hasPockets = version >= 4;
   const hasCategories = version >= 6;

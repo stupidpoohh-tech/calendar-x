@@ -49,7 +49,7 @@
 import { DEFAULT_CURRENCY } from './constants';
 import { addDaysISO, daysBetween, localDateOf, normalizeDate, parseDate, toISO } from './date';
 import { effectiveEndDate } from './entry';
-import { inAnyBudget, reservedOn } from './budget';
+import { inAnyBudget, reservedOn, reserveProtects } from './budget';
 import {
   ambiguousActuals, balanceInclusion, cashSignOf, confirmedKey, confirmedSetOf, isActual,
 } from './ledger';
@@ -119,6 +119,11 @@ export type CurrencyScope =
 
 export function currencyScopeOf(
   accounts: readonly Account[], entries: readonly Entry[],
+  /**
+   * 한도에서 빠지는 생활비 · 세이브. 이들의 금액도 한도에 더해지므로 통화가 다르면 같은 이유로
+   * 계산을 멈춘다. 보호를 끄거나 보관한 세이브는 한도에 들어가지 않으니 따지지 않는다.
+   */
+  res: Reservations = {},
 ): CurrencyScope {
   const seen = new Set<string>();
   for (const a of accounts) {
@@ -128,6 +133,12 @@ export function currencyScopeOf(
     // 흐름에 반영되지 않는 항목(세이브·가용)은 한도를 건드리지 않으니 따지지 않는다.
     if (!participates(e)) continue;
     if (e.money?.currency) seen.add(e.money.currency);
+  }
+  for (const b of res.budgets ?? NO_BUDGETS) {
+    if (b.currency) seen.add(b.currency);
+  }
+  for (const r of res.reserves ?? NO_RESERVES) {
+    if (reserveProtects(r) && r.currency) seen.add(r.currency);
   }
   const list = [...seen].sort();
   if (list.length <= 1) return { ok: true, currency: list[0] ?? DEFAULT_CURRENCY };
@@ -150,8 +161,10 @@ export type CalcScope =
   | { ok: false; reason: 'currency'; currencies: string[] }
   | { ok: false; reason: 'unassigned'; entries: Entry[] };
 
-export function calcScopeOf(accounts: readonly Account[], entries: readonly Entry[]): CalcScope {
-  const cur = currencyScopeOf(accounts, entries);
+export function calcScopeOf(
+  accounts: readonly Account[], entries: readonly Entry[], res: Reservations = {},
+): CalcScope {
+  const cur = currencyScopeOf(accounts, entries, res);
   if (!cur.ok) return { ok: false, reason: 'currency', currencies: cur.currencies };
   const unknown = ambiguousActuals(accounts, entries);
   if (unknown.length > 0) return { ok: false, reason: 'unassigned', entries: unknown };

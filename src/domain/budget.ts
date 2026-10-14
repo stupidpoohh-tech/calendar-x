@@ -59,7 +59,7 @@ import { uid } from './entry';
 import {
   balanceInclusion, confirmedKey, confirmedSetOf, isActual, moneyFlowOf,
 } from './ledger';
-import type { Account, Budget, DateISO, Entry, Reserve } from './types';
+import type { Account, Budget, DateISO, Entry, Reserve, ReservePatch } from './types';
 
 /**
  * 이 지출이 그 예산에서 나가는가.
@@ -367,15 +367,88 @@ export function reservedOn(
     total += pocketReserve(budget, spendingIn(budget, entries, confirmed), inBalance, ended);
   }
 
-  // 세이브는 날짜가 없다. 언제 보든 같은 금액이 묶여 있다.
-  for (const r of reserves) total += r.amountMinor;
+  // 세이브는 날짜가 없다. 언제 보든 같은 금액이 묶여 있다. 보호를 켠 활성 세이브만 뺀다.
+  total += protectedReserveTotal(reserves);
 
   return total;
 }
 
-/** 세이브 총액. 카드가 한 줄로 보여 준다. */
+/** 세이브 총액 — 보호 · 보관과 무관하게 지금 확보하고 있는 금액의 합. */
 export function reservedTotal(reserves: readonly Reserve[]): number {
   return reserves.reduce((t, r) => t + r.amountMinor, 0);
+}
+
+/*
+  ── 세이브 보호 (P1) ─────────────────────────────────────────────
+
+  세이브가 가용 한도에서 빠지는 것은 **보호를 켠 활성 세이브**뿐이다.
+
+    보호 켬 · 활성        한도에서 뺀다 (예전 세이브는 모두 이 상태로 읽힌다)
+    보호 끔              한도에 포함 — 세이브와 금액은 그대로 남는다
+    보관                 일반 목록에서 빠지고 보호도 풀린다 — 금액은 지우지 않는다
+
+  잔고 · 예상 잔고는 어느 쪽이든 그대로다. 세이브는 처음부터 잔고를 건드리지 않았다.
+  목표 금액 · 목표 날짜는 표시용이라 이 판정에 들어가지 않는다.
+
+  나중(P4)에 카드 사용이 세이브에 배정되면, 그 배정분 가운데 아직 내지 않은 대금은 보호를 끄거나
+  보관해도 계속 보호돼야 한다. 그 몫은 여기(봉투 보호)가 아니라 카드 미결제 보호 쪽에서 센다 —
+  이 함수가 `false` 를 돌려주는 세이브의 배정분이 그쪽으로 넘어간다. 그래서 봉투 보호 판정은
+  이 함수 하나로 모아 둔다.
+*/
+
+/** 이 세이브가 지금 가용 한도에서 빠지는가. 필드가 없는 예전 세이브는 빠진다. */
+export function reserveProtects(r: Pick<Reserve, 'protected' | 'archivedAt'>): boolean {
+  return r.protected !== false && !r.archivedAt;
+}
+
+/** 가용 한도에서 빠지는 세이브 금액의 합 (`reservedOn` 의 세이브 몫). */
+export function protectedReserveTotal(reserves: readonly Reserve[]): number {
+  return reserves.reduce((t, r) => (reserveProtects(r) ? t + r.amountMinor : t), 0);
+}
+
+/** 일반 목록에 보이는 세이브 — 보관하지 않은 것. */
+export function activeReserves(reserves: readonly Reserve[]): Reserve[] {
+  return reserves.filter((r) => !r.archivedAt);
+}
+
+/** 보관한 세이브. 따로 접어 두고 거기서 보관을 푼다. */
+export function archivedReserves(reserves: readonly Reserve[]): Reserve[] {
+  return reserves.filter((r) => !!r.archivedAt);
+}
+
+/**
+ * 편집 전과 후를 견줘 **바뀐 칸만** 담는다. 바뀐 것이 없으면 null — 쓸 것이 없다.
+ *
+ * 문서 전체를 다시 쓰지 않는 이유: 편집 창을 연 뒤 다른 기기에서 보호를 껐다면, 창의 옛 값이
+ * 그것을 되돌린다. 바꾼 칸만 쓰면 바꾸지 않은 칸은 서버 값이 남는다.
+ */
+export function reservePatchOf(before: Reserve, after: Reserve): ReservePatch | null {
+  const out: ReservePatch = {};
+  if (after.name !== before.name) out.name = after.name;
+  if (after.amountMinor !== before.amountMinor) out.amountMinor = after.amountMinor;
+  if ((after.protected !== false) !== (before.protected !== false)) out.protected = after.protected !== false;
+  if ((after.targetAmountMinor ?? null) !== (before.targetAmountMinor ?? null)) {
+    out.targetAmountMinor = after.targetAmountMinor ?? null;
+  }
+  if ((after.targetDate ?? null) !== (before.targetDate ?? null)) out.targetDate = after.targetDate ?? null;
+  if ((after.archivedAt ?? null) !== (before.archivedAt ?? null)) out.archivedAt = after.archivedAt ?? null;
+  return Object.keys(out).length > 0 ? out : null;
+}
+
+/** 실패 목록에 남길 한 줄 — 무엇을 바꾸려던 쓰기였는지. */
+export function reservePatchSummary(p: ReservePatch): string {
+  const out: string[] = [];
+  if (p.name !== undefined) out.push('이름');
+  if (p.amountMinor !== undefined) out.push('금액');
+  if (p.protected !== undefined) out.push(p.protected ? '가용 한도에서 제외' : '가용 한도에 포함');
+  if (p.targetAmountMinor !== undefined || p.targetDate !== undefined) out.push('목표');
+  if (p.archivedAt !== undefined) out.push(p.archivedAt ? '보관' : '보관 해제');
+  return out.join(' · ');
+}
+
+/** 부분 쓰기를 메모리의 세이브에 얹는다 — 화면이 서버 확인 전에도 같은 값을 그린다. */
+export function applyReservePatch(r: Reserve, patch: ReservePatch, updatedAt: string): Reserve {
+  return { ...r, ...patch, updatedAt };
 }
 
 // ---------- 만들기 ----------
@@ -416,6 +489,10 @@ export function newReserve(patch: Partial<Reserve> = {}): Reserve {
     name: '세이브',
     amountMinor: 0,
     currency: DEFAULT_CURRENCY,
+    protected: true,
+    targetAmountMinor: null,
+    targetDate: null,
+    archivedAt: null,
     createdAt: now,
     updatedAt: now,
     ...patch,

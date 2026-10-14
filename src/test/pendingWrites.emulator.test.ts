@@ -16,14 +16,15 @@
 import {
   initializeTestEnvironment, type RulesTestEnvironment,
 } from '@firebase/rules-unit-testing';
-import { getDoc, doc, type Firestore } from 'firebase/firestore';
+import { getDoc, doc, setDoc, type Firestore } from 'firebase/firestore';
 import { readFileSync } from 'node:fs';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import {
-  freshnessOf, isOfflineError, sendPending, type CommitInput, type PendingOp,
+  freshnessOf, isOfflineError, sendPending, type CommitInput, type PendingOp, type ReservePatchPayload,
 } from '../data/pendingWrites';
+import { reserveFromDoc } from '../data/converters';
 import { newEntry } from '../domain/entry';
-import type { Entry } from '../domain/types';
+import type { Entry, Reserve } from '../domain/types';
 
 let env: RulesTestEnvironment;
 const ME = 'pending-me';
@@ -202,5 +203,77 @@ describe('다른 종류의 쓰기도 같은 길로 간다', () => {
     expect(await titleOf(db, 'r1')).toBe('회복');
     const user = await getDoc(doc(db, 'users', ME));
     expect((user.data()?.recovery as { activeEntryId?: string })?.activeEntryId).toBe('r1');
+  });
+});
+
+/*
+  세이브 P1. 새 세이브는 문서 전체를, 이미 있는 세이브는 바꾼 칸만(merge) 쓴다.
+  확인하는 것: 다시 보내도 보호 · 목표 · 보관이 사라지지 않는다, 부분 쓰기가 다른 칸(다른 기기의
+  수정)을 덮지 않는다, 그 사이 서버가 더 새로워졌으면 덮기 전에 묻는다(stale).
+*/
+describe('세이브 — 보호 · 목표 · 보관', () => {
+  const base: Reserve = {
+    id: 's1', name: '비상금', amountMinor: 300_000, currency: 'KRW',
+    protected: false, targetAmountMinor: 1_000_000, targetDate: '2027-03-01', archivedAt: null,
+    createdAt: '2026-10-01T00:00:00.000Z', updatedAt: '2026-10-01T00:00:00.000Z',
+  };
+  const readSave = async (db: Firestore) => {
+    const snap = await getDoc(doc(db, 'users', ME, 'reserves', 's1'));
+    return snap.exists() ? reserveFromDoc('s1', snap.data()) : null;
+  };
+  const patchOp = (patch: ReservePatchPayload['patch'], updatedAt: string, at = updatedAt): PendingOp => ({
+    id: `op-${updatedAt}`, kind: 'reservePatch', label: '세이브', summary: '비상금',
+    payload: { id: 's1', patch, updatedAt }, at, reason: '', tries: 0,
+  });
+
+  it('새 세이브의 전체 쓰기를 다시 보내도 보호 · 목표가 그대로 남는다', async () => {
+    const db = dbOf(ME);
+    const op: CommitInput = { kind: 'reserve', label: '세이브', summary: '비상금', payload: base };
+    await sendPending(db, ME, op);
+    await sendPending(db, ME, op);
+    expect(await readSave(db)).toEqual(base);
+  });
+
+  it('부분 쓰기는 바꾼 칸만 바꾸고 금액 · 목표는 서버 값을 남긴다', async () => {
+    const db = dbOf(ME);
+    await sendPending(db, ME, { kind: 'reserve', label: '세이브', summary: '', payload: base });
+    // 다른 기기가 금액을 고쳤다.
+    await sendPending(db, ME, { ...patchOp({ amountMinor: 350_000 }, '2026-10-02T00:00:00.000Z') });
+    // 이 기기는 보호만 켰다.
+    await sendPending(db, ME, { ...patchOp({ protected: true }, '2026-10-03T00:00:00.000Z') });
+    expect(await readSave(db)).toEqual({ ...base, amountMinor: 350_000, protected: true, updatedAt: '2026-10-03T00:00:00.000Z' });
+  });
+
+  it('보관 · 보관 해제가 금액과 보호 설정을 바꾸지 않는다', async () => {
+    const db = dbOf(ME);
+    await sendPending(db, ME, { kind: 'reserve', label: '세이브', summary: '', payload: base });
+    await sendPending(db, ME, patchOp({ archivedAt: '2026-10-02T00:00:00.000Z' }, '2026-10-02T00:00:00.000Z'));
+    expect(await readSave(db)).toMatchObject({ amountMinor: 300_000, protected: false, archivedAt: '2026-10-02T00:00:00.000Z' });
+    await sendPending(db, ME, patchOp({ archivedAt: null }, '2026-10-03T00:00:00.000Z'));
+    expect(await readSave(db)).toMatchObject({ amountMinor: 300_000, protected: false, archivedAt: null });
+  });
+
+  it('실패한 부분 쓰기 뒤에 더 새로운 저장이 있으면 stale 이다', async () => {
+    const db = dbOf(ME);
+    await sendPending(db, ME, { kind: 'reserve', label: '세이브', summary: '', payload: base });
+    const failed = patchOp({ protected: true }, '2026-10-02T00:00:00.000Z');
+    await sendPending(db, ME, patchOp({ amountMinor: 1 }, '2026-10-03T00:00:00.000Z'));
+    expect(await freshnessOf(db, ME, failed)).toBe('stale');
+    expect(await freshnessOf(db, ME, patchOp({ protected: true }, '2026-10-04T00:00:00.000Z'))).toBe('fresh');
+  });
+
+  it('지워진 세이브에 보낸 부분 쓰기는 거절되고, 이름 없는 문서를 남기지 않는다', async () => {
+    const db = dbOf(ME);
+    await expect(sendPending(db, ME, patchOp({ protected: true }, '2026-10-02T00:00:00.000Z'))).rejects.toThrow();
+    expect(await readSave(db)).toBeNull();
+  });
+
+  it('구버전 모양(판 번호 · P1 필드 없음)의 전체 쓰기는 거절되고 서버 값이 남는다', async () => {
+    const db = dbOf(ME);
+    await sendPending(db, ME, { kind: 'reserve', label: '세이브', summary: '', payload: base });
+    await expect(setDoc(doc(db, 'users', ME, 'reserves', 's1'), {
+      name: '비상금', amountMinor: 10, currency: 'KRW', createdAt: '', updatedAt: '2026-10-05T00:00:00.000Z',
+    })).rejects.toThrow();
+    expect(await readSave(db)).toEqual(base);
   });
 });
