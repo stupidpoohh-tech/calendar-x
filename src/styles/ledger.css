@@ -239,8 +239,16 @@ button.led-cat-n:hover svg { color: var(--accent); }
 .led-bl-s { grid-column: 1 / -1; font-size: 0.6875rem; color: var(--ink-4); }
 /* 예산 보기: 카테고리 | 예산 | 결산 | 남음 — 머리 줄과 행이 같은 칸을 쓴다. */
 .led-bl-cols, .led-bl-main.cols {
-  display: grid; grid-template-columns: minmax(0, 1.3fr) repeat(3, minmax(0, 1fr)); gap: 4px 8px;
+  display: grid; grid-template-columns: minmax(0, 1.3fr) repeat(3, minmax(0, 1fr)) 56px; gap: 4px 8px; align-items: center;
 }
+/* 사용률은 맨 오른쪽의 짧은 막대 — 줄 아래 긴 막대로 두면 줄마다 키가 자랐다. */
+.led-bl-main.cols > .ub { align-self: center; }
+.led-bl-main.cols > .led-bl-c { align-self: center; }
+.led-bl.open > .led-bl-main { background: var(--accent-soft); }
+.led-bl .led-stat-d { margin: 0 4px 10px; }
+.led-bl-editbtn { margin-top: 8px; }
+.led-bl-ovs { display: none; }
+.led-bsum .ub { max-width: 220px; }
 .led-bl-cols { padding: 0 4px 4px; border-bottom: 1px solid var(--line); font-size: 0.6875rem; font-weight: 600; color: var(--ink-3); }
 .led-bl-cols span:not(:first-child) { text-align: right; }
 .led-bl-main.cols .led-bl-n { flex-direction: column; align-items: flex-start; gap: 2px; overflow-wrap: anywhere; }
@@ -329,6 +337,9 @@ button.led-cat-n:hover svg { color: var(--accent); }
 .led-stat-dt { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
 @media (max-width: 480px) {
+  .led-bl-cols, .led-bl-main.cols { grid-template-columns: minmax(0, 1.2fr) repeat(3, minmax(0, 1fr)) 44px; gap: 4px 6px; }
+  .led-bl-ovw { display: none; }
+  .led-bl-ovs { display: inline; }
   .led-totals b { font-size: 0.875rem; }
   .led-stat { grid-template-columns: 1fr 84px; }
   .led-spark { width: 84px; }
@@ -526,3 +537,21 @@ button.led-cat-n:hover svg { color: var(--accent); }
   .bi-x { position: absolute; right: -6px; top: -6px; background: var(--bg-elev); border: 1px solid var(--line); border-radius: 50%; width: 22px; height: 22px; }
   .bi-row { position: relative; }
 }
+
+/* ---------- 짧은 사용률 바 (예산 줄 맨 오른쪽) ---------- */
+.ub { display: flex; flex-direction: column; align-items: stretch; gap: 3px; min-width: 0; }
+.ub-p { font-size: 0.6875rem; color: var(--ink-3); text-align: right; line-height: 1; }
+.ub-t { position: relative; display: block; height: 6px; border-radius: 999px; background: var(--line); overflow: hidden; }
+.ub-f, .ub-x { position: absolute; left: 0; top: 0; bottom: 0; border-radius: 999px; }
+.ub-f { background: var(--lens-money); }
+.ub-over .ub-f { background: color-mix(in srgb, var(--bad) 35%, transparent); }
+.ub-over .ub-x { background: var(--bad); }
+.ub-over .ub-p { color: var(--bad); }
+.ub-over2 .ub-f {
+  background: repeating-linear-gradient(135deg, var(--bad) 0 4px, color-mix(in srgb, var(--bad) 60%, #000) 4px 7px);
+}
+.ub-over2 .ub-p { color: var(--bad); font-weight: 700; }
+
+/* 분석 · 카테고리의 범위(이 기간 · 최근 1년)와 1년 금액(합계 · 월평균) */
+.led-span { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.led-span .led-note { margin: 0; flex-basis: 100%; }

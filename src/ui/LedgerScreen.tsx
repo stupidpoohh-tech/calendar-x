@@ -33,8 +33,8 @@
 import { useEffect, useMemo, useState, type ReactNode } from 'react';
 import { setDefaultBudget, setPeriodBudget } from '../domain/category';
 import {
-  actualsIn, budgetRows, budgetSummary, flowBadge, groupByDay, historyItems, matchesQuery,
-  totalsOf, type BudgetRow, type HistoryItem, type LedgerTotals,
+  actualsIn, budgetRows, budgetSummary, flowBadge, groupByDay, historyItems, matchesQuery, onSide,
+  totalsOf, UNCATEGORIZED, type BudgetRow, type HistoryItem, type LedgerTotals,
 } from '../domain/ledgerStats';
 import { formatAmount, formatSigned, parseAmountToMinor } from '../domain/money';
 import {
@@ -51,6 +51,8 @@ import { isComposingEnter } from './ime';
 import { blankRow, type BatchRow } from './batchRows';
 import { LedgerBatchInput } from './LedgerBatchInput';
 import { LedgerMonthly, LedgerStats } from './LedgerCharts';
+import { TxCard } from './TxCard';
+import { UsageBar } from './UsageBar';
 import { dayLabel, feedVerdict } from './ledgerView';
 
 const VIEWS: readonly { id: LedgerTabId; label: string }[] = [
@@ -473,9 +475,14 @@ function PeriodNote({ period, note, feed, onSave }: {
  */
 function LedgerBudget({
   entries, period, todayISO, settleDay, categories, categoryBudgets, categoriesReady,
-  onSeedCategories, onSaveCategoryBudget,
+  onSeedCategories, onSaveCategoryBudget, onEntryClick,
 }: LedgerScreenProps & { period: Period }) {
-  const [editing, setEditing] = useState<string | null>(null);
+  /*
+    카테고리 줄을 누르면 그 아래 이 기간의 거래 카드가 펼쳐진다(분석의 카테고리와 같은 조각). 예산을
+    고치는 자리는 그 카드 안이다. 한 번에 하나만, 기간을 옮기면 접는다.
+  */
+  const [open, setOpen] = useState<{ period: string; key: string } | null>(null);
+  const openKey = open?.period === period.key ? open.key : null;
   const actuals = useMemo(() => actualsIn(entries, period.start, period.end), [entries, period]);
   const rows = useMemo(() => budgetRows(categories, categoryBudgets, actuals, period.key, 'expense'), [categories, categoryBudgets, actuals, period.key]);
   // 예산을 정한 카테고리가 먼저 — 같은 무리 안에서는 카테고리 순서 그대로.
@@ -516,9 +523,7 @@ function LedgerBudget({
                 <b className={'num ' + (left < 0 ? 'minus' : 'plus')}>{formatAmount(Math.abs(left))}</b>
               </div>
             </div>
-            <span className={'bp-bar' + (left < 0 ? ' over' : '')} aria-hidden="true">
-              <span className="bp-bar-f" style={{ width: `${Math.round(Math.min(1, ratio) * 100)}%` }} />
-            </span>
+            <UsageBar used={sum.actualInBudgeted} budget={sum.budgeted} label="전체" showPct={false} />
             <p className="led-bsum-s num">
               사용률 {Math.round(ratio * 100)}%
               {sum.overCount > 0 && <> · <b className="minus">초과 {sum.overCount}개</b></>}
@@ -541,19 +546,22 @@ function LedgerBudget({
       </div>
 
       <div className="led-bl-cols" aria-hidden="true">
-        <span>카테고리</span><span>예산</span><span>사용</span><span>남음</span>
+        <span>카테고리</span><span>예산</span><span>사용</span><span>남음</span><span>사용률</span>
       </div>
       <ul className="led-budgets" aria-label="카테고리별 예산">
         {ordered.map((r) => (
           <BudgetLine
             key={r.categoryId || '__none'}
             row={r}
-            editing={editing === r.categoryId}
-            onEdit={() => setEditing(editing === r.categoryId ? null : r.categoryId)}
+            open={openKey === r.categoryId}
+            onToggle={() => setOpen(openKey === r.categoryId ? null : { period: period.key, key: r.categoryId })}
+            entries={openKey === r.categoryId
+              ? actuals.filter((e) => onSide(e, 'expense') && (e.money?.categoryId || UNCATEGORIZED) === r.categoryId)
+              : []}
+            onEntryClick={onEntryClick}
             canDefault={phase !== 'past'}
             defaultFrom={defaultFrom}
             onSave={(scope, amount) => {
-              setEditing(null);
               onSaveCategoryBudget(scope === 'period'
                 ? setPeriodBudget(r.categoryId, period.key, amount)
                 : setDefaultBudget(r.categoryId, defaultFrom, amount));
@@ -565,28 +573,30 @@ function LedgerBudget({
   );
 }
 
-function BudgetLine({ row, editing, onEdit, canDefault, defaultFrom, onSave }: {
-  row: BudgetRow; editing: boolean; onEdit: () => void;
+function BudgetLine({ row, open, onToggle, entries, onEntryClick, canDefault, defaultFrom, onSave }: {
+  row: BudgetRow; open: boolean; onToggle: () => void;
+  /** 펼쳤을 때만 채운다 — 이 기간 이 카테고리의 실제 지출. */
+  entries: readonly Entry[];
+  onEntryClick?: (e: Entry) => void;
   canDefault: boolean; defaultFrom: PeriodKey;
   onSave: (scope: 'period' | 'default', amount: number | null) => void;
 }) {
+  const [editing, setEditing] = useState(false);
   const [text, setText] = useState(row.budget.amountMinor != null ? String(row.budget.amountMinor) : '');
   useEffect(() => { if (editing) setText(row.budget.amountMinor != null ? String(row.budget.amountMinor) : ''); }, [editing, row.budget.amountMinor]);
+  useEffect(() => { if (!open) setEditing(false); }, [open]);
   const budget = row.budget.amountMinor;
-  const ratio = budget && budget > 0 ? Math.min(1, row.actual / budget) : 0;
   const editable = row.categoryId !== '';
   const parsed = text.trim() === '' ? null : parseAmountToMinor(text);
   const valid = text.trim() === '' || (parsed !== null && parsed >= 0);
+  const save = (scope: 'period' | 'default') => { setEditing(false); onSave(scope, parsed); };
 
   return (
-    <li className="led-bl">
-      <button className="led-bl-main cols" onClick={editable ? onEdit : undefined} aria-expanded={editable ? editing : undefined} disabled={!editable}>
+    <li className={'led-bl' + (open ? ' open' : '')}>
+      <button className="led-bl-main cols" onClick={onToggle} aria-expanded={open}>
         <span className="led-bl-n">
           {row.name}{row.archived && ' (보관)'}
           {row.budget.source === 'period' && <span className="led-badge muted">이 기간만</span>}
-          {budget != null && budget > 0 && (
-            <span className={'led-bl-s num' + (row.over ? ' minus' : '')}>사용률 {Math.round((row.actual / budget) * 100)}%</span>
-          )}
         </span>
         <span className="led-bl-c num" aria-label={`예산 ${budget == null ? '없음' : formatAmount(budget)}`}>
           {budget == null ? <span className="led-bl-none">—</span> : formatAmount(budget)}
@@ -598,25 +608,35 @@ function BudgetLine({ row, editing, onEdit, canDefault, defaultFrom, onSave }: {
         >
           {row.remaining == null
             ? <span className="led-bl-none">—</span>
-            : row.over ? <>초과 {formatAmount(-row.remaining)}</> : formatAmount(row.remaining)}
+            : row.over
+              // 좁은 화면에서는 '초과' 대신 '−' — 두 줄로 접혀 줄마다 키가 자랐다.
+              ? <><span className="led-bl-ovw">초과 </span><span className="led-bl-ovs">−</span>{formatAmount(-row.remaining)}</>
+              : formatAmount(row.remaining)}
         </span>
-        {budget != null && budget > 0 && (
-          <span className={'bp-bar' + (row.over ? ' over' : '')} aria-hidden="true">
-            <span className="bp-bar-f" style={{ width: `${Math.round(ratio * 100)}%` }} />
-          </span>
-        )}
+        {budget != null && budget > 0
+          ? <UsageBar used={row.actual} budget={budget} />
+          : <span className="led-bl-c led-bl-none" aria-label="사용률 없음">—</span>}
       </button>
-      {editing && (
+      {open && (
+        <TxCard label={`${row.name} 거래`} entries={entries} fallbackTitle={row.name} onEntryClick={onEntryClick}>
+          {editable && !editing && (
+            <button className="btn led-bl-editbtn" onClick={() => setEditing(true)}>
+              {budget == null ? '예산 정하기' : '예산 고치기'}
+            </button>
+          )}
+        </TxCard>
+      )}
+      {open && editing && (
         <div className="led-bl-edit">
           <input
             className="mod-input num" inputMode="numeric" placeholder="예산 (비우면 없음)" autoFocus
             aria-label={`${row.name} 예산`} value={text} onChange={(e) => setText(e.target.value)}
-            onKeyDown={(e) => { if (e.key === 'Enter' && !isComposingEnter(e) && valid) onSave('period', parsed); }}
+            onKeyDown={(e) => { if (e.key === 'Enter' && !isComposingEnter(e) && valid) save('period'); }}
           />
           <div className="led-bl-a">
-            <button className="btn" disabled={!valid} onClick={() => onSave('period', parsed)}>이 기간만</button>
+            <button className="btn" disabled={!valid} onClick={() => save('period')}>이 기간만</button>
             <button
-              className="btn primary" disabled={!valid || !canDefault} onClick={() => onSave('default', parsed)}
+              className="btn primary" disabled={!valid || !canDefault} onClick={() => save('default')}
               title={canDefault ? undefined : '지난 기간에서는 기본 예산을 바꾸지 않습니다'}
             >
               기본 예산으로 ({periodName(defaultFrom)}부터)

@@ -18,6 +18,7 @@ import {
   periodName, periodRange, periodsBetween, phaseOf, shiftPeriodKey, type Period,
 } from '../domain/period';
 import type { Category, Entry, PeriodKey } from '../domain/types';
+import { TxCard } from './TxCard';
 
 // ---------- 월별 ----------
 
@@ -235,25 +236,38 @@ export function LedgerStats({ entries, settleDay, todayISO, period, categories, 
     다른 보기로 옮겨 가지 않고 본다. 한 번에 하나만 펼친다. 기간을 옮기면 접는다(다른 기간의 줄이다).
   */
   const [open, setOpen] = useState<{ period: string; key: string } | null>(null);
-  const openKey = open?.period === period.key ? open.key : null;
-  const nowActuals = useMemo(() => actualsIn(entries, period.start, period.end), [entries, period.start, period.end]);
-  const detail = (side: Side, categoryId: string | null) => {
-    const key = `${side}:${categoryId ?? '*'}`;
-    return {
-      open: openKey === key,
-      onToggle: () => setOpen(openKey === key ? null : { period: period.key, key }),
-      entries: openKey === key
-        ? nowActuals.filter((e) => onSide(e, side) && (categoryId === null || (e.money?.categoryId || UNCATEGORIZED) === categoryId))
-        : [],
-      onEntryClick,
-    };
-  };
+  /*
+    범위 — 이 기간 하나 · 최근 1년(고른 기간까지 열두 정산 기간, 막대 · 월평균과 같은 창). 1년은 금액을
+    합계 · 월평균 가운데 골라 본다. 월평균은 끝난 기간만 나눈다(진행 중인 기간은 덜 쓴 달이라 평균을 끌어내린다).
+  */
+  const [span, setSpan] = useState<'period' | 'year'>('period');
+  const [yearValue, setYearValue] = useState<'total' | 'average'>('total');
+  const year = span === 'year';
+  const openScope = `${period.key}:${span}`;
+  const openKey = open?.period === openScope ? open.key : null;
   // 고른 기간까지 열두 기간 — 막대와 월평균의 창이다. 월별 추이와 같은 창이라 두 화면의 평균이 맞는다.
   const periods = useMemo(
     () => periodsBetween(shiftPeriodKey(period.key, -11), period.key, settleDay),
     [period.key, settleDay],
   );
   const last = periods.length - 1;
+  const windowStart = periods[0]?.start ?? period.start;
+  const shownActuals = useMemo(
+    () => actualsIn(entries, year ? windowStart : period.start, period.end),
+    [entries, year, windowStart, period.start, period.end],
+  );
+  const detail = (side: Side, categoryId: string | null) => {
+    const key = `${side}:${categoryId ?? '*'}`;
+    return {
+      open: openKey === key,
+      onToggle: () => setOpen(openKey === key ? null : { period: openScope, key }),
+      entries: openKey === key
+        ? shownActuals.filter((e) => onSide(e, side) && (categoryId === null || (e.money?.categoryId || UNCATEGORIZED) === categoryId))
+        : [],
+      scope: year ? '최근 1년' : '이 기간',
+      onEntryClick,
+    };
+  };
   const totals = useMemo(() => totalsOf(actualsIn(entries, period.start, period.end)), [entries, period.start, period.end]);
   const prevTotals = useMemo(() => {
     const p = periods[last - 1];
@@ -279,55 +293,101 @@ export function LedgerStats({ entries, settleDay, todayISO, period, categories, 
     ? Math.round(financePer.reduce((a, v, i) => (counted[i] ? a + v : a), 0) / averagedOver)
     : null;
   const inProgress = phaseOf(period, todayISO) === 'current';
+  // 1년 합계 · 월평균의 머리 숫자. 기간마다 합계를 내 두고 더하거나 끝난 기간으로 나눈다.
+  const perTotals = useMemo(
+    () => periods.map((p) => totalsOf(actualsIn(entries, p.start, p.end))),
+    [entries, periods],
+  );
+  const yearTotals = (key: 'consumption' | 'financeCost' | 'income') => {
+    const sum = perTotals.reduce((a, t) => a + t[key], 0);
+    if (yearValue === 'total') return sum;
+    const done = perTotals.reduce((a, t, i) => (counted[i] ? a + t[key] : a), 0);
+    return averagedOver > 0 ? Math.round(done / averagedOver) : 0;
+  };
+  const shown = year
+    ? { consumption: yearTotals('consumption'), financeCost: yearTotals('financeCost'), income: yearTotals('income') }
+    : totals;
+  const valueOf = (t: { perPeriod: readonly number[]; total: number; average: number | null }) =>
+    (!year ? t.perPeriod[last] ?? 0 : yearValue === 'total' ? t.total : t.average ?? 0);
 
   // 이 기간에 쓴 카테고리는 이 기간 금액 순으로. 0원이지만 열두 기간 안에 쓴 적이 있는 것은 따로.
-  const withNow = trends.map((t) => ({ ...t, now: t.perPeriod[last] ?? 0, prev: last > 0 ? t.perPeriod[last - 1] ?? 0 : null }));
+  const withNow = trends.map((t) => ({ ...t, now: valueOf(t), prev: !year && last > 0 ? t.perPeriod[last - 1] ?? 0 : null }));
   const rows = withNow.filter((t) => t.now > 0).sort((a, b) => b.now - a.now);
-  const idle = withNow.filter((t) => t.now === 0 && t.total > 0).sort((a, b) => (b.average ?? 0) - (a.average ?? 0));
+  // 이번 기간 0원 묶음은 이 기간 보기에서만 뜻이 있다.
+  const idle = year ? [] : withNow.filter((t) => t.now === 0 && t.total > 0).sort((a, b) => (b.average ?? 0) - (a.average ?? 0));
   const incomeRows = incomeTrends
-    .map((t) => ({ ...t, now: t.perPeriod[last] ?? 0, prev: last > 0 ? t.perPeriod[last - 1] ?? 0 : null }))
+    .map((t) => ({ ...t, now: valueOf(t), prev: !year && last > 0 ? t.perPeriod[last - 1] ?? 0 : null }))
     .filter((t) => t.now > 0)
     .sort((a, b) => b.now - a.now);
   const slices = pieSlices(rows.map((t) => ({ key: t.categoryId || '__none', name: t.name, value: t.now })));
+  // 원형의 전체는 조각의 합 — 월평균은 카테고리마다 반올림해 머리 숫자와 몇 원 다를 수 있다.
+  const pieTotal = rows.reduce((a, t) => a + t.now, 0);
+  const financeShown = !year ? financeNow : yearValue === 'total' ? financePer.reduce((a, v) => a + v, 0) : financeAvg ?? 0;
+  const shareBase = shown.consumption > 0 ? shown.consumption : pieTotal;
+  const rangeLabel = `${periodName(periods[0]?.key ?? period.key)} – ${periodName(period.key)}`;
   const slotOf = new Map(slices.map((s) => [s.key, s.slot]));
   const peak = Math.max(1, ...withNow.flatMap((t) => t.perPeriod));
   const incomePeak = Math.max(1, ...incomeRows.flatMap((t) => t.perPeriod));
 
   return (
     <div className="led-body">
+      <div className="led-span">
+        <div className="seg" role="radiogroup" aria-label="범위">
+          {([['period', '이 기간'], ['year', '최근 1년']] as const).map(([id, label]) => (
+            <button key={id} role="radio" aria-checked={span === id}
+              className={'seg-btn' + (span === id ? ' on' : '')} onClick={() => setSpan(id)}>
+              {label}
+            </button>
+          ))}
+        </div>
+        {year && (
+          <div className="seg" role="radiogroup" aria-label="1년 금액">
+            {([['total', '합계'], ['average', '월평균']] as const).map(([id, label]) => (
+              <button key={id} role="radio" aria-checked={yearValue === id}
+                className={'seg-btn' + (yearValue === id ? ' on' : '')} onClick={() => setYearValue(id)}>
+                {label}
+              </button>
+            ))}
+          </div>
+        )}
+        {year && <span className="led-note num">{rangeLabel}</span>}
+      </div>
       <div className="led-totals">
         <div>
-          <span>소비</span><b className="num minus">{formatAmount(totals.consumption)}</b>
-          {prevTotals && <Delta now={totals.consumption} prev={prevTotals.consumption} />}
+          <span>소비{year && (yearValue === 'total' ? ' · 1년 합계' : ' · 월평균')}</span><b className="num minus">{formatAmount(shown.consumption)}</b>
+          {!year && prevTotals && <Delta now={totals.consumption} prev={prevTotals.consumption} />}
         </div>
         <div>
-          <span>금융비용</span><b className="num">{formatAmount(totals.financeCost)}</b>
-          {prevTotals && <Delta now={totals.financeCost} prev={prevTotals.financeCost} />}
+          <span>금융비용</span><b className="num">{formatAmount(shown.financeCost)}</b>
+          {!year && prevTotals && <Delta now={totals.financeCost} prev={prevTotals.financeCost} />}
         </div>
         <div>
-          <span>수입</span><b className="num plus">{formatAmount(totals.income)}</b>
-          {prevTotals && <Delta now={totals.income} prev={prevTotals.income} />}
+          <span>수입</span><b className="num plus">{formatAmount(shown.income)}</b>
+          {!year && prevTotals && <Delta now={totals.income} prev={prevTotals.income} />}
         </div>
         <p className="led-note">
-          직전 = 바로 앞 정산 기간{inProgress && ' (진행 중인 기간은 지금까지 쓴 금액으로 견줍니다)'}. 월평균 = 열두 기간 중
-          끝난 기간 수({averagedOver}개)의 평균 — 기록이 없는 끝난 기간은 0원. 대출 이자는 금융비용으로 따로 적고,
-          대출 원금 · 이체 · 카드 대금은 소비가 아닙니다.
+          {year
+            ? <>최근 1년 = 고른 기간까지 열두 정산 기간({rangeLabel}). 합계는 진행 중인 기간까지 더하고, 월평균은
+              끝난 기간 {averagedOver}개의 평균입니다 — 기록이 없는 끝난 기간은 0원.</>
+            : <>직전 = 바로 앞 정산 기간{inProgress && ' (진행 중인 기간은 지금까지 쓴 금액으로 견줍니다)'}. 월평균 = 열두 기간 중
+              끝난 기간 수({averagedOver}개)의 평균 — 기록이 없는 끝난 기간은 0원.</>}
+          {' '}대출 이자는 금융비용으로 따로 적고, 대출 원금 · 이체 · 카드 대금은 소비가 아닙니다.
         </p>
       </div>
 
-      {rows.length === 0 && financeNow === 0 ? (
-        <p className="led-empty">{periodName(period.key)}에 기록한 소비가 없습니다.</p>
+      {rows.length === 0 && financeShown === 0 ? (
+        <p className="led-empty">{year ? '최근 1년' : periodName(period.key)}에 기록한 소비가 없습니다.</p>
       ) : (
         <>
-          {totals.consumption > 0 && (
+          {pieTotal > 0 && (
             <div className="led-pie-wrap">
-              <CategoryPie slices={slices} total={totals.consumption} />
+              <CategoryPie slices={slices} total={pieTotal} />
               <ul className="led-pie-legend" aria-label="소비 비중">
                 {slices.map((s) => (
                   <li key={s.key}>
                     <i className="sw" data-slot={s.slot ?? 'rest'} />
                     <span className="led-pie-n">{s.name}</span>
-                    <span className="num">{pct(s.value, totals.consumption)}</span>
+                    <span className="num">{pct(s.value, pieTotal)}</span>
                   </li>
                 ))}
               </ul>
@@ -339,15 +399,16 @@ export function LedgerStats({ entries, settleDay, todayISO, period, categories, 
               return (
                 <StatRow
                   key={key} name={t.name} slot={slotOf.has(key) ? (slotOf.get(key) ?? 'rest') : 'rest'}
-                  now={t.now} prev={t.prev} share={totals.consumption > 0 ? t.now / totals.consumption : 0}
+                  now={t.now} prev={t.prev} share={shareBase > 0 ? t.now / shareBase : 0}
                   average={t.average} perPeriod={t.perPeriod} peak={peak} periods={periods}
+                  foot={year && yearValue === 'average' ? `1년 합계 ${formatAmount(t.total)}` : undefined}
                   detail={detail('consumption', t.categoryId)}
                 />
               );
             })}
-            {financeNow > 0 && (
+            {financeShown > 0 && (
               <StatRow
-                name="금융비용 (대출 이자)" now={financeNow} prev={last > 0 ? financePer[last - 1] ?? 0 : null}
+                name="금융비용 (대출 이자)" now={financeShown} prev={!year && last > 0 ? financePer[last - 1] ?? 0 : null}
                 share={null} average={financeAvg}
                 perPeriod={financePer} peak={Math.max(1, ...financePer)} periods={periods} finance
                 detail={detail('finance', null)}
@@ -378,7 +439,7 @@ export function LedgerStats({ entries, settleDay, todayISO, period, categories, 
           {incomeRows.map((t) => (
             <StatRow
               key={t.categoryId || '__none'} name={t.name} now={t.now} prev={t.prev}
-              share={totals.income > 0 ? t.now / totals.income : null} shareOf="수입"
+              share={shown.income > 0 ? t.now / shown.income : null} shareOf="수입"
               average={t.average} perPeriod={t.perPeriod} peak={incomePeak} periods={periods}
               detail={detail('income', t.categoryId)}
             />
@@ -406,18 +467,17 @@ interface StatDetail {
   onToggle: () => void;
   /** 펼쳤을 때만 채운다. */
   entries: readonly Entry[];
+  /** 카드 머리의 범위 글자('이 기간' · '최근 1년'). */
+  scope?: string;
   onEntryClick?: (e: Entry) => void;
 }
 
-const dayOf = (iso: string) => {
-  const d = new Date(`${iso}T00:00:00`);
-  return `${Number(iso.slice(5, 7))}월 ${Number(iso.slice(8, 10))}일 (${'일월화수목금토'[d.getDay()]})`;
-};
-
-function StatRow({ name, slot, now, prev = null, share, shareOf = '소비', average, perPeriod, peak, periods, finance = false, detail }: {
+function StatRow({ name, slot, now, prev = null, share, shareOf = '소비', average, perPeriod, peak, periods, finance = false, detail, foot }: {
   name: string; slot?: number | 'rest'; now: number; prev?: number | null; share: number | null; shareOf?: string;
   average: number | null; perPeriod: readonly number[]; peak: number; periods: readonly Period[]; finance?: boolean;
   detail?: StatDetail;
+  /** 월평균 자리를 대신할 글자 — 큰 숫자가 이미 월평균이면 1년 합계를 적는다. */
+  foot?: string;
 }) {
   const last = perPeriod.length - 1;
   const head = (
@@ -429,7 +489,7 @@ function StatRow({ name, slot, now, prev = null, share, shareOf = '소비', aver
       <div className="led-stat-s num">
         {share != null && <span>{shareOf}의 {share > 0 && share < 0.001 ? '0.1% 미만' : `${Math.round(share * 1000) / 10}%`}</span>}
         {prev != null && <span>{deltaText(now, prev)}</span>}
-        <span>월평균 {average == null ? '—' : formatAmount(average)}</span>
+        <span>{foot ?? `월평균 ${average == null ? '—' : formatAmount(average)}`}</span>
       </div>
     </>
   );
@@ -454,25 +514,7 @@ function StatRow({ name, slot, now, prev = null, share, shareOf = '소비', aver
         })}
       </svg>
       {detail?.open && (
-        <div className="led-stat-d" role="region" aria-label={`${name} 거래`}>
-          <div className="led-stat-dh num">
-            <span>이 기간 {detail.entries.length.toLocaleString('ko-KR')}건</span>
-            <span>합계 {formatAmount(detail.entries.reduce((a, e) => a + Math.abs(e.money?.amountMinor ?? 0), 0))}</span>
-          </div>
-          <ul>
-            {[...detail.entries]
-              .sort((a, b) => b.startDate.localeCompare(a.startDate) || Math.abs(b.money?.amountMinor ?? 0) - Math.abs(a.money?.amountMinor ?? 0))
-              .map((e) => (
-                <li key={e.id}>
-                  <button className="led-stat-dr" onClick={() => detail.onEntryClick?.(e)} disabled={!detail.onEntryClick}>
-                    <span className="led-stat-dd num">{dayOf(e.startDate)}</span>
-                    <span className="led-stat-dt">{e.title.trim() || name}</span>
-                    <span className="num">{formatAmount(Math.abs(e.money?.amountMinor ?? 0))}</span>
-                  </button>
-                </li>
-              ))}
-          </ul>
-        </div>
+        <TxCard label={`${name} 거래`} scope={detail.scope} entries={detail.entries} fallbackTitle={name} onEntryClick={detail.onEntryClick} />
       )}
     </li>
   );

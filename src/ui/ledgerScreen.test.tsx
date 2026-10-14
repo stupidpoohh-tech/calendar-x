@@ -195,13 +195,49 @@ describe('예산', () => {
     expect(within(food).getByLabelText('예산 300,000')).toBeInTheDocument();
     expect(within(food).getByLabelText('사용 320,000')).toBeInTheDocument();
     expect(within(food).getByLabelText('초과 20,000')).toBeInTheDocument();
-    expect(food.textContent).toContain('사용률 107%');
+    // 사용률은 줄 맨 오른쪽의 짧은 막대 — 숫자를 함께 적는다.
+    expect(within(food).getByRole('img', { name: '사용률 107% (초과)' }).textContent).toBe('107%');
     expect(food.textContent).not.toContain('지난 기간');
     const cafe = within(list).getByRole('button', { name: /카페/ });
     expect(within(cafe).getByLabelText('예산 없음')).toBeInTheDocument();
     expect(within(cafe).getByLabelText('사용 9,000')).toBeInTheDocument();
     // 예산을 정한 카테고리가 먼저.
     expect(within(list).getAllByRole('button').map((b) => b.textContent?.slice(0, 2))).toEqual(['식비', '카페']);
+  });
+
+  it('줄을 누르면 이 기간의 그 카테고리 거래 카드가 펼쳐지고, 예산 고치기는 그 안에 있다', () => {
+    const p = mount({ tab: 'budget', entries: [...entries, tx('d', '2026-10-01', 15_000, { categoryId: 'food' }, { title: '장보기' })], categoryBudgets: budgets });
+    const food = screen.getByRole('button', { name: /식비/ });
+    expect(food).toHaveAttribute('aria-expanded', 'false');
+    fireEvent.click(food);
+    const card = screen.getByRole('region', { name: '식비 거래' });
+    expect(card.textContent).toContain('이 기간 2건');
+    expect(card.textContent).toContain('합계 335,000');
+    fireEvent.click(within(card).getByRole('button', { name: /장보기/ }));
+    expect(p.onEntryClick).toHaveBeenCalledWith(expect.objectContaining({ id: 'd' }));
+    expect(screen.queryByLabelText('식비 예산')).toBeNull();
+    fireEvent.click(within(card).getByRole('button', { name: '예산 고치기' }));
+    expect(screen.getByLabelText('식비 예산')).toHaveValue('300000');
+    // 다른 줄을 펼치면 앞 카드는 접힌다.
+    fireEvent.click(screen.getByRole('button', { name: /카페/ }));
+    expect(screen.queryByRole('region', { name: '식비 거래' })).toBeNull();
+    expect(screen.queryByLabelText('식비 예산')).toBeNull();
+  });
+
+  it('사용률 단계 — 100% 까지 · 100% 초과 · 200% 초과를 다르게 그린다', () => {
+    const b = [setDefaultBudget('food', '2026-01', 100_000), setDefaultBudget('cafe', '2026-01', 10_000), setDefaultBudget('salary', '2026-01', 1)];
+    mount({ tab: 'budget', entries: [tx('f', '2026-10-01', 80_000, { categoryId: 'food' }), tx('c', '2026-10-01', 25_000, { categoryId: 'cafe' })], categoryBudgets: b });
+    const food = screen.getByRole('img', { name: '사용률 80%' });
+    expect(food.className).toContain('ub-ok');
+    expect((food.querySelector('.ub-f') as HTMLElement).style.width).toBe('80%');
+    const cafe = screen.getByRole('img', { name: '사용률 250% (두 배 초과)' });
+    expect(cafe.className).toContain('ub-over2');
+    cleanup();
+    mount({ tab: 'budget', entries: [tx('f', '2026-10-01', 150_000, { categoryId: 'food' })], categoryBudgets: b });
+    const over = screen.getByRole('img', { name: '사용률 150% (초과)' });
+    expect(over.className).toContain('ub-over');
+    // 넘은 몫(50%)을 진하게 겹친다.
+    expect((over.querySelector('.ub-x') as HTMLElement).style.width).toBe('50%');
   });
 
   it('요약은 예산을 정한 카테고리만 견주고, 예산 밖 지출을 따로 적는다', () => {
@@ -237,6 +273,7 @@ describe('예산', () => {
   it('진행 중인 기간 — "이 기간만" 과 "기본 예산(이번 기간부터)" 을 가른다', () => {
     const p = mount({ tab: 'budget', periodKey: '2026-10', entries, categoryBudgets: budgets });
     fireEvent.click(screen.getByRole('button', { name: /카페/ }));
+    fireEvent.click(screen.getByRole('button', { name: '예산 정하기' }));
     fireEvent.change(screen.getByLabelText('카페 예산'), { target: { value: '50000' } });
     fireEvent.click(screen.getByRole('button', { name: /기본 예산으로/ }));
     expect(p.onSaveCategoryBudget).toHaveBeenCalledWith(expect.objectContaining({
@@ -247,6 +284,7 @@ describe('예산', () => {
   it('지난 기간에서는 기본 예산을 바꾸지 못한다 — 소급되면 지난 결산이 바뀐다', () => {
     const p = mount({ tab: 'budget', periodKey: '2026-08', entries, categoryBudgets: budgets });
     fireEvent.click(screen.getByRole('button', { name: /식비/ }));
+    fireEvent.click(screen.getByRole('button', { name: '예산 고치기' }));
     expect(screen.getByRole('button', { name: /기본 예산으로/ })).toBeDisabled();
     fireEvent.change(screen.getByLabelText('식비 예산'), { target: { value: '' } });
     fireEvent.click(screen.getByRole('button', { name: '이 기간만' }));
@@ -367,6 +405,52 @@ describe('분석 · 카테고리 — 정산 기간 하나', () => {
     expect(screen.getByRole('region', { name: '카페 거래' }).textContent).toContain('원두');
     fireEvent.click(screen.getByRole('button', { name: '카페 거래 접기' }));
     expect(screen.queryByRole('region', { name: '카페 거래' })).toBeNull();
+  });
+
+  it('최근 1년 — 열두 기간의 합계 · 월평균을 토글로, 원형 · 줄 · 카드가 같은 범위를 본다', () => {
+    const p = mount({
+      tab: 'stats', settleDay: 1,
+      entries: [
+        tx('a', '2026-01-10', 100_000, { categoryId: 'food' }),
+        tx('b', '2026-02-10', 200_000, { categoryId: 'food' }),
+        tx('c', '2026-10-05', 300_000, { categoryId: 'food' }),
+        tx('d', '2026-10-06', 100_000, { categoryId: 'cafe' }),
+        tx('old', '2025-09-10', 999_000, { categoryId: 'food' }), // 창 밖
+      ],
+    });
+    fireEvent.click(screen.getByRole('radio', { name: '카테고리' }));
+    expect(screen.queryByRole('radiogroup', { name: '1년 금액' })).toBeNull();
+    fireEvent.click(screen.getByRole('radio', { name: '최근 1년' }));
+    expect(screen.getByRole('radio', { name: '합계' })).toHaveAttribute('aria-checked', 'true');
+    expect(screen.getByText('2025년 11월 – 2026년 10월', { selector: '.led-span .led-note' })).toBeInTheDocument();
+    const totals = () => document.querySelector('.led-totals > div')!.textContent;
+    expect(totals()).toBe('소비 · 1년 합계700,000');
+    const legend = screen.getByRole('list', { name: '소비 비중' });
+    expect(legend.textContent).toContain('식비85.7%');
+    const list = screen.getByRole('list', { name: '카테고리별 소비' });
+    const food = within(list).getByText('식비').closest('li')!;
+    expect(food.querySelector('.led-stat-h > .num')!.textContent).toBe('600,000');
+    expect(food.textContent).not.toContain('직전');
+    // 카드도 1년 범위다.
+    fireEvent.click(screen.getByRole('button', { name: '식비 거래 보기' }));
+    const card = screen.getByRole('region', { name: '식비 거래' });
+    expect(card.textContent).toContain('최근 1년 3건');
+    expect(card.textContent).toContain('합계 600,000');
+    expect(card.textContent).toContain('1월 10일 (토)');
+    fireEvent.click(within(card).getAllByRole('button')[0]!);
+    expect(p.onEntryClick).toHaveBeenCalledWith(expect.objectContaining({ id: 'c' }));
+
+    // 월평균 — 끝난 기간 11개로 나눈다. 진행 중인 10월은 넣지 않는다.
+    fireEvent.click(screen.getByRole('radio', { name: '월평균' }));
+    expect(totals()).toBe('소비 · 월평균27,273');
+    const food2 = within(screen.getByRole('list', { name: '카테고리별 소비' })).getByText('식비').closest('li')!;
+    expect(food2.querySelector('.led-stat-h > .num')!.textContent).toBe('27,273');
+    expect(food2.textContent).toContain('1년 합계 600,000');
+    // 끝난 기간에 쓰지 않은 카페는 월평균 0이라 원형에서 빠진다.
+    expect(screen.getByRole('list', { name: '소비 비중' }).textContent).not.toContain('카페');
+
+    fireEvent.click(screen.getByRole('radio', { name: '이 기간' }));
+    expect(totals()).toContain('400,000');
   });
 
   it('기간을 옮기면 그 기간을 본다', () => {
