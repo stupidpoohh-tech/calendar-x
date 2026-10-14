@@ -1726,3 +1726,11 @@
   display: flex; align-items: center; justify-content: space-between; gap: 8px; flex-wrap: wrap; width: 100%;
   font-size: 0.78125rem; color: var(--ink-3);
 }
+
+/* 지난 날의 미확정 예정 — 날짜 상세의 접힌 구역. 실제 거래가 본문이다. */
+.sheet-pend { margin-top: 10px; border-top: 1px solid var(--line); }
+.sheet-pend > summary { padding: 10px 2px; font-size: 0.8125rem; color: var(--ink-2); cursor: pointer; }
+.sheet-pend-n { margin-left: 6px; font-size: 0.6875rem; color: var(--ink-4); }
+.sheet-li.pend { flex-wrap: wrap; }
+.sheet-pend-a { display: flex; gap: 6px; padding: 0 0 8px 14px; width: 100%; }
+.sheet-pend-a .chip { font-size: 0.75rem; padding: 3px 10px; }

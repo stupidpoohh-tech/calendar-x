@@ -30,10 +30,12 @@ interface Props {
   onTheme: (t: ThemePref) => void;
   onFontScale: (f: FontScale) => void;
   onWeekStart: (w: WeekStart) => void;
-  onExport: () => void | Promise<void>;
+  onExport: () => unknown;
   onImport: () => void | Promise<void>;
   /** 다른 가계부의 엑셀 · CSV 를 실제 거래로 더한다. */
   onImportLedger: () => void | Promise<void>;
+  /** 지난 예정 정리 창을 연다. 로그인했을 때만 준다. */
+  onCleanPastPlans?: () => void;
   onMigrate: () => void | Promise<void>;
   onSignOut: () => void;
   onClose: () => void;
@@ -49,12 +51,12 @@ const FONT_SCALES: Array<[FontScale, string]> = [
 export function SettingsSheet({
   user, theme, fontScale, weekStart, entryCount, legacyCount, migratedAt,
   recoveryRule, onRecoveryRule, ledger,
-  onTheme, onFontScale, onWeekStart, onExport, onImport, onImportLedger, onMigrate, onSignOut, onClose,
+  onTheme, onFontScale, onWeekStart, onExport, onImport, onImportLedger, onCleanPastPlans, onMigrate, onSignOut, onClose,
 }: Props) {
   const [showRedo, setShowRedo] = useState(false);
   const [busy, setBusy] = useState<string | null>(null);
 
-  const run = async (key: string, fn: () => void | Promise<void>) => {
+  const run = async (key: string, fn: () => unknown) => {
     setBusy(key);
     try { await fn(); } finally { setBusy(null); }
   };
@@ -186,6 +188,15 @@ export function SettingsSheet({
                 <span className="set-row-s">다른 가계부에서 내보낸 일자 · 구분 · 금액 표를 실제 거래로 더합니다. 여러 파일을 한 번에 고를 수 있습니다.</span>
               </span>
             </button>
+            {onCleanPastPlans && (
+              <button className="set-row" disabled={busy != null} onClick={onCleanPastPlans}>
+                <span className="set-ico"><Icon.X size={16} /></span>
+                <span className="set-row-b">
+                  <span className="set-row-t">지난 예정 정리</span>
+                  <span className="set-row-s">날짜가 지났는데 확정하지 않은 한 번짜리 예정을 골라 지웁니다. 백업을 확인하고 숫자가 그대로일 때만 지웁니다.</span>
+                </span>
+              </button>
+            )}
           </div>
 
           <div className="set-grp">

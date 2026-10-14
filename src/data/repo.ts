@@ -10,7 +10,7 @@
  * 곧바로 반영된다. (F-08)
  */
 import {
-  deleteDoc, getDoc, getDocs, onSnapshot, query, runTransaction, setDoc, where, writeBatch,
+  deleteDoc, getDoc, getDocs, getDocsFromServer, onSnapshot, query, runTransaction, setDoc, where, writeBatch,
   type Firestore, type QuerySnapshot,
 } from 'firebase/firestore';
 import { normalizeDate, ymOf } from '../domain/date';
@@ -395,6 +395,26 @@ export async function fetchPocketEntries(
 ): Promise<{ entries: Entry[]; complete: boolean }> {
   const snap = await getDocs(query(col(db, uid, COL.entries), where('money.budgetId', '==', budgetId)));
   return { entries: mapSnap(snap, entryFromDoc), complete: !snap.metadata.fromCache };
+}
+
+/**
+ * 가계부 계산에 드는 자료 전부 — **서버에서만** 읽는다(캐시로 물러나지 않는다).
+ * 지난 예정 정리가 쓴다. 캐시는 비었거나 낡았을 수 있어, 그것으로 지울 목록을 고르거나 "지워졌다"
+ * 를 확인하면 안 된다. 오프라인이면 던진다.
+ */
+export async function fetchLedgerFromServer(db: Firestore, uid: string): Promise<{
+  entries: Entry[]; accounts: Account[]; budgets: Budget[]; reserves: Reserve[];
+}> {
+  const [e, a, b, r] = await Promise.all([
+    getDocsFromServer(col(db, uid, COL.entries)),
+    getDocsFromServer(col(db, uid, COL.accounts)),
+    getDocsFromServer(col(db, uid, COL.budgets)),
+    getDocsFromServer(col(db, uid, COL.reserves)),
+  ]);
+  return {
+    entries: mapSnap(e, entryFromDoc), accounts: mapSnap(a, accountFromDoc),
+    budgets: mapSnap(b, budgetFromDoc), reserves: mapSnap(r, reserveFromDoc),
+  };
 }
 
 /** migratedAt 같은 이웃 필드를 지우지 않도록 merge 로 쓴다. */

@@ -4,6 +4,7 @@ import type { DaySummary } from '../domain/daySummary';
 import { displayTitle, isDone } from '../domain/entry';
 import { cashSignOf, isActual } from '../domain/ledger';
 import { flowBadge } from '../domain/ledgerStats';
+import { discardableOnDay } from '../domain/pastPlanned';
 import { formatAmount, formatSigned } from '../domain/money';
 import { entriesOn, netOf, type BalanceView } from '../domain/tide';
 import type { Category, Entry } from '../domain/types';
@@ -21,6 +22,15 @@ export interface DaySheetLedger {
   onToggleHighlight: (e: Entry) => void;
   /** 오늘 · 앞날의 예상 잔고와 생활비 외 가용. 낼 수 없으면 null — 지어내지 않는다. */
   balance?: BalanceView | null;
+  /**
+   * 지난 날의 미확정 예정에 붙는 행동. 확정은 기존 확정 창, 정리는 기존 삭제(확인창)를 연다.
+   * 정리는 한 번짜리 예정에만 붙는다 — 반복 회차에서 지우면 반복 전체가 사라진다.
+   */
+  planActions?: {
+    canConfirm: (e: Entry) => boolean;
+    onConfirm: (e: Entry, date: string) => void;
+    onDiscard: (e: Entry) => void;
+  };
 }
 
 interface Props {
@@ -115,8 +125,15 @@ function LedgerDay({ dateISO, todayISO, entries, ledger, onClose, onEntryClick, 
 }) {
   const { summary } = ledger;
   // 실제 거래를 금액 큰 순으로, 그 뒤에 예정.
-  const rows = [...entries].sort((a, b) =>
+  const sorted = [...entries].sort((a, b) =>
     Number(isActual(b)) - Number(isActual(a)) || amountOf(b) - amountOf(a));
+  /*
+    지난 날은 실제 거래가 본문이다. 날짜가 지난 미확정 예정은 접힌 구역으로 따로 둔다 — 달력 셀도
+    더 이상 '예정 N' 을 적지 않는다. 숨긴 것이 아니라 자리를 옮긴 것이고, 합계에는 처음부터 없다.
+  */
+  const past = dateISO < todayISO;
+  const rows = past ? sorted.filter(isActual) : sorted;
+  const pending = past ? sorted.filter((e) => !isActual(e)) : [];
   const shownId = summary?.major?.entry.id ?? null;
   const catName = (id: string | null | undefined) => (id ? ledger.categories.find((c) => c.id === id)?.name : undefined);
 
@@ -164,7 +181,7 @@ function LedgerDay({ dateISO, todayISO, entries, ledger, onClose, onEntryClick, 
 
         <div className="sheet-b">
           {rows.length === 0 ? (
-            <p className="sheet-empty">이 날에는 거래가 없습니다.</p>
+            <p className="sheet-empty">{past && pending.length > 0 ? '이 날의 실제 거래는 없습니다.' : '이 날에는 거래가 없습니다.'}</p>
           ) : (
             <ul className="sheet-ul" aria-label="이 날의 거래">
               {rows.map((e) => {
@@ -206,6 +223,46 @@ function LedgerDay({ dateISO, todayISO, entries, ledger, onClose, onEntryClick, 
                 );
               })}
             </ul>
+          )}
+          {pending.length > 0 && (
+            <details className="sheet-pend">
+              <summary>미확정 예정 {pending.length}건 <span className="sheet-pend-n">합계에 넣지 않았습니다</span></summary>
+              <ul className="sheet-ul" aria-label="이 날의 미확정 예정">
+                {pending.map((e) => {
+                  const sign = cashSignOf(e);
+                  const confirmable = ledger.planActions?.canConfirm(e) ?? false;
+                  const discardable = discardableOnDay(e);
+                  return (
+                    <li key={e.id} className="sheet-li pend">
+                      <button className="sheet-row planned" onClick={() => onEntryClick(e)}>
+                        <span className="sheet-bar" style={{ background: e.money ? MONEY_TYPE_BY_ID[e.money.type].color : colorHex(e.color) }} />
+                        <span className="sheet-row-b">
+                          <span className="sheet-row-t">{e.title.trim() || displayTitle(e)}</span>
+                          <span className="sheet-row-m">
+                            <span className="sheet-st plan">예정</span>
+                            {e.isRecurring && <span>반복 — 이 회차만 지울 수 없습니다</span>}
+                            {!e.isRecurring && !confirmable && <span>확정할 수 없는 종류</span>}
+                          </span>
+                        </span>
+                        <span className={'sheet-amt num' + (sign > 0 ? ' plus' : sign < 0 ? ' minus' : '')}>
+                          {sign > 0 ? '+' : sign < 0 ? '−' : ''}{formatAmount(amountOf(e))}
+                        </span>
+                      </button>
+                      {ledger.planActions && (confirmable || discardable) && (
+                        <span className="sheet-pend-a" role="group" aria-label={`${e.title.trim() || displayTitle(e)} 처리`}>
+                          {confirmable && (
+                            <button className="chip" onClick={() => ledger.planActions!.onConfirm(e, dateISO)}>실제 거래로 확정</button>
+                          )}
+                          {discardable && (
+                            <button className="chip" onClick={() => ledger.planActions!.onDiscard(e)}>정리</button>
+                          )}
+                        </span>
+                      )}
+                    </li>
+                  );
+                })}
+              </ul>
+            </details>
           )}
         </div>
 

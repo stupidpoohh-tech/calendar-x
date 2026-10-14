@@ -12,6 +12,7 @@ import { defineConfig } from 'vitest/config';
  *   ledgerImport.emulator.test.ts  가계부 이관 — 엑셀 → 실제 거래, 재가져오기 0건, 백업 왕복
  *   relink.emulator.test.ts        예정 수정 시 확정 거래 다시 잇기 — 한 배치 · 옛 백업 무중복
  *   pocket.emulator.test.ts        생활비 기간 변경 · 삭제 — 걸린 거래 찾기 · 주머니와 연결을 한 배치로
+ *   pastPlanned.emulator.test.ts   지난 예정 정리 — 후보만 지우고 숫자 그대로, 백업으로 되돌린다
  */
 export default defineConfig({
   test: {
@@ -27,6 +28,7 @@ export default defineConfig({
       'src/test/ledgerImport.emulator.test.ts',
       'src/test/relink.emulator.test.ts',
       'src/test/pocket.emulator.test.ts',
+      'src/test/pastPlanned.emulator.test.ts',
     ],
     testTimeout: 20_000,
     hookTimeout: 30_000,

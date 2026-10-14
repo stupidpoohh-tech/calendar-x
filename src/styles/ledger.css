@@ -413,3 +413,38 @@ button.led-cat-n:hover { background: var(--accent-soft); }
 /* 좁은 폭에서 줄 아래 설명(비중 · 직전 · 월평균)이 낱말 중간에서 끊기지 않게 — 항목 단위로 내린다. */
 .led-stat-s { flex-wrap: wrap; row-gap: 0; }
 .led-stat-s > span, .led-memo-h .led-sub, .led-delta { white-space: nowrap; }
+
+/* ---------- 지난 예정 정리 (PastPlanSheet) ---------- */
+.pp .sheet-b { display: flex; flex-direction: column; gap: 12px; }
+.pp-note { margin: 0; font-size: 0.75rem; color: var(--ink-3); line-height: 1.55; }
+.pp-note.ok { color: var(--good); }
+.pp-note.warn { color: var(--bad); }
+.pp-state { margin: 4px 0; font-size: 0.8125rem; color: var(--ink-2); }
+.pp-sum {
+  display: flex; flex-direction: column; gap: 4px; padding: 10px 12px;
+  border: 1px solid var(--line); border-radius: var(--radius); background: var(--bg-soft); font-size: 0.8125rem;
+}
+.pp-sum b { font-weight: 600; }
+.pp-sum .plus, .pp-a.plus { color: var(--good); }
+.pp-sum .minus, .pp-a.minus { color: var(--bad); }
+.pp-tools { display: flex; gap: 6px; flex-wrap: wrap; }
+.pp-grp ul { list-style: none; margin: 4px 0 0; padding: 0; }
+.pp-gt { margin: 0 0 2px; font-size: 0.8125rem; font-weight: 700; color: var(--ink); }
+.pp-gt .num { font-weight: 400; color: var(--ink-3); margin-left: 4px; }
+.pp-row label {
+  display: grid; grid-template-columns: auto auto minmax(0, 1fr) auto; gap: 8px; align-items: center;
+  padding: 8px 2px; border-bottom: 1px solid var(--line); cursor: pointer; min-height: 40px;
+}
+.pp-row.blocked label { cursor: default; opacity: .7; }
+.pp-row input { width: 16px; height: 16px; margin: 0; }
+.pp-d { font-size: 0.75rem; color: var(--ink-3); white-space: nowrap; }
+.pp-t { display: flex; flex-direction: column; min-width: 0; }
+.pp-n { font-size: 0.8125rem; color: var(--ink); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pp-m { font-size: 0.6875rem; color: var(--ink-4); overflow-wrap: anywhere; }
+.pp-a { font-size: 0.8125rem; white-space: nowrap; }
+.pp-step { display: flex; flex-direction: column; gap: 6px; padding-top: 10px; border-top: 1px solid var(--line); }
+.pp-run { display: flex; flex-direction: column; gap: 6px; padding-top: 6px; }
+.pp-result {
+  display: flex; flex-direction: column; gap: 2px; padding: 10px 12px; font-size: 0.8125rem;
+  border: 1px solid var(--line); border-radius: var(--radius); background: var(--bg-soft);
+}

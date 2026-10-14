@@ -211,8 +211,13 @@ export function MonthCalendar({
       const iso = toISO(d);
       if (iso > todayISO) continue;
       const s = daySummary(ledgerSummary.entries, iso);
-      // 오늘은 실제 거래만 요약한다 — 남은 예정은 막대로 그리므로 요약에서 또 세지 않는다.
-      const day = iso === todayISO ? { ...s, unconfirmed: 0 } : s;
+      /*
+        셀에는 실제 거래만 요약한다. 오늘의 남은 예정은 막대로 그리고, **지난 날의 미확정 예정은
+        셀에 적지 않는다** — 날짜가 지난 예정이 '예정 N' 으로 쌓여 실제 요약과 섞였다. 숨기는 것은
+        표시뿐이다: 예정 자체는 그대로이고, 계산(예상 잔고 · 한도)도 그대로 그것을 센다. 그 날의
+        미확정 예정은 날짜 상세의 접힌 구역에서 확정 · 열기 · 정리한다.
+      */
+      const day = { ...s, unconfirmed: 0 };
       if (day.actuals.length === 0 && day.unconfirmed === 0) continue;
       map.set(iso, day);
     }

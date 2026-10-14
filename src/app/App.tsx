@@ -11,7 +11,7 @@ import { LEDGER_BATCH_MAX, ledgerBatchSize } from '../data/pendingWrites';
 import { planFromFiles, readImportFiles, writeLedgerImport, type ImportIO } from '../data/ledgerImportRun';
 import { convertLegacyItems, readLegacyItems, summarize } from '../data/migrate';
 import {
-  createManyIfAbsent, fetchAll, fetchConfirmationsOf, fetchEntry, fetchLedgerSettings, fetchPocketEntries, markMigrated,
+  createManyIfAbsent, fetchAll, fetchConfirmationsOf, fetchEntry, fetchLedgerFromServer, fetchLedgerSettings, fetchPocketEntries, markMigrated,
   subscribeActualEntries,
   readMigrationMark, writeMany,
 } from '../data/repo';
@@ -29,7 +29,7 @@ import { applyFilters, collectTags, emptyFilters, hasActiveFilter } from '../dom
 import { baseIdOf, isVirtualEntry, materialize, occurrenceDateOf } from '../domain/recurrence';
 import { defaultCategories } from '../domain/category';
 import {
-  confirmationOf, confirmationsOfPlan, lostConfirmations, planScheduleChanged, reflectedAfterRename, repairLink,
+  confirmBlockOf, confirmationOf, confirmationsOfPlan, lostConfirmations, planScheduleChanged, reflectedAfterRename, repairLink,
 } from '../domain/confirm';
 import { applyReflectChoice, isActual, reflectChoiceFor } from '../domain/ledger';
 import { movedToPocket, pocketPeriodImpact, unlinkedFromPocket } from '../domain/budget';
@@ -44,6 +44,7 @@ import type {
 import { ConfirmSheet } from '../ui/ConfirmSheet';
 import { LedgerScreen, type SubscribeAll } from '../ui/LedgerScreen';
 import { PocketSheet } from '../ui/PocketSheet';
+import { PastPlanSheet } from '../ui/PastPlanSheet';
 import type { PocketFocus } from '../ui/BudgetPanel';
 import { LedgerImportPreview, LedgerImportProblems } from '../ui/LedgerImport';
 import { monthsOfPeriods, periodByKey, periodOf, periodsBetween, periodsOfYear, shiftPeriodKey } from '../domain/period';
@@ -125,6 +126,8 @@ function Workspace({ uid, user, onSignOut }: WorkspaceProps) {
   const [showSettings, setShowSettings] = useState(false);
   const [showPicker, setShowPicker] = useState(false);
   const [daySheet, setDaySheet] = useState<string | null>(null);
+  // 지난 예정 정리 창 — 설정 > 데이터에서만 연다.
+  const [pastPlanOpen, setPastPlanOpen] = useState(false);
   // 생활비 · 세이브 창. 카드의 확보 줄 · 달력의 생활비 막대 · '+ 생활비' 가 모두 이 하나를 연다.
   const [pocketFocus, setPocketFocus] = useState<PocketFocus | null>(null);
   const [modal, setModal] = useState<{
@@ -1033,7 +1036,7 @@ function Workspace({ uid, user, onSignOut }: WorkspaceProps) {
     const ok = await dialog.confirm({
       title: '이 항목을 삭제할까요?',
       body: (e.isRecurring
-        ? '반복 항목입니다. 모든 발생분이 함께 사라집니다. 이미 실제 거래로 확정한 회차는 그대로 남습니다.'
+        ? '반복 항목입니다. 이 날짜 하나가 아니라 앞으로의 회차까지 모든 발생분이 함께 사라집니다 — 한 회차만 지우는 기능은 없습니다. 이미 실제 거래로 확정한 회차는 그대로 남습니다.'
         : confirmedFrom
           ? '예정 회차를 확정한 실제 거래입니다. 지우면 그 예정 회차가 다시 보입니다.'
           : '되돌릴 수 없습니다.') + sharedNote,
@@ -1132,18 +1135,43 @@ function Workspace({ uid, user, onSignOut }: WorkspaceProps) {
 
   // ---------- 백업 / 복원 / 이관 ----------
 
-  const handleExport = useCallback(async () => {
-    if (isAnon || !uid) { void promptLogin(); return; }
+  const handleExport = useCallback(async (): Promise<boolean> => {
+    if (isAnon || !uid) { void promptLogin(); return false; }
     try {
       const [all, ledger] = await Promise.all([fetchAll(db, uid), fetchLedgerSettings(db, uid)]);
       // 회복 규칙 · 정산 시작일은 users/{uid} 문서에 있어 fetchAll 이 보지 않는다.
       // 회복 규칙은 구독으로 이미 들고 있으니 그대로 실어 보낸다.
       downloadJSON(buildBackup({ ...all, ledger, recovery: recovery.rule }), backupFilename());
       dialog.toast(`${countBackup(all).toLocaleString('ko-KR')}건을 내려받았습니다.`);
+      return true;
     } catch (err) {
       dialog.toast(`백업하지 못했습니다. ${describeFirestoreError(err)}`, 'bad');
+      return false;
     }
   }, [db, uid, isAnon, promptLogin, dialog, recovery]);
+
+  /**
+   * 지난 예정 정리 — 고른 id 를 묶음으로 지운다. 기존 쓰기 큐(`ledgerBatch`)를 그대로 쓰므로
+   * 거절된 묶음은 "저장하지 못한 것" 목록에 남는다. 묶음마다 서버 확정을 기다려 센다 —
+   * 이 기기에 반영된 것과 서버에 반영된 것은 다른 사건이다.
+   */
+  const deletePastPlans = useCallback(async (ids: string[]) => {
+    if (isAnon || !uid) { void promptLogin(); return { ok: 0, failed: ids.length }; }
+    const unique = [...new Set(ids)];
+    const CHUNK = 400;
+    const results = await Promise.all(Array.from({ length: Math.ceil(unique.length / CHUNK) }, (_, i) => {
+      const part = unique.slice(i * CHUNK, (i + 1) * CHUNK);
+      return commit({
+        kind: 'ledgerBatch', label: '지난 예정 정리',
+        summary: `예정 ${part.length.toLocaleString('ko-KR')}건`,
+        payload: { entries: [], deleteIds: part, accounts: [] },
+      }).then((ok) => ({ ok, n: part.length }));
+    }));
+    return {
+      ok: results.filter((r) => r.ok).reduce((t, r) => t + r.n, 0),
+      failed: results.filter((r) => !r.ok).reduce((t, r) => t + r.n, 0),
+    };
+  }, [isAnon, uid, promptLogin, commit]);
 
   /**
    * 백업 가져오기.
@@ -2086,6 +2114,15 @@ function Workspace({ uid, user, onSignOut }: WorkspaceProps) {
         />
       )}
 
+      {pastPlanOpen && uid && !isAnon && (
+        <PastPlanSheet
+          todayISO={today}
+          load={() => fetchLedgerFromServer(db, uid)}
+          onBackup={handleExport}
+          onDelete={deletePastPlans}
+          onClose={() => setPastPlanOpen(false)}
+        />
+      )}
       {pocketFocus && ledgerOn && (
         <PocketSheet
           focus={pocketFocus}
@@ -2122,6 +2159,12 @@ function Workspace({ uid, user, onSignOut }: WorkspaceProps) {
             balance: daySheetBalance,
             categories: store.categories,
             onToggleHighlight: toggleHighlight,
+            planActions: {
+              // 펼친 회차는 확정할 수 없다 — 원본 시리즈를 보고 그 날짜를 확정한다.
+              canConfirm: (e) => confirmBlockOf(findBase(e.id) ?? e) === null,
+              onConfirm: (e, date) => { setDaySheet(null); startConfirm(findBase(e.id) ?? e, date); },
+              onDiscard: (e) => { setDaySheet(null); void handleDelete(e); },
+            },
           } : undefined}
           onClose={() => setDaySheet(null)}
           onEntryClick={(e) => { setDaySheet(null); openEdit(e); }}
@@ -2286,6 +2329,7 @@ function Workspace({ uid, user, onSignOut }: WorkspaceProps) {
           migratedAt={legacy?.migratedAt ?? null}
           recoveryRule={recovery.rule}
           onRecoveryRule={recovery.saveRule}
+          onCleanPastPlans={isAnon || !uid ? undefined : () => { setShowSettings(false); setPastPlanOpen(true); }}
           ledger={{
             todayISO: today,
             settleDay: store.ledger.settleDay,

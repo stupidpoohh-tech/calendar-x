@@ -43,7 +43,13 @@ import {
 import { uid as newId } from '../domain/entry';
 import { useDialog } from '../ui/Dialog';
 
-export type Commit = (op: CommitInput) => void;
+/**
+ * 쓰기 한 건을 보낸다. 화면은 로컬 캐시로 곧바로 바뀐다(오프라인 지속성).
+ * 돌려주는 promise 는 **서버 확정**이다 — 서버가 받으면 true, 거절되면 false(그 쓰기는 "저장하지
+ * 못한 것" 목록에 이미 남았다). 오프라인이면 연결될 때까지 끝나지 않으므로 기다려 화면을 막지 않는다.
+ * 대부분의 자리는 이 값을 쓰지 않는다 — 로컬 반영과 서버 확정을 구분해 알려야 하는 자리만 쓴다.
+ */
+export type Commit = (op: CommitInput) => Promise<boolean>;
 
 export interface WriteQueue {
   commit: Commit;
@@ -142,7 +148,7 @@ export function useWriteQueue(uid: string | null): WriteQueue {
   }, [write, dialog]);
 
   const commit = useCallback<Commit>((input) => {
-    if (!uid) return;
+    if (!uid) return Promise.resolve(false);
     const owner = uid;
     let sending: Promise<void>;
     try {
@@ -150,7 +156,7 @@ export function useWriteQueue(uid: string | null): WriteQueue {
       sending = sendPending(db, owner, input);
     } catch (err) {
       enqueue(owner, input, err);
-      return;
+      return Promise.resolve(false);
     }
     /*
       거절은 종류를 가리지 않고 전부 붙잡는다.
@@ -160,7 +166,7 @@ export function useWriteQueue(uid: string | null): WriteQueue {
       `navigator.onLine` 이 false 여도 마찬가지다. 아직 큐에 남아 있는 쓰기는 애초에
       pending 인 채라 여기 오지 않는다.
     */
-    void sending.catch((err: unknown) => enqueue(owner, input, err));
+    return sending.then(() => true, (err: unknown) => { enqueue(owner, input, err); return false; });
   }, [uid, db, enqueue]);
 
   const discard = useCallback((id: string) => {

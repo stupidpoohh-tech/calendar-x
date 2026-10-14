@@ -76,10 +76,18 @@ describe('지난 날 — 막대 대신 요약', () => {
     expect(s.textContent).toContain('가전');
   });
 
-  it('지난 날에 남은 미확정 예정은 점선 표식으로 따로', () => {
+  it('지난 날의 미확정 예정은 달력에 적지 않는다 — 막대도 표식도 없다', () => {
     mount([plan('2026-10-12', 70_000)]);
     expect(bars()).toHaveLength(0);
-    expect(sums()[0]!.querySelector('.cal-sum-plan')!.textContent).toBe('예정 1');
+    expect(sums()).toHaveLength(0);
+    expect(document.querySelector('.cal-sum-plan')).toBeNull();
+  });
+
+  it('실제 거래가 있는 지난 날도 요약만 — 예정 건수를 덧붙이지 않는다', () => {
+    mount([tx('2026-10-12', 5_000), plan('2026-10-12', 70_000)]);
+    expect(sums()).toHaveLength(1);
+    expect(sums()[0]!.textContent).toBe('−5천거래 1건');
+    expect(sums()[0]!.querySelector('.cal-sum-plan')).toBeNull();
   });
 
   it('요약 칸을 누르면 그 날짜 상세를 연다', () => {
@@ -195,5 +203,88 @@ describe('가계부 날짜 상세', () => {
     open(null as never);
     expect(screen.queryByLabelText('이 날의 실제 현금흐름')).toBeNull();
     expect(screen.getByRole('status').textContent).toContain('불러오는 중');
+  });
+});
+
+describe('지난 날 상세 — 실제 거래가 먼저, 미확정 예정은 접힌 구역', () => {
+  const day = '2026-10-09';
+  const paid = tx(day, 12_000, {}, '점심');
+  const once = plan(day, 70_000, '병원 예약');
+  const rec = newEntry('money', {
+    id: 'gym', title: '헬스장', startDate: '2026-09-09',
+    recurrence: { freq: 'monthly', interval: 1, until: null, count: null },
+    money: newMoney({ type: 'expense', amountMinor: 50_000 }),
+  });
+  const shown = [paid, once, ...materialize([rec], day, day)];
+
+  function open(actions = true) {
+    const planActions = { canConfirm: vi.fn(() => true), onConfirm: vi.fn(), onDiscard: vi.fn() };
+    render(
+      <DaySheet
+        dateISO={day} todayISO={TODAY} entries={shown} moneyEntries={shown}
+        onClose={vi.fn()} onEntryClick={vi.fn()} onAdd={vi.fn()}
+        ledger={{ summary: daySummary([paid, once, rec], day), categories: [], onToggleHighlight: vi.fn(), planActions: actions ? planActions : undefined }}
+      />,
+    );
+    return planActions;
+  }
+
+  it('거래 목록에는 실제 거래만, 예정은 "미확정 예정 N건" 아래로', () => {
+    open();
+    const rows = within(screen.getByRole('list', { name: '이 날의 거래' })).getAllByRole('listitem');
+    expect(rows.map((r) => r.textContent)).toEqual([expect.stringContaining('점심')]);
+    const pend = screen.getByRole('list', { name: '이 날의 미확정 예정' });
+    expect(pend.closest('details')!.open).toBe(false);
+    expect(pend.closest('details')!.querySelector('summary')!.textContent).toContain('미확정 예정 2건');
+    expect(within(pend).getAllByRole('listitem')).toHaveLength(2);
+    // 합계는 실제 거래만.
+    expect(screen.getByLabelText('이 날의 실제 현금흐름').textContent).toContain('−12,000');
+  });
+
+  it('한 번짜리는 확정 · 정리, 반복 회차는 확정만 — 이 회차만 지울 수 없다고 적는다', () => {
+    const a = open();
+    const oneOff = screen.getByRole('group', { name: '병원 예약 처리' });
+    fireEvent.click(within(oneOff).getByRole('button', { name: '실제 거래로 확정' }));
+    expect(a.onConfirm).toHaveBeenCalledWith(expect.objectContaining({ id: once.id }), day);
+    fireEvent.click(within(oneOff).getByRole('button', { name: '정리' }));
+    expect(a.onDiscard).toHaveBeenCalledWith(expect.objectContaining({ id: once.id }));
+
+    const recurring = screen.getByRole('group', { name: '헬스장 처리' });
+    expect(within(recurring).queryByRole('button', { name: '정리' })).toBeNull();
+    expect(screen.getByText('반복 — 이 회차만 지울 수 없습니다')).toBeInTheDocument();
+  });
+
+  it('확정할 수 없는 종류(기간 · 예전)에는 확정 단추가 없다', () => {
+    const a = open();
+    a.canConfirm.mockReturnValue(false);
+    cleanup();
+    const span = newEntry('money', {
+      id: 'liv', title: '생활비', startDate: '2026-10-01', endDate: '2026-10-10',
+      money: newMoney({ type: 'living', amountMinor: 300_000 }),
+    });
+    render(
+      <DaySheet
+        dateISO={day} todayISO={TODAY} entries={[span]} moneyEntries={[span]}
+        onClose={vi.fn()} onEntryClick={vi.fn()} onAdd={vi.fn()}
+        ledger={{ summary: daySummary([span], day), categories: [], onToggleHighlight: vi.fn(), planActions: { canConfirm: () => false, onConfirm: vi.fn(), onDiscard: vi.fn() } }}
+      />,
+    );
+    expect(screen.getByText('이 날의 실제 거래는 없습니다.')).toBeInTheDocument();
+    expect(screen.getByText('확정할 수 없는 종류')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: '실제 거래로 확정' })).toBeNull();
+    expect(screen.queryByRole('button', { name: '정리' })).toBeNull();
+  });
+
+  it('오늘 · 앞날은 지금처럼 한 목록이다', () => {
+    const fut = plan('2026-10-20', 30_000, '카드대금');
+    render(
+      <DaySheet
+        dateISO="2026-10-20" todayISO={TODAY} entries={[fut]} moneyEntries={[fut]}
+        onClose={vi.fn()} onEntryClick={vi.fn()} onAdd={vi.fn()}
+        ledger={{ summary: daySummary([fut], '2026-10-20'), categories: [], onToggleHighlight: vi.fn() }}
+      />,
+    );
+    expect(screen.queryByRole('list', { name: '이 날의 미확정 예정' })).toBeNull();
+    expect(screen.getByRole('list', { name: '이 날의 거래' }).textContent).toContain('카드대금');
   });
 });
