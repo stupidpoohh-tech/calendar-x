@@ -1,5 +1,14 @@
 /* Calendar X shell refinement. Event blocks retain their original styling. */
 .app { background: var(--bg); }
+.app-masthead { display: flex; align-items: center; min-height: 48px; padding: 10px 24px; border-bottom: 1px solid var(--line); background: var(--bg); }
+.app-logo { display: inline-flex; align-items: center; gap: 8px; color: var(--ink); }
+.app-logo-mark { display: inline-flex; color: var(--accent); }
+.app-logo-name { font-size: 1rem; font-weight: 750; letter-spacing: -.035em; white-space: nowrap; }
+@media (max-width: 600px) {
+  .app-masthead { min-height: 42px; padding: 8px 14px; }
+  .app-logo-name { font-size: .9375rem; }
+  .app-logo-mark svg { width: 20px; height: 20px; }
+}
 .topbar {
   position: relative; display: flex; flex-wrap: wrap; gap: 12px;
   padding: 18px 24px 14px; border: 0; background: var(--bg); backdrop-filter: none;

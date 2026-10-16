@@ -12,6 +12,8 @@
 import { CALENDAR_AMOUNTS, type Layout } from '../domain/layout';
 
 export interface LayoutSettingsProps {
+  /** The settings hub places these groups on separate detail screens. */
+  section?: 'features' | 'sharing' | 'calendar';
   layout: Layout;
   onLayout: (patch: Partial<Layout>) => void;
   shared: {
@@ -40,10 +42,10 @@ function ShowHide({ label, on, onChange }: { label: string; on: boolean; onChang
   );
 }
 
-export function LayoutSettings({ layout, onLayout, shared }: LayoutSettingsProps) {
+export function LayoutSettings({ layout, onLayout, shared, section }: LayoutSettingsProps) {
   return (
     <>
-      <div className="set-grp">
+      {(!section || section === 'features') && <div className="set-grp">
         <h3 className="set-gt">내 캘린더 구성</h3>
         <p className="set-note">필요한 기능만 선택해서 사용하세요.</p>
 
@@ -79,6 +81,10 @@ export function LayoutSettings({ layout, onLayout, shared }: LayoutSettingsProps
           <ShowHide label="노트" on={layout.notes} onChange={(v) => onLayout({ notes: v })} />
         </div>
 
+      </div>}
+
+      {(!section || section === 'sharing') && <div className="set-grp">
+        <h3 className="set-gt">같이 보기 연결</h3>
         <div className="set-row-inline">
           <span>
             같이보기 공간 전환
@@ -108,9 +114,9 @@ export function LayoutSettings({ layout, onLayout, shared }: LayoutSettingsProps
             </span>
           </button>
         )}
-      </div>
+      </div>}
 
-      {layout.ledger && (
+      {layout.ledger && (!section || section === 'calendar') && (
         <div className="set-grp">
           <h3 className="set-gt">캘린더 표시</h3>
           <p className="set-note">현금흐름 달력 칸에 적을 금액입니다. 계산은 그대로이고 보여 줄 숫자만 고릅니다.</p>
