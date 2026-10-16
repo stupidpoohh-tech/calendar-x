@@ -12,7 +12,7 @@
 import { useMemo, useState } from 'react';
 import { MONEY_TYPE_BY_ID } from '../domain/constants';
 import { calcScopeOf, headlineLimit, horizonOf } from '../domain/tide';
-import type { Account, Budget, Reserve } from '../domain/types';
+import type { Account, Budget, Card, Reserve } from '../domain/types';
 import { addDaysISO, fmtDayShort } from '../domain/date';
 import { displayTitle, effectiveEndDate, isDone, newEntry } from '../domain/entry';
 import { formatAmount } from '../domain/money';
@@ -40,6 +40,9 @@ interface Props {
   reserves?: readonly Reserve[];
   /** 세이브마다 연결된 실제 지출의 합(P3). 한도는 확보액이 아니라 남은 금액을 뺀다. */
   reserveUsage?: ReadonlyMap<string, number>;
+  /** 신용카드와 카드에 걸린 거래 전량(P4). 미결제가 한도에서 빠지고, 아직 적지 않은 대금이 결제일에 예상 잔고에서 빠진다. */
+  cards?: readonly Card[];
+  cardEntries?: readonly Entry[];
   /** 잔고를 한 번도 입력하지 않았으면 tide 값을 0으로 단정하지 않는다. */
   hasBalance: boolean;
   collapsed: boolean;
@@ -68,7 +71,7 @@ function occursOnDay(e: Entry, iso: string): boolean {
 
 export function TodayPanel({
   todayISO, entries, tideEntries, tideFrom, calcState = CALC_READY, accounts,
-  budgets = NO_BUDGETS, reserves = NO_RESERVES, reserveUsage = NO_USAGE, hasBalance,
+  budgets = NO_BUDGETS, reserves = NO_RESERVES, reserveUsage = NO_USAGE, cards, cardEntries, hasBalance,
   collapsed, onToggleCollapsed, moneyCollapsed, onToggleMoneyCollapsed,
   onEntryClick, onStatusChange, onPromote, onQuickIdea, onSaveAccount, showMoney = true,
 }: Props) {
@@ -94,7 +97,10 @@ export function TodayPanel({
   // '오늘 마감 예상' 대신 tide-over 규칙 — 다음 입금까지 남는 한도.
   const horizon = useMemo(() => horizonOf(tideEntries, todayISO), [tideEntries, todayISO]);
   // 통화가 섞이면 최소 단위가 달라 애초에 더할 수 없다.
-  const res = useMemo(() => ({ budgets, reserves, reserveUsage }), [budgets, reserves, reserveUsage]);
+  const res = useMemo(
+    () => ({ budgets, reserves, reserveUsage, cards, cardEntries }),
+    [budgets, reserves, reserveUsage, cards, cardEntries],
+  );
   const scope = useMemo(() => calcScopeOf(accounts, tideEntries, res), [accounts, tideEntries, res]);
 
   const tideLimit = useMemo(

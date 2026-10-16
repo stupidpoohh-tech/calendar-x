@@ -13,11 +13,11 @@ import { confirmOccurrence, needsTypeChoice, pocketChoiceFor, type ConfirmRefusa
 import { confirmedEntryId, moneyFlowOf } from '../domain/ledger';
 import { fmtDayShort } from '../domain/date';
 import { formatAmount, minorToInput, parseAmountToMinor } from '../domain/money';
-import type { Account, Budget, Category, Debt, Entry, MoneyFields, Reserve } from '../domain/types';
+import type { Account, Budget, Card, Category, Debt, Entry, MoneyFields, Reserve } from '../domain/types';
 import { Icon } from './Icon';
 import { FlowChips } from './FlowChips';
 import { LedgerFields } from './LedgerFields';
-import { flowLabel, flowPickPatch, type FlowPick } from './ledgerFlows';
+import { cardPaymentLabel, flowLabel, flowPickPatch, type FlowPick } from './ledgerFlows';
 import { PICKER } from './pickerField';
 import { isComposingEnter } from './ime';
 
@@ -31,6 +31,9 @@ interface Props {
   budgets: readonly Budget[];
   /** 세이브(P3). 예정에 걸어 둔 세이브가 기본값이고, 확정하면 그때부터 사용으로 센다. */
   reserves?: readonly Reserve[];
+  /** 신용카드와 카드 거래 전량(P4). 예정의 카드 · 회차가 기본값이다. */
+  cards?: readonly Card[];
+  cardEntries?: readonly Entry[];
   debts: readonly Debt[];
   /** `reflected` — "이 잔고에 이미 반영됨" 을 고른 값. 손대지 않았으면 undefined. */
   onSave: (actual: Entry, opts?: { reflected?: boolean }) => void;
@@ -38,6 +41,8 @@ interface Props {
 }
 
 const NO_RESERVES: readonly Reserve[] = [];
+const NO_CARDS: readonly Card[] = [];
+const NO_ENTRIES: readonly Entry[] = [];
 
 const REASONS: Record<ConfirmRefusal, string> = {
   'not-money': '가계부 항목이 아닙니다.',
@@ -54,7 +59,7 @@ const REASONS: Record<ConfirmRefusal, string> = {
 
 export function ConfirmSheet({
   plan, occurrenceDate, categories, categoriesReady, onSeedCategories,
-  accounts, budgets, reserves = NO_RESERVES, debts, onSave, onClose,
+  accounts, budgets, reserves = NO_RESERVES, cards = NO_CARDS, cardEntries = NO_ENTRIES, debts, onSave, onClose,
 }: Props) {
   const legacy = needsTypeChoice(plan);
   const planMoney = plan.money!;
@@ -128,6 +133,8 @@ export function ConfirmSheet({
       budgetId: money.budgetId ?? null,
       debtId: money.debtId ?? null,
       reserveId: money.reserveId ?? null,
+      cardId: money.cardId ?? null,
+      ...(money.cardCycle ? { cardCycle: money.cardCycle } : {}),
     });
     if (!r.ok) { setError(REASONS[r.reason]); return; }
     onSave(r.entry, { reflected });
@@ -182,6 +189,7 @@ export function ConfirmSheet({
           <FlowChips
             money={money} chosen={typeChosen}
             legacyLabel={flowLabel(moneyFlowOf(money))}
+            currentLabel={cardPaymentLabel(money, cards)}
             onPick={pickFlow}
           />
 
@@ -197,6 +205,8 @@ export function ConfirmSheet({
             accounts={accounts}
             pockets={pockets}
             reserves={reserves}
+            cards={cards}
+            cardEntries={cardEntries}
             debts={debts}
             reflected={reflected}
             onReflected={setReflected}

@@ -21,7 +21,7 @@ import {
 import { LENSES, LENS_BY_ID, SHARED_TABS } from '../domain/constants';
 import { calendarAmountCaption, lensVisible } from '../domain/layout';
 import { endOfMonth, fmtMonthTitle, startOfMonth, toISO } from '../domain/date';
-import { convertKind, displayTitle, effectiveEndDate, newEntry, uid as newId, withDerived } from '../domain/entry';
+import { convertKind, displayTitle, effectiveEndDate, newEntry, newMoney, uid as newId, withDerived } from '../domain/entry';
 import {
   INVITE_PARAM, isShareableTask, newNote, repinNotes, sharedChange, sharedTitle,
 } from '../domain/shared';
@@ -42,12 +42,14 @@ import { balanceViewOn, calcScopeOf } from '../domain/tide';
 import { ymOf } from '../domain/date';
 import { isRecoveryEntry } from '../domain/recovery';
 import type {
-  AnnualBudget, Account, Budget, Category, CategoryBudget, Entry, Filters, LedgerNote, LedgerTabId, LensId, Reserve, SharedInvite, SharedNote, SharedTodoItem,
+  AnnualBudget, Account, Budget, Card, Category, CategoryBudget, Entry, Filters, LedgerNote, LedgerTabId, LensId, Reserve, SharedInvite, SharedNote, SharedTodoItem,
   TaskStatus, ViewId, YearMonth,
 } from '../domain/types';
 import { ConfirmSheet } from '../ui/ConfirmSheet';
 import { LedgerScreen, type SubscribeAll } from '../ui/LedgerScreen';
 import { PocketSheet } from '../ui/PocketSheet';
+import { CardLine, CardSheet } from '../ui/CardSheet';
+import type { CycleState } from '../domain/card';
 import { LoanCategorySheet } from '../ui/LoanCategorySheet';
 import { PastPlanSheet } from '../ui/PastPlanSheet';
 import type { PocketFocus } from '../ui/BudgetPanel';
@@ -137,6 +139,8 @@ function Workspace({ uid, user, onSignOut }: WorkspaceProps) {
   const [loanCatOpen, setLoanCatOpen] = useState(false);
   // 생활비 · 세이브 창. 카드의 확보 줄 · 달력의 생활비 막대 · '+ 생활비' 가 모두 이 하나를 연다.
   const [pocketFocus, setPocketFocus] = useState<PocketFocus | null>(null);
+  // 카드대금 창(P4). 현금흐름 카드 안의 '카드대금' 줄에서 연다.
+  const [cardSheetOpen, setCardSheetOpen] = useState(false);
   const [modal, setModal] = useState<{
     open: boolean; mode: 'create' | 'edit'; entry: Entry | null;
     /** 반복 발생분을 눌렀으면 그 회차 날짜. 편집은 원본을 향하지만 확정은 이 회차를 향한다. */
@@ -942,6 +946,47 @@ function Workspace({ uid, user, onSignOut }: WorkspaceProps) {
     commit({ kind: 'ledgerBatch', label: '세이브 삭제', summary: `${r.name} · 연결 해제 ${n(linked.length)}건`, payload });
   }, [isAnon, uid, promptLogin, store.reserveLinked, dialog, commit]);
 
+  /** 카드 저장(P4). 문서 전체를 쓴다. */
+  const saveCard = useCallback((c: Card) => {
+    if (isAnon || !uid) { void promptLogin(); return; }
+    commit({ kind: 'card', label: '카드', summary: c.name, payload: c });
+  }, [isAnon, uid, promptLogin, commit]);
+
+  /**
+   * 카드 삭제(P4). 연결된 거래가 있으면 지우지 않고 보관을 권한다 — 카드를 지우면 그 거래들의 회차를 셀 수 없어
+   * 미결제가 말없이 사라지고 한도가 부푼다. 보관은 고르는 자리에서만 빼고 미결제 계산은 그대로다.
+   */
+  const deleteCard = useCallback(async (c: Card) => {
+    if (isAnon || !uid) { void promptLogin(); return; }
+    const linked = store.cardLinked.filter((e) => e.money?.cardId === c.id);
+    if (linked.length === 0) {
+      const ok = await dialog.confirm({ title: `'${c.name}'을(를) 삭제할까요?`, danger: true, confirmLabel: '삭제' });
+      if (ok) commit({ kind: 'cardDelete', label: '카드 삭제', summary: c.name, payload: { id: c.id } });
+      return;
+    }
+    const ok = await dialog.confirm({
+      title: `'${c.name}'에 연결된 거래가 ${linked.length.toLocaleString('ko-KR')}건 있습니다`,
+      body: <p>지우면 그 거래들의 미결제를 셀 수 없게 됩니다. 대신 보관하면 고르는 자리에서만 빠지고, 남은 미결제는 그대로 가용 한도에서 빠집니다.</p>,
+      confirmLabel: '보관',
+    });
+    if (ok) commit({ kind: 'card', label: '카드 보관', summary: c.name, payload: { ...c, archivedAt: new Date().toISOString(), updatedAt: new Date().toISOString() } });
+  }, [isAnon, uid, promptLogin, store.cardLinked, dialog, commit]);
+
+  /** 대금을 거래 창으로 적는다(P4). 금액은 그 회차의 남은 금액, 계좌는 카드의 결제 계좌. 창에서 고친다. */
+  const openCardPayment = useCallback((c: Card, cycle: CycleState, planned: boolean) => {
+    if (isAnon || !uid) { void promptLogin(); return; }
+    const date = planned && cycle.payDate > today ? cycle.payDate : today;
+    const entry = newEntry('money', {
+      title: `${c.name} 대금`, startDate: date,
+      money: newMoney({
+        status: planned ? 'planned' : 'actual', type: 'expense', flow: 'cardPayment',
+        cardId: c.id, cardCycle: cycle.key, amountMinor: cycle.remainingMinor, accountId: c.accountId,
+      }),
+    });
+    setCardSheetOpen(false);
+    setModal({ open: true, mode: 'create', entry: withDerived(entry) });
+  }, [isAnon, uid, promptLogin, today]);
+
   /*
     ── 가계부 상세(내역 · 예산 · 월별 · 통계) ──────────────────────────
 
@@ -1745,8 +1790,11 @@ function Workspace({ uid, user, onSignOut }: WorkspaceProps) {
   const ledgerDayReady = store.display.ready && !(store.display.empty && store.display.fromCache);
   // 달력 칸의 가용 · 생활비 잔여가 보는 예약. 카드 · 날짜 상세와 같은 값이다.
   const reservations = useMemo(
-    () => ({ budgets: store.budgets, reserves: store.reserves, reserveUsage: store.reserveUsage }),
-    [store.budgets, store.reserves, store.reserveUsage],
+    () => ({
+      budgets: store.budgets, reserves: store.reserves, reserveUsage: store.reserveUsage,
+      cards: store.cards, cardEntries: store.cardLinked,
+    }),
+    [store.budgets, store.reserves, store.reserveUsage, store.cards, store.cardLinked],
   );
   const ledgerSummary = useMemo(
     () => ({ entries: store.entries, ready: ledgerDayReady }),
@@ -1760,10 +1808,10 @@ function Workspace({ uid, user, onSignOut }: WorkspaceProps) {
   const daySheetBalance = useMemo(() => {
     if (!daySheet || !ledgerOn || daySheet < today || !hasBalance || calcState.kind !== 'ready') return null;
     if (!store.tideMonths.includes(ymOf(daySheet))) return null;
-    const res = { budgets: store.budgets, reserves: store.reserves, reserveUsage: store.reserveUsage };
+    const res = reservations;
     if (!calcScopeOf(store.accounts, store.tideEntries, res).ok) return null;
     return balanceViewOn(store.accounts, store.tideEntries, daySheet, today, res);
-  }, [daySheet, ledgerOn, today, hasBalance, calcState.kind, store.tideMonths, store.accounts, store.tideEntries, store.budgets, store.reserves, store.reserveUsage]);
+  }, [daySheet, ledgerOn, today, hasBalance, calcState.kind, store.tideMonths, store.accounts, store.tideEntries, reservations]);
   // 가계부 날짜 상세는 필터와 무관하게 그 날의 가계부 항목을 빠짐없이 보여 준다(소액 포함).
   const ledgerDayEntries = daySheet && ledgerOn
     ? materialized.filter((e) => e.kind === 'money' && e.startDate <= daySheet && effectiveEndDate(e) >= daySheet)
@@ -2101,6 +2149,8 @@ function Workspace({ uid, user, onSignOut }: WorkspaceProps) {
             budgets={store.budgets}
             reserves={store.reserves}
             reserveUsage={store.reserveUsage}
+            cards={store.cards}
+            cardEntries={store.cardLinked}
             hasBalance={hasBalance}
             collapsed={prefs.todayCollapsed}
             onToggleCollapsed={() => set('todayCollapsed', !prefs.todayCollapsed)}
@@ -2172,6 +2222,8 @@ function Workspace({ uid, user, onSignOut }: WorkspaceProps) {
             budgets={store.budgets}
             reserves={store.reserves}
             reserveUsage={store.reserveUsage}
+            cards={store.cards}
+            cardEntries={store.cardLinked}
             tideFrom={tideFrom}
             calcState={calcState}
             hasBalance={hasBalance}
@@ -2180,7 +2232,9 @@ function Workspace({ uid, user, onSignOut }: WorkspaceProps) {
             collapsed={prefs.moneyCardCollapsed}
             onToggleCollapsed={() => set('moneyCardCollapsed', !prefs.moneyCardCollapsed)}
             onOpenPockets={setPocketFocus}
+            onOpenCards={() => setCardSheetOpen(true)}
           >
+            <CardLine cards={store.cards} cardEntries={store.cardLinked} todayISO={today} onOpen={() => setCardSheetOpen(true)} />
             <MoneyPanel
               debts={store.debts}
               collapsed={prefs.debtsCollapsed}
@@ -2283,6 +2337,19 @@ function Workspace({ uid, user, onSignOut }: WorkspaceProps) {
           onClose={() => setLoanCatOpen(false)}
         />
       )}
+      {cardSheetOpen && ledgerOn && (
+        <CardSheet
+          cards={store.cards}
+          cardEntries={store.cardLinked}
+          accounts={store.accounts}
+          todayISO={today}
+          onClose={() => setCardSheetOpen(false)}
+          onSaveCard={saveCard}
+          onDeleteCard={(c) => { void deleteCard(c); }}
+          onEntryClick={(e) => { setCardSheetOpen(false); openEdit(e); }}
+          onRecordPayment={openCardPayment}
+        />
+      )}
       {pocketFocus && ledgerOn && (
         <PocketSheet
           focus={pocketFocus}
@@ -2377,6 +2444,8 @@ function Workspace({ uid, user, onSignOut }: WorkspaceProps) {
         linkableTasks={linkableTasks}
         budgets={store.budgets}
         reserves={store.reserves}
+        cards={store.cards}
+        cardEntries={store.cardLinked}
         debts={store.debts}
         sharedActive={!!shared.board}
         categories={store.categories}
@@ -2402,6 +2471,8 @@ function Workspace({ uid, user, onSignOut }: WorkspaceProps) {
           accounts={store.accounts}
           budgets={store.budgets}
           reserves={store.reserves}
+          cards={store.cards}
+          cardEntries={store.cardLinked}
           debts={store.debts}
           onSave={(actual, opts) => {
             setConfirming(null);

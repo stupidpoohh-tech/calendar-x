@@ -67,7 +67,7 @@ export function calcSnapshot(
   const from = unsettledAfter(accounts, today);
   return {
     headline: accounts.length > 0 ? headlineLimit(accounts, entries, today, res) : 0,
-    projectedToday: projectedBalanceOn(accounts, entries, today, today),
+    projectedToday: projectedBalanceOn(accounts, entries, today, today, res),
     availableToday: limitOn(accounts, entries, today, today, res),
     pockets: budgetStates(res.budgets ?? [], entries, { accounts, today, unsettledAfter: from })
       .map((s) => `${s.budget.id}:${s.actualMinor}:${s.plannedMinor}:${s.reservedMinor}`).join('|'),

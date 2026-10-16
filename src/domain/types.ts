@@ -163,10 +163,55 @@ export interface MoneyFields {
    * **실제** 거래에서 매번 센다(`budget.reserveUsageOf`) — 거래를 고치거나 지우거나 되살려도 세이브와 어긋날
    * 자리가 없다. 예정에도 걸 수 있지만 확정하기 전에는 사용액에 넣지 않는다(확정하면 실제 거래가 이어받는다).
    *
-   * 일반 지출(`flow: 'normal'`)에만 건다. 수입 · 대출 · 이체 · 카드 대금은 소비가 아니고, 카드 사용은 대금과의
-   * 관계가 P4 의 몫이라 걸지 않는다. 생활비 주머니(`budgetId`)와 함께 걸리지 않는다 — 사용처는 하나다.
+   * 일반 지출(`flow: 'normal'`)과 **등록한 카드의** 카드 사용(`cardSpend` + `cardId`, P4)에 건다. 수입 · 대출 · 이체 ·
+   * 카드 대금은 소비가 아니다. 카드가 정해지지 않은 카드 사용은 미결제로 지켜지지 않아 걸지 않는다(걸면 세이브만 줄고
+   * 빚은 아무도 지키지 않는다). 생활비 주머니(`budgetId`)와 함께 걸리지 않는다 — 사용처는 하나다.
    */
   reserveId?: string | null;
+  /**
+   * 어느 신용카드의 거래인가 (Financial Core P4). 카드 사용(`flow: 'cardSpend'`) · 카드 대금(`'cardPayment'`)에만
+   * 붙는다. 없으면 예전처럼 카드가 정해지지 않은 거래다 — 계산은 그대로이고 미결제로 세지 않는다.
+   *
+   * 카드 사용은 쓴 날 소비로 세고(현금 0), 그 카드의 미결제가 된다. 카드 대금은 현금이 나가고 미결제를 줄인다.
+   * 미결제 · 청구 금액은 저장하지 않고 이 연결이 걸린 거래에서 매번 센다(`card.ts`).
+   */
+  cardId?: string | null;
+  /**
+   * 카드 대금이 갚는 청구 회차 — 결제하는 달 `YYYY-MM` (P4). 카드 대금에만 붙는다. 없으면 거래 날짜의 달로 읽는다
+   * (반복 예정은 회차마다 그 회차의 달이다). 일부 납부 · 여러 번 납부는 같은 회차를 가리키는 대금 여러 건이다.
+   */
+  cardCycle?: string | null;
+}
+
+/**
+ * 신용카드 (Financial Core P4). 현금 계좌와 다르다 — 잔고가 없고, 쓴 돈은 결제일에 결제 계좌에서 한꺼번에 나간다.
+ *
+ * 청구 회차는 카드마다 다르므로 세 값으로 적는다. 이용 기간은 `closeDay` 다음 날부터 다음 `closeDay` 까지이고,
+ * 그 마감일이 든 달에서 `payMonthOffset` 달 뒤의 `payDay` 에 결제한다. 그 달에 없는 날(31일 · 2월 30일)은 말일이다.
+ *
+ *   이용 전월 1일 ~ 말일, 다음 달 25일 결제   closeDay 31 · payDay 25 · payMonthOffset 1
+ *   이용 전전월 14일 ~ 전월 13일, 1일 결제     closeDay 13 · payDay 1  · payMonthOffset 1
+ *
+ * 휴일이면 실제 출금일이 밀릴 수 있다 — 넘겨짚지 않는다. 사용자가 예정 납부를 다른 날로 적으면 그것을 따른다.
+ * 한도 · 포인트 · 할부는 다루지 않는다.
+ */
+export interface Card {
+  id: string;
+  name: string;
+  /** 이용 기간이 끝나는 날 (1~31). */
+  closeDay: number;
+  /** 결제일 (1~31). */
+  payDay: number;
+  /** 마감한 달에서 몇 달 뒤에 결제하는가 (0~2). 0 이면 결제일이 마감일보다 뒤여야 한다. */
+  payMonthOffset: number;
+  /** 대금이 나가는 계좌. 대금을 적을 때 기본값이 된다. */
+  accountId: string | null;
+  currency: string;
+  order: number;
+  /** 보관한 순간. 고르는 자리에서 빠질 뿐 미결제 계산은 그대로다(빚은 보관해도 남는다). */
+  archivedAt: string | null;
+  createdAt: string;
+  updatedAt: string;
 }
 
 /** 예정 · 실제. */
@@ -598,7 +643,7 @@ export interface LedgerSettings {
 /** 백업이 담는 컬렉션. */
 export type BackupCollection =
   | 'entries' | 'accounts' | 'debts' | 'pins' | 'budgets' | 'reserves'
-  | 'categories' | 'categoryBudgets' | 'ledgerNotes' | 'annualBudgets';
+  | 'categories' | 'categoryBudgets' | 'ledgerNotes' | 'annualBudgets' | 'cards';
 
 export type ThemePref = 'system' | 'light' | 'dark';
 /** 글씨 크기. 'auto' 는 브라우저·OS 설정을 따른다는 뜻이다. */

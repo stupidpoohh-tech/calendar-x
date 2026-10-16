@@ -50,11 +50,12 @@ import { DEFAULT_CURRENCY } from './constants';
 import { addDaysISO, daysBetween, localDateOf, normalizeDate, parseDate, toISO } from './date';
 import { effectiveEndDate } from './entry';
 import { inAnyBudget, reservedOn, reserveProtects } from './budget';
+import { cardRemainders, cycleRef, isCardPayment, paymentCycleKey } from './card';
 import {
   ambiguousActuals, balanceInclusion, cashSignOf, confirmedKey, confirmedSetOf, isActual,
 } from './ledger';
 import { isVirtualEntry } from './recurrence';
-import type { Account, Budget, DateISO, Entry, Reserve } from './types';
+import type { Account, Budget, Card, DateISO, Entry, Reserve } from './types';
 
 /**
  * 한도에서 미리 빠져 있는 것들.
@@ -73,6 +74,13 @@ export interface Reservations {
    * 세면 창 밖의 지난 사용이 빠진다). 없으면 사용액 0 — P3 이전과 같은 숫자다.
    */
   reserveUsage?: ReadonlyMap<string, number>;
+  /**
+   * 신용카드(P4)와 카드에 걸린 거래 **전량**(`money.cardId != null`). 둘 다 주어야 카드 미결제가 한도에서 빠진다.
+   * 카드 미결제는 계산 창이 아니라 이 목록에서 센다 — 창 밖의 지난 사용도 아직 갚지 않았으면 빚이다.
+   * 없으면 미결제 0 — P4 이전과 같은 숫자다.
+   */
+  cards?: readonly Card[];
+  cardEntries?: readonly Entry[];
 }
 
 const NO_BUDGETS: readonly Budget[] = [];
@@ -525,7 +533,106 @@ export function limitOn(
     .filter((o) => !inAnyBudget(o.entry, budgets));
   total += netOf(actuals);
   // 확보해 둔 돈(생활비 예산 · 세이브)은 쓸 수 있는 한도에서 미리 빠진다.
-  return total - reservedOn(budgets, reserves, entries, date, from, accounts, today, res.reserveUsage);
+  total -= reservedOn(budgets, reserves, entries, date, from, accounts, today, res.reserveUsage);
+  // 아직 갚지 않은 카드 사용(P4) 가운데 위 흐름에 대금으로 아직 잡히지 않은 몫.
+  return total - cardHoldOn(accounts, entries, date, today, res);
+}
+
+/*
+  ── 카드 미결제 (P4) ──────────────────────────────────────────
+
+  카드로 쓴 돈은 그날 현금이 나가지 않지만(`cashSignOf` 0) 갚아야 할 빚이다. 한도에서는 회차마다 **한 번만** 뺀다.
+
+    회차의 남은 금액 R  = 청구(실제 카드 사용) − 납부(실제 카드 대금)            (`card.cardRemainders`)
+    예정 대금 P(d)      = 그 회차를 가리키는 예정 대금 가운데 d 까지 흐름에 잡힌 몫
+    카드 보호(d)        = max(0, R − P(d))
+
+  예정 대금은 이미 위의 흐름에서 출금으로 빠졌으므로 보호에서 그만큼 덜어 낸다. 회차 하나가 한도에서 차지하는 자리는
+  언제나 max(R, P(d)) 이다 — 사용자가 적은 예정이 크면 그 예정을, 작거나 없으면 실제 빚을 따른다.
+
+  실제 대금을 적으면 R 이 줄고 그 대금이 (잔고 밖이면) 실제 거래로 빠진다. 잔고에 반영하면 잔고에서 빠져 있다.
+  어느 쪽이든 같은 돈은 한 번 빠진다 — 적기 전 · 적은 뒤 · 잔고 반영 뒤의 가용이 같다(`card.test.ts`).
+
+  카드 사용을 세이브에 걸면(P3 · P4) 세이브의 남은 금액이 그만큼 줄고 카드 보호가 그만큼 는다. 같은 돈을 지키는
+  자리가 세이브에서 카드 빚으로 옮겨 갈 뿐 두 번 빠지지 않는다.
+*/
+
+/** `카드id|회차` → 그 회차를 가리키는 예정 대금 가운데 (after, through] 의 합. */
+function plannedCardPayments(
+  entries: readonly Entry[], after: DateISO, through: DateISO,
+  confirmed: ReadonlySet<string>, budgets: readonly Budget[],
+): Map<string, number> {
+  const out = new Map<string, number>();
+  for (const entry of entries) {
+    if (!isCardPayment(entry) || isActual(entry) || inAnyBudget(entry, budgets)) continue;
+    for (const o of occurrences([entry], after, through, confirmed)) {
+      const ref = cycleRef(entry.money!.cardId!, paymentCycleKey(entry, o.date));
+      out.set(ref, (out.get(ref) ?? 0) + o.amountMinor);
+    }
+  }
+  return out;
+}
+
+/** 카드 미결제 가운데 그 날까지 대금으로 흐름에 잡히지 않은 몫 — 한도에서 따로 빼는 금액. */
+export function cardHoldOn(
+  accounts: readonly Account[], entries: readonly Entry[], date: DateISO, today: DateISO, res: Reservations = {},
+): number {
+  if (!res.cards?.length || !res.cardEntries?.length) return 0;
+  assertOriginals(res.cardEntries);
+  const remainders = cardRemainders(res.cards, res.cardEntries, today);
+  if (remainders.size === 0) return 0;
+  const from = unsettledAfter(accounts, today);
+  const planned = plannedCardPayments(entries, from, normalizeDate(date), confirmedSetOf(entries), res.budgets ?? NO_BUDGETS);
+  let hold = 0;
+  for (const [ref, r] of remainders) hold += Math.max(0, r.remainingMinor - (planned.get(ref) ?? 0));
+  return hold;
+}
+
+/**
+ * 화면의 '확보' 가운데 카드 미결제 몫 — 그 날의 예상 잔고에 예상 대금으로도 아직 잡히지 않은 빚.
+ * `확보 = 예상 잔고 − 가용` 이고, 예상 잔고는 결제일이 지난 예상 대금을 이미 뺐으므로 그만큼 덜어 낸다.
+ */
+export function cardHeldOn(
+  accounts: readonly Account[], entries: readonly Entry[], date: DateISO, today: DateISO, res: Reservations = {},
+): number {
+  const d = normalizeDate(date);
+  const counted = cardDueEstimates(accounts, entries, today, res).reduce((t, c) => (c.date <= d ? t + c.amountMinor : t), 0);
+  return cardHoldOn(accounts, entries, date, today, res) - counted;
+}
+
+/** 아직 적지 않은 카드 대금의 예상 — 예상 잔고가 결제일에 빼는 금액. */
+export interface CardDueEstimate {
+  cardId: string;
+  cycle: string;
+  /** 결제일. 지났으면 오늘(아직 갚지 않은 빚이다). */
+  date: DateISO;
+  /** 남은 금액 − 그 회차를 가리키는 예정 대금. */
+  amountMinor: number;
+}
+
+/**
+ * 예상 잔고에 넣을 카드 대금. 사용자가 그 회차의 예정 대금을 적었으면 그 예정이 먼저다 — 남은 금액 가운데 예정이
+ * 덮지 못한 몫만 결제일에 둔다. 같은 돈을 예정과 예상에서 두 번 빼지 않는다.
+ */
+export function cardDueEstimates(
+  accounts: readonly Account[], entries: readonly Entry[], today: DateISO, res: Reservations = {},
+): CardDueEstimate[] {
+  if (!res.cards?.length || !res.cardEntries?.length) return [];
+  assertOriginals(res.cardEntries);
+  const remainders = cardRemainders(res.cards, res.cardEntries, today);
+  if (remainders.size === 0) return [];
+  const from = unsettledAfter(accounts, today);
+  let last = today;
+  for (const r of remainders.values()) if (r.payDate > last) last = r.payDate;
+  const planned = plannedCardPayments(entries, from, addDaysISO(last, SEARCH_DAYS), confirmedSetOf(entries), res.budgets ?? NO_BUDGETS);
+  const out: CardDueEstimate[] = [];
+  for (const [ref, r] of remainders) {
+    const amount = r.remainingMinor - (planned.get(ref) ?? 0);
+    if (amount <= 0) continue;
+    const [cardId, cycle] = ref.split('|') as [string, string];
+    out.push({ cardId, cycle, date: r.payDate > today ? r.payDate : today, amountMinor: amount });
+  }
+  return out.sort((a, b) => a.date.localeCompare(b.date));
 }
 
 /**
@@ -609,13 +716,18 @@ export function confirmedBalance(accounts: readonly Account[]): number {
  */
 export function projectedBalanceOn(
   accounts: readonly Account[], entries: readonly Entry[], date: DateISO, today: DateISO,
+  /** 카드(P4)만 본다 — 아직 적지 않은 대금을 결제일에 뺀다(`cardDueEstimates`). 생활비 · 세이브는 빼지 않는다. */
+  res: Reservations = {},
 ): number {
   assertOriginals(entries);
   const from = unsettledAfter(accounts, today);
   const d = normalizeDate(date);
+  const cardDue = cardDueEstimates(accounts, entries, today, res)
+    .reduce((t, c) => (c.date <= d ? t + c.amountMinor : t), 0);
   return confirmedBalance(accounts)
     + netOf(occurrences(entries, from, d))
-    + netOf(unreflectedActuals(accounts, entries, d));
+    + netOf(unreflectedActuals(accounts, entries, d))
+    - cardDue;
 }
 
 /** 한 날짜의 잔고 보기. 화면은 이 하나로 셋을 함께 적는다. */
@@ -636,7 +748,7 @@ export function balanceViewOn(
   accounts: readonly Account[], entries: readonly Entry[], date: DateISO, today: DateISO,
   res: Reservations = {},
 ): BalanceView {
-  const projected = projectedBalanceOn(accounts, entries, date, today);
+  const projected = projectedBalanceOn(accounts, entries, date, today, res);
   const available = limitOn(accounts, entries, date, today, res);
   return {
     date,

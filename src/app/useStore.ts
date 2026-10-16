@@ -5,13 +5,13 @@ import { getFirebase } from '../data/firebase';
 import {
   monthWindow, subscribeAccounts, subscribeBudgets, subscribeAnnualBudgets, subscribeCategories, subscribeCategoryBudgets,
   subscribeDebts, subscribeEntriesForMonths, subscribeLedgerNotes, subscribeLedgerSettings,
-  subscribePins, subscribeRecurringEntries, subscribeReserveLinkedEntries, subscribeReserves, tideWindow, tideWindowReaches,
+  subscribePins, subscribeRecurringEntries, subscribeReserveLinkedEntries, subscribeReserves, subscribeCards, subscribeCardLinkedEntries, tideWindow, tideWindowReaches,
   earliestAsOfOf,
   type SnapMeta,
 } from '../data/repo';
 import { DEFAULT_SETTLE_DAY } from '../domain/period';
 import type {
-  AnnualBudget, Account, Budget, Category, CategoryBudget, Debt, Entry, LedgerNote, LedgerSettings, Pin, Reserve, YearMonth,
+  AnnualBudget, Account, Budget, Card, Category, CategoryBudget, Debt, Entry, LedgerNote, LedgerSettings, Pin, Reserve, YearMonth,
 } from '../domain/types';
 
 export interface StoreState {
@@ -47,6 +47,13 @@ export interface StoreState {
   reserveLinked: Entry[];
   /** 세이브마다 연결된 실제 지출의 합 — `reserveLinked` 에서 센다(`budget.reserveUsageOf`). */
   reserveUsage: ReadonlyMap<string, number>;
+  /** 신용카드(P4). 몇 장뿐이라 전량 받는다. */
+  cards: Card[];
+  /**
+   * 카드에 걸린 거래 전량(P4, 카드 사용 · 카드 대금, 실제 · 예정). 달과 무관하게 받는다 — 미결제는 이 목록에서 센다.
+   * 한도를 바꾸는 값이라 계산 상태(`calc`)가 이 구독까지 종합한다.
+   */
+  cardLinked: Entry[];
   /**
    * 가계부 결산 — 카테고리 · 카테고리 예산 · 정산 시작일.
    *
@@ -177,7 +184,7 @@ const DEFAULT_LEDGER: LedgerSettings = { settleDay: DEFAULT_SETTLE_DAY };
 
 const EMPTY: StoreState = {
   entries: [], tideEntries: [], tideMonths: [],
-  accounts: [], debts: [], pins: [], budgets: [], reserves: [], reserveLinked: [], reserveUsage: new Map(),
+  accounts: [], debts: [], pins: [], budgets: [], reserves: [], reserveLinked: [], reserveUsage: new Map(), cards: [], cardLinked: [],
   categories: [], categoryBudgets: [], annualBudgets: [], ledger: DEFAULT_LEDGER, ledgerMeta: FEED_LOADING,
   ledgerNotes: [], ledgerNotesFeed: FEED_LOADING,
   display: FEED_LOADING, calc: FEED_LOADING,
@@ -231,6 +238,10 @@ export function useStore(uid: string | null, cursorISO: string, todayISO: string
   const [reservesFeed, setReservesFeed] = useState<FeedState>(FEED_LOADING);
   const [reserveLinked, setReserveLinked] = useState<Entry[]>([]);
   const [reserveLinkedFeed, setReserveLinkedFeed] = useState<FeedState>(FEED_LOADING);
+  const [cards, setCards] = useState<Card[]>([]);
+  const [cardsFeed, setCardsFeed] = useState<FeedState>(FEED_LOADING);
+  const [cardLinked, setCardLinked] = useState<Entry[]>([]);
+  const [cardLinkedFeed, setCardLinkedFeed] = useState<FeedState>(FEED_LOADING);
   const [categories, setCategories] = useState<Category[]>([]);
   const [categoriesFeed, setCategoriesFeed] = useState<FeedState>(FEED_LOADING);
   const [categoryBudgets, setCategoryBudgets] = useState<CategoryBudget[]>([]);
@@ -265,6 +276,8 @@ export function useStore(uid: string | null, cursorISO: string, todayISO: string
     setBudgets([]); setBudgetsFeed(FEED_LOADING);
     setReserves([]); setReservesFeed(FEED_LOADING);
     setReserveLinked([]); setReserveLinkedFeed(FEED_LOADING);
+    setCards([]); setCardsFeed(FEED_LOADING);
+    setCardLinked([]); setCardLinkedFeed(FEED_LOADING);
     setCategories([]); setCategoriesFeed(FEED_LOADING);
     setCategoryBudgets([]); setCategoryBudgetsFeed(FEED_LOADING);
     setAnnualBudgets([]); setAnnualBudgetsFeed(FEED_LOADING);
@@ -380,6 +393,16 @@ export function useStore(uid: string | null, cursorISO: string, todayISO: string
         own(uid, (items, meta) => { setReserveLinked(items); setReserveLinkedFeed(feedFrom(items.length, meta)); }),
         own(uid, (scope, err) => failWith(setReserveLinkedFeed, scope, err)),
       ),
+      subscribeCards(
+        db, uid,
+        own(uid, (items, meta) => { setCards(items); setCardsFeed(feedFrom(items.length, meta)); }),
+        own(uid, (scope, err) => failWith(setCardsFeed, scope, err)),
+      ),
+      subscribeCardLinkedEntries(
+        db, uid,
+        own(uid, (items, meta) => { setCardLinked(items); setCardLinkedFeed(feedFrom(items.length, meta)); }),
+        own(uid, (scope, err) => failWith(setCardLinkedFeed, scope, err)),
+      ),
       subscribeCategories(
         db, uid,
         own(uid, (items, meta) => { setCategories(items); setCategoriesFeed(feedFrom(items.length, meta)); }),
@@ -441,8 +464,10 @@ export function useStore(uid: string | null, cursorISO: string, todayISO: string
       ? { ...FEED_LOADING, outOfRange: true }
       : combineFeeds([
         tideNow?.feed ?? FEED_LOADING, recurringFeed, accountsFeed, budgetsFeed, reservesFeed, reserveLinkedFeed,
+        cardsFeed, cardLinkedFeed,
       ])),
-    [tideOutOfRange, tideNow?.feed, recurringFeed, accountsFeed, budgetsFeed, reservesFeed, reserveLinkedFeed],
+    [tideOutOfRange, tideNow?.feed, recurringFeed, accountsFeed, budgetsFeed, reservesFeed, reserveLinkedFeed,
+      cardsFeed, cardLinkedFeed],
   );
 
   // 세이브 사용액(P3). 연결된 거래 전량에서 센다 — 계산 창의 거래만 세면 창 밖의 지난 사용이 빠진다.
@@ -458,7 +483,7 @@ export function useStore(uid: string | null, cursorISO: string, todayISO: string
 
   return {
     entries, tideEntries, tideMonths,
-    accounts, debts, pins, budgets, reserves, reserveLinked, reserveUsage,
+    accounts, debts, pins, budgets, reserves, reserveLinked, reserveUsage, cards, cardLinked,
     categories, categoryBudgets, annualBudgets, ledger, ledgerMeta, ledgerNotes, ledgerNotesFeed,
     display, calc,
     loading: !display.ready, error, rulesBlocked,

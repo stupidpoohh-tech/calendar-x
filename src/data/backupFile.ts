@@ -28,6 +28,7 @@
  * | v8 | `version: 8` | v7 과 같은 구조. 세이브에 보호 · 목표 · 보관(P1)이 실릴 수 있다 — 없으면 보호 켬 |
  * | v9 | `version: 9` | v8 + `annualBudgets`(연간 카테고리 예산, P2) **필수** |
  * | v10 | `version: 10` | v9 와 같은 구조. 지출에 세이브 연결(`money.reserveId`, P3)이 실릴 수 있다 |
+ * | v11 | `version: 11` | v10 + `cards`(신용카드, P4) **필수**. 거래에 카드 연결(`money.cardId` · `cardCycle`)이 실릴 수 있다 |
  *
  * 없는 컬렉션을 빈 배열로 넘겨 짚지 않는다. v2·v3 파일에 `debts` 가 없다면 그건
  * 빈 백업이 아니라 깨진 파일이다.
@@ -44,14 +45,14 @@ import type { BackupCollection } from '../domain/types';
 import type { BackupData } from './backup';
 import {
   accountFromDoc, budgetFromDoc, categoryBudgetFromDoc, categoryFromDoc, debtFromDoc,
-  annualBudgetFromDoc, entryFromDoc, LEDGER_NOTE_MAX, ledgerNoteFromDoc, ledgerSettingsFromDoc, pinFromDoc, recoveryRuleFromDoc, reserveFromDoc,
+  annualBudgetFromDoc, cardFromDoc, entryFromDoc, LEDGER_NOTE_MAX, ledgerNoteFromDoc, ledgerSettingsFromDoc, pinFromDoc, recoveryRuleFromDoc, reserveFromDoc,
 } from './converters';
 import { convertLegacyItems } from './migrate';
 
-export const SUPPORTED_VERSIONS = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10] as const;
-export const LATEST_VERSION = 10;
+export const SUPPORTED_VERSIONS = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11] as const;
+export const LATEST_VERSION = 11;
 
-export type BackupFormat = 'legacy' | 'v2' | 'v3' | 'v4' | 'v5' | 'v6' | 'v7' | 'v8' | 'v9' | 'v10';
+export type BackupFormat = 'legacy' | 'v2' | 'v3' | 'v4' | 'v5' | 'v6' | 'v7' | 'v8' | 'v9' | 'v10' | 'v11';
 
 /** 파일 한 곳이 왜 들어갈 수 없는지. */
 export interface FileProblem {
@@ -344,16 +345,36 @@ function checkLedgerRaw(c: Collector, where: string, e: Raw, m: Raw): void {
     손으로 고친 파일이고, 규칙도 거절한다 — 저장하며 조용히 떼어 내면 세이브 사용이 말없이 사라지므로 먼저 막는다.
   */
   optStr(c, `${at}.reserveId`, m.reserveId, LIMITS.refId);
+  const hasCard = typeof m.cardId === 'string' && !!m.cardId;
   if (typeof m.reserveId === 'string' && m.reserveId) {
     if (m.type !== 'expense') c.add(`${at}.reserveId`, `세이브는 지출에만 겁니다: ${describe(m.type)}`);
-    if (m.flow !== undefined && m.flow !== null && m.flow !== 'normal') {
-      c.add(`${at}.reserveId`, `세이브는 일반 지출에만 겁니다: ${describe(m.flow)}`);
+    // 일반 지출, 또는 등록한 카드의 카드 사용(P4).
+    if (m.flow !== undefined && m.flow !== null && m.flow !== 'normal' && !(m.flow === 'cardSpend' && hasCard)) {
+      c.add(`${at}.reserveId`, `세이브는 일반 지출 · 카드를 정한 카드 사용에만 겁니다: ${describe(m.flow)}`);
     }
     if ((typeof m.budgetId === 'string' && m.budgetId) || (typeof m.debtId === 'string' && m.debtId)) {
       c.add(`${at}.reserveId`, '세이브와 생활비 · 대출을 함께 걸 수 없습니다 — 사용처는 하나입니다.');
     }
     if (e.recurrence !== undefined && e.recurrence !== null) {
       c.add(`${at}.reserveId`, '반복 항목은 세이브에 걸지 않습니다.');
+    }
+  }
+
+  /*
+    카드 연결 (P4). 카드 사용 · 카드 대금에만 붙고, 대금의 회차는 `YYYY-MM` 이다. 규칙도 같은 모양만 받는다.
+    없는 카드를 가리키는 연결은 받는다 — 계산이 무시하고 입력 창이 '지워진 카드' 로 보여 준다.
+  */
+  optStr(c, `${at}.cardId`, m.cardId, LIMITS.refId);
+  if (hasCard && !(m.type === 'expense' && (m.flow === 'cardSpend' || m.flow === 'cardPayment'))) {
+    c.add(`${at}.cardId`, `카드는 카드 사용 · 카드 대금에만 붙습니다: ${describe(m.flow)}`);
+  }
+  if (m.cardCycle !== undefined && m.cardCycle !== null) {
+    if (typeof m.cardCycle !== 'string' || !/^\d{4}-(0[1-9]|1[0-2])$/.test(m.cardCycle)) {
+      c.add(`${at}.cardCycle`, `YYYY-MM 이 아닙니다: ${describe(m.cardCycle)}`);
+    } else if (!hasCard || m.flow !== 'cardPayment') {
+      c.add(`${at}.cardCycle`, '청구 회차는 카드를 정한 카드 대금에만 붙습니다.');
+    } else if (e.recurrence !== undefined && e.recurrence !== null) {
+      c.add(`${at}.cardCycle`, '반복 대금은 회차마다 그 달을 갚습니다 — 회차를 박아 둘 수 없습니다.');
     }
   }
 
@@ -553,6 +574,28 @@ function checkAnnualBudgetRaw(c: Collector, where: string, r: Raw): void {
   }
 }
 
+/**
+ * 신용카드(v11). 이름 · 마감일 · 결제일(1~31) · 결제 달 수(0~2, 0 이면 결제일 > 마감일) — 규칙이 받는 모양과 같다.
+ */
+function checkCardRaw(c: Collector, where: string, r: Raw): void {
+  reqStr(c, `${where}.name`, r.name, LIMITS.name);
+  if (typeof r.name === 'string' && !r.name.trim()) c.add(`${where}.name`, '카드 이름이 비어 있습니다.');
+  for (const k of ['closeDay', 'payDay'] as const) {
+    if (!isIntNum(r[k]) || (r[k] as number) < 1 || (r[k] as number) > 31) c.add(`${where}.${k}`, `1~31 의 정수가 아닙니다: ${describe(r[k])}`);
+  }
+  const off = r.payMonthOffset;
+  if (!isIntNum(off) || off < 0 || off > 2) c.add(`${where}.payMonthOffset`, `0~2 의 정수가 아닙니다: ${describe(off)}`);
+  else if (off === 0 && isIntNum(r.payDay) && isIntNum(r.closeDay) && r.payDay <= r.closeDay) {
+    c.add(`${where}.payDay`, '마감한 그 달에 결제하려면 결제일이 마감일보다 뒤여야 합니다.');
+  }
+  optStr(c, `${where}.accountId`, r.accountId, LIMITS.accountId);
+  reqStr(c, `${where}.currency`, r.currency);
+  if (r.order !== undefined && r.order !== null && typeof r.order !== 'number') c.add(`${where}.order`, `숫자가 아닙니다: ${describe(r.order)}`);
+  optStr(c, `${where}.archivedAt`, r.archivedAt, LIMITS.checkedAt);
+  optStr(c, `${where}.createdAt`, r.createdAt, LIMITS.checkedAt);
+  optStr(c, `${where}.updatedAt`, r.updatedAt, LIMITS.checkedAt);
+}
+
 const CHECKERS: Record<BackupCollection, (c: Collector, where: string, v: Raw) => void> = {
   entries: checkEntryRaw,
   accounts: checkAccountRaw,
@@ -564,6 +607,7 @@ const CHECKERS: Record<BackupCollection, (c: Collector, where: string, v: Raw) =
   categoryBudgets: checkCategoryBudgetRaw,
   ledgerNotes: checkLedgerNoteRaw,
   annualBudgets: checkAnnualBudgetRaw,
+  cards: checkCardRaw,
 };
 
 /** 컬렉션 하나를 통째로 본다. 없으면 그 자체가 문제다 (v2·v3 명세). */
@@ -672,12 +716,13 @@ export function readBackupFile(text: string): ReadResult {
     return { ok: false, problems: [{ where: 'version', reason: '버전이 없습니다. 백업 파일이 맞는지 확인해 주세요.' }] };
   }
 
-  const format: BackupFormat = version >= 10 ? 'v10' : version === 9 ? 'v9' : version === 8 ? 'v8' : version === 7 ? 'v7' : version === 6 ? 'v6' : version === 5 ? 'v5'
+  const format: BackupFormat = version >= 11 ? 'v11' : version === 10 ? 'v10' : version === 9 ? 'v9' : version === 8 ? 'v8' : version === 7 ? 'v7' : version === 6 ? 'v6' : version === 5 ? 'v5'
     : version === 4 ? 'v4' : version === 3 ? 'v3' : 'v2';
   const hasPockets = version >= 4;
   const hasCategories = version >= 6;
   const hasNotes = version >= 7;
   const hasAnnual = version >= 9;
+  const hasCards = version >= 11;
 
   // ---- 컬렉션 ----
   const entries = checkCollection(c, 'entries', obj.entries);
@@ -705,6 +750,10 @@ export function readBackupFile(text: string): ReadResult {
   const annualBudgets = hasAnnual
     ? checkCollection(c, 'annualBudgets', obj.annualBudgets)
     : checkOptionalCollection(c, 'annualBudgets', obj.annualBudgets);
+  // v11 부터 필수다. v10 까지는 카드가 없던 시절이라 없는 것이 정상이다.
+  const cards = hasCards
+    ? checkCollection(c, 'cards', obj.cards)
+    : checkOptionalCollection(c, 'cards', obj.cards);
   if (obj.ledger !== undefined && obj.ledger !== null) {
     if (!isObj(obj.ledger)) {
       c.add('ledger', `객체가 아닙니다: ${describe(obj.ledger)}`);
@@ -742,6 +791,7 @@ export function readBackupFile(text: string): ReadResult {
         categoryBudgets: categoryBudgets.map((r) => categoryBudgetFromDoc(r.id as string, r)),
         ledgerNotes: ledgerNotes.map((r) => ledgerNoteFromDoc(r.id as string, r)),
         annualBudgets: annualBudgets.map((r) => annualBudgetFromDoc(r.id as string, r)),
+        cards: cards.map((r) => cardFromDoc(r.id as string, r)),
         ledger: isObj(obj.ledger) ? ledgerSettingsFromDoc(obj.ledger) : null,
         recovery: isObj(obj.recovery) ? recoveryRuleFromDoc(obj.recovery) : null,
       },
@@ -785,6 +835,7 @@ function readLegacy(c: Collector, items: unknown[]): ReadResult {
         categoryBudgets: [],
         ledgerNotes: [],
         annualBudgets: [],
+        cards: [],
         ledger: null,
         recovery: null,
       },

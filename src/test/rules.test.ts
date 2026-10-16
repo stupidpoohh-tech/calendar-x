@@ -593,6 +593,59 @@ describe('가계부 원장', () => {
     });
   });
 
+  describe('신용카드 연결 (P4)', () => {
+    const cardUse = (over: Record<string, unknown> = {}, top: Record<string, unknown> = {}) =>
+      ledgerEntry(ledgerMoney({ status: 'actual', flow: 'cardSpend', cardId: 'life', ...over }), { schema: 4, ...top });
+    const cardPay = (over: Record<string, unknown> = {}, top: Record<string, unknown> = {}) =>
+      ledgerEntry(ledgerMoney({ status: 'actual', flow: 'cardPayment', cardId: 'life', cardCycle: '2026-11', ...over }), { schema: 4, ...top });
+
+    it('카드 사용 · 카드 대금(회차 포함)에 카드를 건다 — 예정 · 반복 예정 대금도', async () => {
+      await assertSucceeds(setDoc(doc(db(ME), path('c1')), cardUse()));
+      await assertSucceeds(setDoc(doc(db(ME), path('c2')), cardPay()));
+      await assertSucceeds(setDoc(doc(db(ME), path('c3')), cardPay({ status: 'planned' })));
+      await assertSucceeds(setDoc(doc(db(ME), path('c4')), cardPay({ status: 'planned', cardCycle: null }, {
+        isRecurring: true, recurrence: { freq: 'monthly', interval: 1, until: null, count: null },
+      })));
+    });
+
+    it('카드는 카드 흐름에만 — 일반 지출 · 수입에는 걸 수 없다', async () => {
+      await assertFails(setDoc(doc(db(ME), path('x1')), cardUse({ flow: 'normal' })));
+      await assertFails(setDoc(doc(db(ME), path('x2')), cardUse({ type: 'income' })));
+      await assertFails(setDoc(doc(db(ME), path('x3')), cardUse({ cardId: 7 })));
+    });
+
+    it('청구 회차는 카드를 정한 반복 아닌 대금에만, YYYY-MM 모양으로만', async () => {
+      await assertFails(setDoc(doc(db(ME), path('x1')), cardPay({ cardCycle: '2026-13' })));
+      await assertFails(setDoc(doc(db(ME), path('x2')), cardUse({ cardCycle: '2026-11' })));
+      await assertFails(setDoc(doc(db(ME), path('x3')), cardPay({ cardId: null })));
+      await assertFails(setDoc(doc(db(ME), path('x4')), cardPay({ status: 'planned' }, {
+        isRecurring: true, recurrence: { freq: 'monthly', interval: 1, until: null, count: null },
+      })));
+    });
+
+    it('세이브는 카드를 정한 카드 사용에 걸 수 있다 — 카드 없는 카드 사용 · 대금에는 안 된다', async () => {
+      await assertSucceeds(setDoc(doc(db(ME), path('s1')), cardUse({ reserveId: 'trip' })));
+      await assertFails(setDoc(doc(db(ME), path('x1')), cardUse({ reserveId: 'trip', cardId: null })));
+      await assertFails(setDoc(doc(db(ME), path('x2')), cardPay({ reserveId: 'trip' })));
+    });
+
+    it('남은 못 쓴다', async () => {
+      await assertFails(setDoc(doc(db(OTHER), path('c1')), cardUse()));
+    });
+
+    it('카드가 실린 거래는 판 3 쓰기로 덮을 수 없다 — 그 필드를 모르는 앱이 연결을 지우지 못한다', async () => {
+      await assertSucceeds(setDoc(doc(db(ME), path('c1')), cardUse()));
+      // P3 앱이 고친 모양: 카드가 없고 판 3.
+      await assertFails(setDoc(doc(db(ME), path('c1')), cardUse({ cardId: null }, { schema: 3 })));
+      const snap = await getDoc(doc(db(ME), path('c1')));
+      expect(snap.data()?.money?.cardId).toBe('life');
+      // 판 4 는 연결을 풀 수 있고, 부분 갱신 · 지우기는 막지 않는다.
+      await assertSucceeds(updateDoc(doc(db(ME), path('c1')), { title: '부분' }));
+      await assertSucceeds(setDoc(doc(db(ME), path('c1')), cardUse({ flow: 'normal', cardId: null })));
+      await assertSucceeds(deleteDoc(doc(db(ME), path('c1'))));
+    });
+  });
+
   describe('계좌의 잔고 반영 목록', () => {
     const account = {
       name: '주계좌', balanceMinor: 1350000, currency: 'KRW', asOf: '2026-08-19',
@@ -618,6 +671,32 @@ describe('가계부 원장', () => {
       await assertSucceeds(setDoc(doc(db(ME), apath), { ...account, reflectedEntryIds: [], schema: 2 }));
       await assertSucceeds(setDoc(doc(db(ME), apath), { ...account, balanceMinor: 1 }));
     });
+  });
+});
+
+describe('신용카드 (P4)', () => {
+  const card = (over: Record<string, unknown> = {}) => ({
+    name: '생활 카드', closeDay: 31, payDay: 25, payMonthOffset: 1, accountId: 'a1', currency: 'KRW',
+    order: 0, archivedAt: null, createdAt: 'x', updatedAt: 'x', ...over,
+  });
+  const cpath = (id: string) => `users/${ME}/cards/${id}`;
+
+  it('내 카드만 쓰고 읽는다', async () => {
+    await assertSucceeds(setDoc(doc(db(ME), cpath('c1')), card()));
+    await assertFails(setDoc(doc(db(OTHER), cpath('c2')), card()));
+    await assertFails(getDoc(doc(db(OTHER), cpath('c1'))));
+    await assertSucceeds(setDoc(doc(db(ME), cpath('c1')), card({ archivedAt: '2026-10-16T00:00:00.000Z' })));
+    await assertSucceeds(deleteDoc(doc(db(ME), cpath('c1'))));
+  });
+
+  it('마감일 · 결제일 1~31, 결제 달 수 0~2, 그 달 결제는 결제일이 마감일보다 뒤', async () => {
+    await assertFails(setDoc(doc(db(ME), cpath('x1')), card({ closeDay: 0 })));
+    await assertFails(setDoc(doc(db(ME), cpath('x2')), card({ payDay: 32 })));
+    await assertFails(setDoc(doc(db(ME), cpath('x3')), card({ payMonthOffset: 3 })));
+    await assertFails(setDoc(doc(db(ME), cpath('x4')), card({ payMonthOffset: 0, closeDay: 25, payDay: 25 })));
+    await assertSucceeds(setDoc(doc(db(ME), cpath('ok')), card({ payMonthOffset: 0, closeDay: 5, payDay: 20 })));
+    await assertFails(setDoc(doc(db(ME), cpath('x5')), card({ name: '' })));
+    await assertFails(setDoc(doc(db(ME), cpath('x6')), card({ closeDay: 1.5 })));
   });
 });
 

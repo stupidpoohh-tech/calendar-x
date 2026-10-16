@@ -14,12 +14,12 @@ import { budgetCovers } from '../domain/budget';
 import { pocketChoiceFor } from '../domain/confirm';
 import { pocketEligible } from '../domain/budget';
 import type {
-  Account, Budget, Category, Debt, Entry, Reserve, EntryKind, MoneyFields, NewMoneyType, RepeatFreq, TaskStatus,
+  Account, Budget, Card, Category, Debt, Entry, Reserve, EntryKind, MoneyFields, NewMoneyType, RepeatFreq, TaskStatus,
 } from '../domain/types';
 import { Icon } from './Icon';
 import { FlowChips } from './FlowChips';
 import { LedgerFields } from './LedgerFields';
-import { flowLabel, flowPickOf, flowPickPatch, type FlowPick } from './ledgerFlows';
+import { cardPaymentLabel, flowLabel, flowPickOf, flowPickPatch, type FlowPick } from './ledgerFlows';
 import { moneyFlowOf } from '../domain/ledger';
 import { PICKER } from './pickerField';
 import { isComposingEnter } from './ime';
@@ -34,6 +34,9 @@ interface Props {
   budgets: readonly Budget[];
   /** 세이브(P3). 일반 지출에 '사용할 세이브' 칸을 띄운다. */
   reserves?: readonly Reserve[];
+  /** 신용카드와 카드 거래 전량(P4). 지출의 결제수단 · 카드 대금의 카드 · 회차를 고른다. */
+  cards?: readonly Card[];
+  cardEntries?: readonly Entry[];
   /** 상환을 걸 수 있는 대출. */
   debts: readonly Debt[];
   /** 같이 보기 보드가 있는가. 없으면 비공개 토글을 띄울 이유가 없다. */
@@ -88,6 +91,8 @@ function moneyUseOf(money: Entry['money']): MoneyUse {
 const NO_CATEGORIES: readonly Category[] = [];
 const NO_ACCOUNTS: readonly Account[] = [];
 const NO_RESERVES: readonly Reserve[] = [];
+const NO_CARDS: readonly Card[] = [];
+const NO_ENTRIES: readonly Entry[] = [];
 
 /**
  * 새 실제 지출의 생활비 주머니 기본값.
@@ -105,7 +110,7 @@ function withDefaultPocket(e: Entry, budgets: readonly Budget[]): Entry {
 }
 
 export function EntryModal({
-  open, mode, initial, allTags, linkableTasks, budgets, reserves = NO_RESERVES, debts, sharedActive = false,
+  open, mode, initial, allTags, linkableTasks, budgets, reserves = NO_RESERVES, cards = NO_CARDS, cardEntries = NO_ENTRIES, debts, sharedActive = false,
   categories = NO_CATEGORIES, categoriesReady = true, onSeedCategories,
   accounts = NO_ACCOUNTS, occurrenceDate = null, onConfirm, onUnconfirm,
   onSave, onDelete, onClose, ledgerVisible = true,
@@ -161,6 +166,7 @@ export function EntryModal({
   const isOutflow = isMoney && (moneyDef?.sign ?? 0) < 0;
   const moneyUse = moneyUseOf(form.money);
   const flowPick = flowPickOf(form.money);
+  const isCardFlow = isMoney && ['cardSpend', 'cardPayment'].includes(moneyFlowOf(form.money));
   const pickedBudget = budgets.find((b) => b.id === form.money?.budgetId) ?? null;
   const outsideBudget = pickedBudget !== null
     && (form.startDate < pickedBudget.startDate || form.startDate > pickedBudget.endDate);
@@ -371,6 +377,7 @@ export function EntryModal({
                 <FlowChips
                   money={form.money}
                   legacyLabel={legacyDef ? legacyDef.label : flowLabel(moneyFlowOf(form.money))}
+                  currentLabel={cardPaymentLabel(form.money, cards)}
                   onPick={setFlow}
                 />
               )}
@@ -401,14 +408,17 @@ export function EntryModal({
                     debts={debts}
                     reserves={reserves}
                     recurring={!!form.recurrence}
+                    cards={cards}
+                    cardEntries={cardEntries}
+                    todayISO={computeToday()}
                     reflected={reflected}
                     onReflected={setReflected}
                   />
                 </>
               )}
 
-              {/* 대출은 흐름이다 — 사용처(생활비)를 묻지 않고 대출 연결만 묻는다. */}
-              {!isActual && isOutflow && flowPick !== 'loan' && (
+              {/* 대출은 흐름이다 — 사용처(생활비)를 묻지 않고 대출 연결만 묻는다. 카드 사용 · 대금(P4)도 생활비에 걸지 않는다. */}
+              {!isActual && isOutflow && flowPick !== 'loan' && !isCardFlow && (
                 <div className="mod-row">
                   <span className="mod-lbl">사용처</span>
                   <div className="mod-chips">
@@ -520,6 +530,9 @@ export function EntryModal({
                   debts={debts}
                   reserves={reserves}
                   recurring={!!form.recurrence}
+                  cards={cards}
+                  cardEntries={cardEntries}
+                  todayISO={computeToday()}
                 />
               )}
 

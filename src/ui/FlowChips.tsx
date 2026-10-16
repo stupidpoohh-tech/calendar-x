@@ -7,15 +7,19 @@ import type { MoneyFields } from '../domain/types';
 
 const COLOR: Record<FlowPick, string> = { income: '#22c55e', expense: '#ef4444', loan: '#f97316' };
 
-export function FlowChips({ money, chosen = true, legacyLabel, onPick }: {
-  money: Pick<MoneyFields, 'type' | 'flow'>;
+export function FlowChips({ money, chosen = true, legacyLabel, currentLabel, onPick }: {
+  money: Pick<MoneyFields, 'type' | 'flow' | 'cardId'>;
   /** false 면 아무것도 고르지 않은 상태로 보인다(예전 종류의 확정 — 추정하지 않는다). */
   chosen?: boolean;
   /** 지금 값이 세 흐름 밖이면 그 이름. 고를 수는 없고 보여만 준다. */
   legacyLabel?: string | null;
+  /** 세 흐름 밖이지만 예전 값이 아닌 것(카드 대금 · 카드 이름, P4). '(예전)' 을 붙이지 않는다. */
+  currentLabel?: string | null;
   onPick: (pick: FlowPick) => void;
 }) {
   const current = chosen ? flowPickOf(money) : null;
+  // 이미 지출(현금 · 카드)인데 지출을 다시 누르면 결제수단을 지우지 않는다.
+  const pick = (id: FlowPick) => { if (id !== current) onPick(id); };
   return (
     <div className="mod-row">
       <span className="mod-lbl">흐름</span>
@@ -26,12 +30,17 @@ export function FlowChips({ money, chosen = true, legacyLabel, onPick }: {
             className={'chip mt' + (current === f.id ? ' on' : '')}
             style={{ ['--c' as string]: COLOR[f.id] }}
             aria-checked={current === f.id}
-            onClick={() => onPick(f.id)}
+            onClick={() => pick(f.id)}
           >
             <span className="chip-dot" />{f.label}
           </button>
         ))}
-        {chosen && current === null && legacyLabel && (
+        {chosen && current === null && currentLabel && (
+          <span className="chip mt on" title="카드 대금입니다. 흐름을 고르면 바뀝니다.">
+            <span className="chip-dot" />{currentLabel}
+          </span>
+        )}
+        {chosen && current === null && !currentLabel && legacyLabel && (
           <span className="chip mt on legacy" title="예전 유형입니다. 흐름을 고르면 바뀝니다.">
             <span className="chip-dot" />{legacyLabel} (예전)
           </span>

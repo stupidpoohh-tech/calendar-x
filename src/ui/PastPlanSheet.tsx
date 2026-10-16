@@ -21,12 +21,14 @@ import { formatAmount } from '../domain/money';
 import {
   impactOfRemoving, pastPlanTotals, scanPastPlanned, type PastPlanItem,
 } from '../domain/pastPlanned';
-import type { Account, Budget, Entry, Reserve } from '../domain/types';
+import type { Account, Budget, Card, Entry, Reserve } from '../domain/types';
 import { useDialog } from './Dialog';
 import { Icon } from './Icon';
 
 export interface PastPlanData {
   entries: Entry[]; accounts: Account[]; budgets: Budget[]; reserves: Reserve[];
+  /** 신용카드(P4). 미결제를 같은 원장 전량에서 센다. */
+  cards?: Card[];
 }
 
 interface Props {
@@ -69,7 +71,10 @@ export function PastPlanSheet({ todayISO, load, onBackup, onDelete, onClose }: P
       setData(d);
       // 처음에는 후보만 골라 둔다. 확인 필요는 사용자가 직접 고른다. 막힘은 고를 수 없다.
       // 자료와 같은 순간에 정한다 — 그린 뒤 effect 로 고르면, 그 사이에 누른 '전체 선택' 을 덮는다.
-      const sc = scanPastPlanned(d.entries, d.accounts, todayISO, { budgets: d.budgets, reserves: d.reserves, reserveUsage: reserveUsageOf(d.entries) });
+      const sc = scanPastPlanned(d.entries, d.accounts, todayISO, {
+        budgets: d.budgets, reserves: d.reserves, reserveUsage: reserveUsageOf(d.entries),
+        cards: d.cards ?? [], cardEntries: d.entries.filter((e) => !!e.money?.cardId),
+      });
       setSelected(new Set(sc.items.filter((i) => i.group === 'candidate').map((i) => i.entry.id)));
       setPhase('ready');
       return d;
@@ -86,6 +91,8 @@ export function PastPlanSheet({ todayISO, load, onBackup, onDelete, onClose }: P
   // 세이브 사용액은 서버에서 읽은 원장 전량에서 센다 — 지울 후보는 예정뿐이라 이 값을 바꾸지 않는다.
   const res = useMemo(() => ({
     budgets: data?.budgets ?? [], reserves: data?.reserves ?? [], reserveUsage: reserveUsageOf(data?.entries ?? []),
+    // 카드 미결제(P4)도 같은 원장 전량에서 센다. 지울 후보는 예정뿐이라 이 값도 바뀌지 않는다.
+    cards: data?.cards ?? [], cardEntries: (data?.entries ?? []).filter((e) => !!e.money?.cardId),
   }), [data]);
   const scan = useMemo(
     () => (data ? scanPastPlanned(data.entries, data.accounts, todayISO, res) : null),

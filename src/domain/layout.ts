@@ -96,7 +96,7 @@ export function calendarAmountOn(
     case 'balance':
       return date === today ? confirmedBalance(accounts) : null;
     case 'projected':
-      return projectedBalanceOn(accounts, entries, date, today);
+      return projectedBalanceOn(accounts, entries, date, today, res);
     case 'available':
       return limitOn(accounts, entries, date, today, res);
     case 'pocket': {

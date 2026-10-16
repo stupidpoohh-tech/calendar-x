@@ -686,6 +686,16 @@
 .rv-arch-i { cursor: default; }
 .rv-arch-i:hover { background: transparent; }
 .tide-pk-off { color: var(--ink-4); }
+/* 카드대금 (P4) — 생활비 · 세이브 창과 같은 껍데기(.bp · .debt-*)를 쓴다. 여기 있는 것은 카드에만 있는 조각이다. */
+.tide-est { font-style: normal; font-size: 0.6875rem; color: var(--ink-4); margin-left: 4px; }
+.cd-actions { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin: 2px 0 4px; }
+.cd-cycles { padding-left: 0; }
+.cd-cy .bp-li-t { white-space: normal; font-size: 0.6875rem; color: var(--ink-3); }
+.cd-cy .bp-li-d { min-width: 56px; }
+.cd-cy-b { padding: 0 0 6px 10px; }
+.cd-f-row { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px; }
+.cd-f-row label { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+@media (max-width: 480px) { .cd-f-row { grid-template-columns: 1fr 1fr; } }
 .tide-more .bp { border: 0; border-radius: 0; background: none; }
 
 /* ============ 고정 메모 ============ */

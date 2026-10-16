@@ -16,7 +16,7 @@ import type { Entry } from '../domain/types';
 import { newEntry } from '../domain/entry';
 import type { SnapMeta } from '../data/repo';
 
-type Kind = 'entries' | 'recurring' | 'accounts' | 'debts' | 'pins' | 'budgets' | 'reserves' | 'reserveLinked'
+type Kind = 'entries' | 'recurring' | 'accounts' | 'debts' | 'pins' | 'budgets' | 'reserves' | 'reserveLinked' | 'cards' | 'cardLinked'
   | 'categories' | 'categoryBudgets' | 'annualBudgets' | 'ledgerNotes' | 'ledger';
 
 interface Sub {
@@ -63,6 +63,10 @@ vi.mock('../data/repo', async (importOriginal) => {
       record('reserves', uid, [], cb, onError),
     subscribeReserveLinkedEntries: (_db: unknown, uid: string, cb: unknown, onError: unknown) =>
       record('reserveLinked', uid, [], cb, onError),
+    subscribeCards: (_db: unknown, uid: string, cb: unknown, onError: unknown) =>
+      record('cards', uid, [], cb, onError),
+    subscribeCardLinkedEntries: (_db: unknown, uid: string, cb: unknown, onError: unknown) =>
+      record('cardLinked', uid, [], cb, onError),
     subscribeCategories: (_db: unknown, uid: string, cb: unknown, onError: unknown) =>
       record('categories', uid, [], cb, onError),
     subscribeCategoryBudgets: (_db: unknown, uid: string, cb: unknown, onError: unknown) =>
@@ -178,6 +182,8 @@ describe('월 경계 — 계산 창이 바뀔 때', () => {
       one('budgets').push([], LIVE);
       one('reserves').push([], LIVE);
       one('reserveLinked').push([], LIVE);
+      one('cards').push([], LIVE);
+      one('cardLinked').push([], LIVE);
     });
     expect(result.current.calc.status).toBe('live');
 
@@ -272,6 +278,8 @@ describe('계산 상태는 다섯 구독을 종합한다', () => {
       one('budgets').push([], LIVE);
       one('reserves').push([], LIVE);
       one('reserveLinked').push([], LIVE);
+      one('cards').push([], LIVE);
+      one('cardLinked').push([], LIVE);
     });
     return h;
   };
@@ -468,6 +476,8 @@ describe('계산 상태는 다섯 구독을 종합한다', () => {
     act(() => {
       one('budgets').push([], LIVE);
       one('reserves').push([], LIVE);
+      one('cards').push([], LIVE);
+      one('cardLinked').push([], LIVE);
     });
     deliver({ month: true, recurring: true, accounts: true });
     expect(result.current.calc.ready).toBe(false);
@@ -482,12 +492,35 @@ describe('계산 상태는 다섯 구독을 종합한다', () => {
     expect(result.current.reserveUsage.get('r1')).toBe(30_000);
   });
 
+  it('카드 · 카드 거래 구독이 아직이면 준비되지 않았다 (P4)', () => {
+    // 카드 미결제는 한도를 깎는다. 카드 거래가 아직 안 온 사이에 확정으로 내보내면 미결제가 빠진 큰 한도가 떴다가 준다.
+    const { result } = mountBare();
+    act(() => {
+      one('budgets').push([], LIVE);
+      one('reserves').push([], LIVE);
+      one('reserveLinked').push([], LIVE);
+      one('cards').push([{ id: 'life', name: '생활 카드', closeDay: 31, payDay: 25, payMonthOffset: 1 }] as never, LIVE);
+    });
+    deliver({ month: true, recurring: true, accounts: true });
+    expect(result.current.calc.ready).toBe(false);
+    act(() => {
+      one('cardLinked').push([{
+        id: 'x', kind: 'money', startDate: '2026-09-10',
+        money: { type: 'expense', status: 'actual', flow: 'cardSpend', cardId: 'life', amountMinor: 30_000 },
+      }] as never, LIVE);
+    });
+    expect(result.current.calc.ready).toBe(true);
+    expect(result.current.cardLinked.map((e) => e.id)).toEqual(['x']);
+  });
+
   it('예산과 세이브가 도착하면 화면이 그대로 받는다', () => {
     const { result } = mountBare();
     act(() => {
       one('budgets').push([{ id: 'b1', name: '9월 생활비', amountMinor: 700_000 }], LIVE);
       one('reserves').push([{ id: 'r1', name: '비상금', amountMinor: 100_000 }], LIVE);
       one('reserveLinked').push([], LIVE);
+      one('cards').push([], LIVE);
+      one('cardLinked').push([], LIVE);
     });
     deliver({ month: true, recurring: true, accounts: true });
 
@@ -510,6 +543,8 @@ describe('잔고 기준일이 오래됐을 때 — 계산 창이 거슬러 간�
     one('budgets').push([], LIVE);
     one('reserves').push([], LIVE);
     one('reserveLinked').push([], LIVE);
+    one('cards').push([], LIVE);
+    one('cardLinked').push([], LIVE);
   };
   const aliveCalc = () => subs.filter((s) => s.kind === 'entries' && s.alive && s.months.includes('2026-12'));
 

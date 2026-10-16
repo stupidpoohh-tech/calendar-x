@@ -145,6 +145,9 @@ export function useDemoStore(): StoreState {
       // 데모 세이브에 건 지출은 없다 — 사용액 0, 남은 금액 = 확보액.
       reserveLinked: [],
       reserveUsage: new Map(),
+      // 데모에는 등록한 카드가 없다 — 카드 사용 · 대금 거래는 예전처럼 카드가 정해지지 않은 거래다.
+      cards: [],
+      cardLinked: [],
       // 경조사 · 선물은 올해 연간 예산 — 설 · 추석 달에 몰아 쓰는 지출이다. 계획이라 한도에서 빼지 않는다.
       annualBudgets: [
         newAnnualBudget('default-social', Number(today.slice(0, 4)), 600_000, { '02': 300_000, '09': 200_000 }, ''),

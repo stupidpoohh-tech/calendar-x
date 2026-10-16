@@ -27,14 +27,21 @@ import {
 } from '../data/repo';
 import { safeMerge, type RestoreIO } from '../data/restore';
 import { newAnnualBudget } from '../domain/annualBudget';
-import { newBudget, newReserve } from '../domain/budget';
+import { newBudget, newReserve, reserveUsageOf } from '../domain/budget';
 import { defaultCategories, newCategory, setDefaultBudget, setPeriodBudget } from '../domain/category';
 import { confirmOccurrence } from '../domain/confirm';
 import { newEntry, newMoney } from '../domain/entry';
 import { actualsIn, budgetRows, totalsOf } from '../domain/ledgerStats';
 import { periodByKey } from '../domain/period';
 import { defaultRecoveryRule } from '../domain/recovery';
-import { headlineLimit, limitOn } from '../domain/tide';
+import { headlineLimit, limitOn, type Reservations } from '../domain/tide';
+import { cardStates, newCard } from '../domain/card';
+
+/** 화면이 넘기는 예약 그대로 — 세이브 사용(P3) · 카드 미결제(P4)까지. */
+const resOf = (d: Omit<BackupData, 'recovery' | 'ledger'>): Reservations => ({
+  budgets: d.budgets, reserves: d.reserves, reserveUsage: reserveUsageOf(d.entries),
+  cards: d.cards, cardEntries: d.entries.filter((e) => !!e.money?.cardId),
+});
 import type { Account, Entry } from '../domain/types';
 
 let env: RulesTestEnvironment;
@@ -102,6 +109,15 @@ function richAccount(): BackupData {
       id: 'card', title: '옷', startDate: '2026-10-05',
       money: newMoney({ status: 'actual', amountMinor: 80_000, flow: 'cardSpend', categoryId: 'pet' }),
     }),
+    // P4 — 등록한 카드의 사용 · 일부 납부. 왕복 뒤에도 미결제가 같아야 한다.
+    newEntry('money', {
+      id: 'card-shoe', title: '신발', startDate: '2026-10-06',
+      money: newMoney({ status: 'actual', amountMinor: 150_000, flow: 'cardSpend', cardId: 'card-life', categoryId: 'pet' }),
+    }),
+    newEntry('money', {
+      id: 'card-pay', title: '카드 대금', startDate: TODAY,
+      money: newMoney({ status: 'actual', amountMinor: 50_000, flow: 'cardPayment', cardId: 'card-life', cardCycle: '2026-11', accountId: 'acc-main' }),
+    }),
     newEntry('money', {
       id: 'interest', title: '이자', startDate: '2026-10-03',
       money: newMoney({ status: 'actual', amountMinor: 20_000, flow: 'loanInterest', debtId: 'debt-1', accountId: 'acc-sub' }),
@@ -145,6 +161,7 @@ function richAccount(): BackupData {
       newAnnualBudget('default-shopping', 2026, 600_000, { '04': 400_000, '10': 200_000 }),
       newAnnualBudget('default-shopping', 2027, 900_000),
     ],
+    cards: [newCard({ id: 'card-life', name: '생활 카드', closeDay: 31, payDay: 25, payMonthOffset: 1, accountId: 'acc-main' })],
     ledgerNotes: [{
       id: '2026-09', period: '2026-09', text: '배달을 줄이자.\n외식은 주 1회.',
       createdAt: '2026-09-25T00:00:00.000Z', updatedAt: '2026-09-25T00:00:00.000Z',
@@ -166,8 +183,9 @@ function computed(d: Omit<BackupData, 'recovery' | 'ledger'>, settleDay: number)
   const period = periodByKey('2026-10', settleDay)!;
   const actuals = actualsIn(d.entries, period.start, period.end);
   return {
-    headline: headlineLimit(d.accounts, d.entries, TODAY, { budgets: d.budgets, reserves: d.reserves }),
-    limitEndOfMonth: limitOn(d.accounts, d.entries, '2026-10-31', TODAY, { budgets: d.budgets, reserves: d.reserves }),
+    headline: headlineLimit(d.accounts, d.entries, TODAY, resOf(d)),
+    limitEndOfMonth: limitOn(d.accounts, d.entries, '2026-10-31', TODAY, resOf(d)),
+    outstanding: cardStates(d.cards, d.entries, TODAY).map((s) => [s.card.id, s.outstandingMinor]),
     totals: totalsOf(actuals),
     budgetRows: budgetRows(d.categories, d.categoryBudgets, actuals, period.key, 'expense'),
   };

@@ -8,6 +8,7 @@
 import { todayISO } from '../domain/date';
 import type {
   AnnualBudget,
+  Card,
   Account, Budget, Category, CategoryBudget, Debt, Entry, LedgerNote, LedgerSettings, Pin, RecoveryRule, Reserve,
 } from '../domain/types';
 
@@ -40,8 +41,12 @@ import type {
  *
  * 10 은 9 와 구조가 같다. 지출에 세이브 연결(`money.reserveId`, P3)이 실릴 수 있어 올렸다 — 그 필드를 모르는
  * 예전 앱이 가져오면 연결이 말없이 떨어져 세이브의 남은 금액이 확보액 전체로 돌아가고 한도가 그만큼 준다.
+ *
+ * 11 부터 `cards`(신용카드, P4)가 **필수**다 — v10 에 없는 것은 정상(그 구조가 없던 시절), v11 에 없는 것은 잘린
+ * 파일이다. 거래에는 카드 연결(`money.cardId` · `money.cardCycle`)이 실릴 수 있다 — 예전 앱이 가져오면 연결이 떨어져
+ * 미결제가 사라지고 한도가 부푼다. 예전 앱은 모르는 버전을 거절한다.
  */
-export const BACKUP_VERSION = 10;
+export const BACKUP_VERSION = 11;
 
 export interface BackupPayload {
   app: 'Dada Calendar';
@@ -58,6 +63,8 @@ export interface BackupPayload {
   ledgerNotes: LedgerNote[];
   /** 연간 카테고리 예산(v9). */
   annualBudgets: AnnualBudget[];
+  /** 신용카드(v11). */
+  cards: Card[];
   /** 정산 시작일. 회복 규칙처럼 설정이라 개수에 세지 않는다. */
   ledger: LedgerSettings | null;
   /**
@@ -79,6 +86,7 @@ export interface BackupData {
   categoryBudgets: CategoryBudget[];
   ledgerNotes: LedgerNote[];
   annualBudgets: AnnualBudget[];
+  cards: Card[];
   ledger: LedgerSettings | null;
   recovery: RecoveryRule | null;
 }
@@ -98,6 +106,7 @@ export function buildBackup(data: BackupData): BackupPayload {
     categoryBudgets: data.categoryBudgets,
     ledgerNotes: data.ledgerNotes,
     annualBudgets: data.annualBudgets,
+    cards: data.cards,
     ledger: data.ledger,
     recovery: data.recovery,
   };
@@ -135,7 +144,7 @@ export function downloadJSON(payload: unknown, filename: string): void {
 export function countBackup(d: Omit<BackupData, 'recovery' | 'ledger'>): number {
   return d.entries.length + d.accounts.length + d.debts.length + d.pins.length
     + d.budgets.length + d.reserves.length + d.categories.length + d.categoryBudgets.length
-    + d.ledgerNotes.length + d.annualBudgets.length;
+    + d.ledgerNotes.length + d.annualBudgets.length + d.cards.length;
 }
 
 /** 병합. 같은 id 는 원본을 남기고 새 항목만 더한다. */
@@ -155,6 +164,7 @@ export function mergeBackup(current: BackupData, incoming: BackupData): BackupDa
     categoryBudgets: merge(current.categoryBudgets, incoming.categoryBudgets),
     ledgerNotes: merge(current.ledgerNotes, incoming.ledgerNotes),
     annualBudgets: merge(current.annualBudgets, incoming.annualBudgets),
+    cards: merge(current.cards, incoming.cards),
     // 설정은 병합할 수 없다. 쓰고 있는 것을 남긴다.
     ledger: current.ledger ?? incoming.ledger,
     recovery: current.recovery ?? incoming.recovery,

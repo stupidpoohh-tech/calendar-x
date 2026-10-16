@@ -13,7 +13,7 @@
  * 뜻으로 계산된다. 편집 화면은 그 유형을 '(예전)' 칩으로 보여 주고, 세 흐름 가운데 하나를 눌렀을
  * 때만 바꾼다 — 다른 칸을 고치려다 유형이 조용히 바뀌지 않게.
  */
-import type { MoneyFields, MoneyFlow } from '../domain/types';
+import type { Card, MoneyFields, MoneyFlow } from '../domain/types';
 
 /** 예전 유형의 이름. 내역의 작은 글씨 · 편집 화면의 '(예전)' 칩이 같은 말을 쓴다. */
 export const FLOW_LABEL: Record<MoneyFlow, string> = {
@@ -38,12 +38,14 @@ export const FLOW_PICKS: readonly { id: FlowPick; label: string }[] = [
 ];
 
 /** 지금 값이 세 흐름 가운데 무엇인가. 예전 종류 · 예전 유형이면 null. */
-export function flowPickOf(m: Pick<MoneyFields, 'type' | 'flow'> | null | undefined): FlowPick | null {
+export function flowPickOf(m: Pick<MoneyFields, 'type' | 'flow' | 'cardId'> | null | undefined): FlowPick | null {
   if (!m) return null;
   const flow = m.flow ?? 'normal';
   if (m.type === 'income') return flow === 'normal' ? 'income' : null;
   if (m.type !== 'expense') return null;
   if (flow === 'normal') return 'expense';
+  // 등록한 카드로 쓴 돈은 지출이다(P4). 결제수단 줄이 카드를 보여 준다. 카드가 없는 예전 카드 사용은 '(예전)' 이다.
+  if (flow === 'cardSpend' && m.cardId) return 'expense';
   if (flow === 'loanPrincipal') return 'loan';
   return null;
 }
@@ -55,8 +57,20 @@ export function flowPickOf(m: Pick<MoneyFields, 'type' | 'flow'> | null | undefi
  */
 export function flowPickPatch(pick: FlowPick): Partial<MoneyFields> {
   switch (pick) {
-    case 'income': return { type: 'income', flow: 'normal', budgetId: null, debtId: null, outsidePocket: false };
-    case 'expense': return { type: 'expense', flow: 'normal' };
-    case 'loan': return { type: 'expense', flow: 'loanPrincipal', budgetId: null, outsidePocket: false, categoryId: null };
+    case 'income': return { type: 'income', flow: 'normal', budgetId: null, debtId: null, outsidePocket: false, cardId: null, cardCycle: null };
+    case 'expense': return { type: 'expense', flow: 'normal', cardId: null, cardCycle: null };
+    case 'loan': return {
+      type: 'expense', flow: 'loanPrincipal', budgetId: null, outsidePocket: false, categoryId: null, cardId: null, cardCycle: null,
+    };
   }
+}
+
+/**
+ * 카드에 걸린 카드 대금의 이름(P4) — '카드 대금 · 생활 카드'. 흐름 칩 줄이 '(예전)' 없이 보여 준다.
+ * 카드가 없는 예전 대금은 null(예전 유형으로 보인다).
+ */
+export function cardPaymentLabel(m: Pick<MoneyFields, 'type' | 'flow' | 'cardId'> | null | undefined, cards: readonly Card[]): string | null {
+  if (!m || m.type !== 'expense' || m.flow !== 'cardPayment' || !m.cardId) return null;
+  const c = cards.find((x) => x.id === m.cardId);
+  return `카드 대금 · ${c ? c.name : '지워진 카드'}`;
 }

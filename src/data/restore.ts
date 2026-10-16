@@ -31,10 +31,11 @@
  * 존재를 확인한다 (`createManyIfAbsent`). 이미 있는 문서는 충돌로 남기고 건드리지 않는다.
  */
 import { annualBudgetId, annualBudgetProblem } from '../domain/annualBudget';
+import { cardProblem } from '../domain/card';
 import { conflictingConfirmations } from '../domain/confirm';
 import { isValidDate, normalizeDate } from '../domain/date';
 import type {
-  AnnualBudget,
+  AnnualBudget, Card,
   Account, BackupCollection, Budget, Category, CategoryBudget, Debt, Entry, LedgerNote, Pin, RecoveryRule, Reserve,
 } from '../domain/types';
 import type { BackupData } from './backup';
@@ -234,6 +235,12 @@ function checkAnnualBudget(b: AnnualBudget): string | null {
   return null;
 }
 
+/** 신용카드(P4). 규칙이 받는 모양과 같은 조건 — 쓰기 단계에서 한 건씩 거절되기 전에 막는다. */
+function checkCard(c: Card): string | null {
+  if (c.name.length > LIMITS.name) return `이름이 ${LIMITS.name}자를 넘습니다.`;
+  return cardProblem(c);
+}
+
 function scan<T extends { id: string }>(
   collection: BackupCollection, list: readonly T[],
   check: (v: T) => string | null, out: BackupProblem[],
@@ -272,6 +279,7 @@ export function validateBackup(data: BackupData): BackupProblem[] {
   scan('categoryBudgets', data.categoryBudgets, checkCategoryBudget, out);
   scan('ledgerNotes', data.ledgerNotes, checkLedgerNote, out);
   scan('annualBudgets', data.annualBudgets, checkAnnualBudget, out);
+  scan('cards', data.cards, checkCard, out);
   return out;
 }
 
@@ -304,6 +312,8 @@ export function planMerge(current: BackupData, incoming: BackupData): BackupData
     ledgerNotes: only(current.ledgerNotes, incoming.ledgerNotes),
     // 같은 해 같은 카테고리의 연간 예산이 이미 있으면 지금 것을 남긴다 — 금액 · 배분을 파일 값으로 덮지 않는다.
     annualBudgets: only(current.annualBudgets, incoming.annualBudgets),
+    // 같은 카드가 이미 있으면 지금 것을 남긴다 — 마감일 · 결제일을 파일 값으로 덮지 않는다.
+    cards: only(current.cards, incoming.cards),
     // 정산 시작일도 설정이다. 회복 규칙과 같은 이유로 병합이 적용하지 않는다.
     ledger: current.ledger ?? incoming.ledger,
     /*
@@ -361,7 +371,7 @@ export function mergeSkipsLedger(fileDay: number, currentDay: number): string {
 export function countDocs(d: Omit<BackupData, 'recovery' | 'ledger'>): number {
   return d.entries.length + d.accounts.length + d.debts.length + d.pins.length
     + d.budgets.length + d.reserves.length + d.categories.length + d.categoryBudgets.length
-    + d.ledgerNotes.length + d.annualBudgets.length;
+    + d.ledgerNotes.length + d.annualBudgets.length + d.cards.length;
 }
 
 // ---------- 실행 순서 ----------

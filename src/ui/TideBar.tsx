@@ -20,10 +20,10 @@ import { MONEY_TYPE_BY_ID } from '../domain/constants';
 import { daysBetween, fmtDayShort } from '../domain/date';
 import { formatAmount, formatSigned } from '../domain/money';
 import {
-  balanceViewOn, calcScopeOf, headlineDate, horizonOf, projectedBalanceOn, summarize, unsettledAfter, upcomingInHorizon,
+  balanceViewOn, calcScopeOf, cardDueEstimates, cardHeldOn, headlineDate, horizonOf, projectedBalanceOn, summarize, unsettledAfter, upcomingInHorizon,
   type Summary,
 } from '../domain/tide';
-import type { Account, Budget, Entry, Reserve } from '../domain/types';
+import type { Account, Budget, Card, Entry, Reserve } from '../domain/types';
 import type { PocketFocus } from './BudgetPanel';
 import { Icon } from './Icon';
 import { BalanceInput, BalanceNote, useBalanceEditor } from './balanceEditor';
@@ -46,6 +46,9 @@ interface Props {
   reserves?: readonly Reserve[];
   /** 세이브마다 연결된 실제 지출의 합(P3). 한도는 확보액이 아니라 남은 금액을 뺀다. */
   reserveUsage?: ReadonlyMap<string, number>;
+  /** 신용카드와 카드에 걸린 거래 전량(P4). 미결제가 한도에서 빠지고, 아직 적지 않은 대금이 결제일에 예상 잔고에서 빠진다. */
+  cards?: readonly Card[];
+  cardEntries?: readonly Entry[];
   /** 계산 목록이 덮는 가장 이른 날. 정산이 자료 부족을 판정하는 데 쓴다. */
   tideFrom?: string | null;
   /**
@@ -58,13 +61,15 @@ interface Props {
   onEntryClick?: (entry: Entry) => void;
   collapsed: boolean;
   onToggleCollapsed: () => void;
-  /** 대출 · 고정 메모. 이 카드 안쪽 아래에 접힌 줄로 붙는다. */
+  /** 대출 · 고정 메모 · 카드대금. 이 카드 안쪽 아래에 접힌 줄로 붙는다. */
   children?: ReactNode;
   /**
    * 생활비 · 세이브 창을 연다(`PocketSheet`). 주면 확보 줄의 생활비 · 세이브가 눌리는 자리가 되고
    * '+ 생활비' · '+ 세이브' 가 붙는다 — 관리하러 다른 보기로 가지 않는다.
    */
   onOpenPockets?: (focus: PocketFocus) => void;
+  /** 카드대금 창을 연다(P4). 예상 대금 줄 · 확보의 카드 미결제 줄이 누르는 자리가 된다. */
+  onOpenCards?: () => void;
 }
 
 const NO_BUDGETS: readonly Budget[] = [];
@@ -72,16 +77,19 @@ const NO_RESERVES: readonly Reserve[] = [];
 const NO_USAGE: ReadonlyMap<string, number> = new Map();
 
 export function TideBar({
-  todayISO, accounts, entries, budgets = NO_BUDGETS, reserves = NO_RESERVES, reserveUsage = NO_USAGE,
+  todayISO, accounts, entries, budgets = NO_BUDGETS, reserves = NO_RESERVES, reserveUsage = NO_USAGE, cards, cardEntries,
   tideFrom, calcState = CALC_READY,
   hasBalance, onSaveAccount, onEntryClick,
-  collapsed, onToggleCollapsed, children, onOpenPockets,
+  collapsed, onToggleCollapsed, children, onOpenPockets, onOpenCards,
 }: Props) {
   const today = todayISO;
   const editor = useBalanceEditor(accounts, entries, onSaveAccount, tideFrom, todayISO);
 
   // 통화가 섞이면 최소 단위가 달라 애초에 더할 수 없다. 숫자를 내지 않는다.
-  const res = useMemo(() => ({ budgets, reserves, reserveUsage }), [budgets, reserves, reserveUsage]);
+  const res = useMemo(
+    () => ({ budgets, reserves, reserveUsage, cards, cardEntries }),
+    [budgets, reserves, reserveUsage, cards, cardEntries],
+  );
   const scope = useMemo(() => calcScopeOf(accounts, entries, res), [accounts, entries, res]);
 
   const horizon = useMemo(() => horizonOf(entries, today), [entries, today]);
@@ -95,9 +103,17 @@ export function TideBar({
   const limit = view.available;
   // 오늘의 예상 잔고. 확인 잔고와 다르면(아직 반영 안 한 거래 · 기준일 뒤 지난 예정) 함께 적는다.
   const projectedToday = useMemo(
-    () => projectedBalanceOn(accounts, entries, today, today),
-    [accounts, entries, today],
+    () => projectedBalanceOn(accounts, entries, today, today, res),
+    [accounts, entries, today, res],
   );
+  // 카드 미결제(P4) 가운데 머리 숫자의 날까지 예정 · 예상 대금으로 잡히지 않은 몫 — 확보에 들어 있다.
+  const cardHold = useMemo(() => cardHeldOn(accounts, entries, bindDate, today, res), [accounts, entries, bindDate, today, res]);
+  // 아직 적지 않은 카드 대금 가운데 이 구간에 결제일이 오는 것 — 예상 잔고가 그 날 뺀다.
+  const cardDues = useMemo(
+    () => cardDueEstimates(accounts, entries, today, res).filter((d) => d.date <= horizon.end),
+    [accounts, entries, today, res, horizon.end],
+  );
+  const cardName = (id: string) => cards?.find((c) => c.id === id)?.name ?? '카드';
   const pockets = useMemo(() => {
     const from = unsettledAfter(accounts, today);
     // 관리하는 자리이기도 하다 — 끝나지 않은 생활비는 확보액이 0이어도 보인다.
@@ -238,7 +254,7 @@ export function TideBar({
         {(view.held !== 0 || (onOpenPockets && (pockets.length > 0 || activeReserves(reserves).length > 0))) ? (
           <details className="tide-held">
             <summary className="num">
-              생활비 · 세이브로 확보 <b>₩ {formatAmount(view.held)}</b>
+              {cardHold > 0 ? '생활비 · 세이브 · 카드 미결제로 확보' : '생활비 · 세이브로 확보'} <b>₩ {formatAmount(view.held)}</b>
             </summary>
             <ul aria-label="생활비 · 세이브">
               {pockets.map((p) => {
@@ -290,6 +306,21 @@ export function TideBar({
                     </li>
                   );
                 })}
+              {cardHold > 0 && (
+                <li className="num">
+                  {onOpenCards ? (
+                    <button className="tide-pk" onClick={onOpenCards} aria-label="카드 미결제 열기">
+                      <span>카드 미결제 <i>결제일에 대금으로 나갈 돈</i></span>
+                      <span>{formatAmount(cardHold)}</span>
+                    </button>
+                  ) : (
+                    <>
+                      <span>카드 미결제 <i>결제일에 대금으로 나갈 돈</i></span>
+                      <span>{formatAmount(cardHold)}</span>
+                    </>
+                  )}
+                </li>
+              )}
             </ul>
             {onOpenPockets && <PocketAdd onOpen={onOpenPockets} />}
             <p className="tide-held-n num">
@@ -306,10 +337,21 @@ export function TideBar({
         {caveat && <p className="tide-caveat">{caveat}</p>}
       </div>
 
-      {upcoming.length > 0 ? (
+      {upcoming.length > 0 || cardDues.length > 0 ? (
         <ul className="tide-list">
           {upcoming.map((u) => (
             <TideRow key={u.key} summary={u} onClick={() => onEntryClick?.(u.entry)} />
+          ))}
+          {/* 적지 않은 카드 대금(P4). 거래가 아니라 미결제에서 센 예상이라 누르면 카드대금 창이 열린다. */}
+          {cardDues.map((d) => (
+            <li key={`card-${d.cardId}-${d.cycle}`}>
+              <button className="tide-row" onClick={onOpenCards} disabled={!onOpenCards}>
+                <span className="tide-dot" style={{ background: 'var(--lens-money)' }} />
+                <span className="tide-when num">{fmtDayShort(d.date)}</span>
+                <span className="tide-name">{cardName(d.cardId)} 대금 <i className="tide-est">예상</i></span>
+                <span className="tide-amt num minus">−{formatAmount(d.amountMinor)}</span>
+              </button>
+            </li>
           ))}
         </ul>
       ) : (

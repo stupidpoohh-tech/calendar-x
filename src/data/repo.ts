@@ -17,10 +17,10 @@ import { normalizeDate, ymOf } from '../domain/date';
 import { describeFirestoreError } from './errors';
 import { layoutFrom, type Layout } from '../domain/layout';
 import type {
-  AnnualBudget, Account, Budget, Category, CategoryBudget, Debt, Entry, LedgerNote, LedgerSettings, Pin, RecoveryRule, Reserve, YearMonth,
+  AnnualBudget, Account, Budget, Card, Category, CategoryBudget, Debt, Entry, LedgerNote, LedgerSettings, Pin, RecoveryRule, Reserve, YearMonth,
 } from '../domain/types';
 import {
-  annualBudgetFromDoc, annualBudgetToDoc, accountFromDoc, accountToDoc, budgetFromDoc, budgetToDoc,
+  annualBudgetFromDoc, annualBudgetToDoc, accountFromDoc, accountToDoc, budgetFromDoc, budgetToDoc, cardFromDoc, cardToDoc,
   categoryBudgetFromDoc, categoryBudgetToDoc, categoryFromDoc, categoryToDoc, ledgerNoteFromDoc, ledgerNoteToDoc,
   debtFromDoc, debtToDoc, entryFromDoc, entryToDoc, ledgerSettingsFromDoc, ledgerSettingsToDoc,
   pinFromDoc, pinToDoc, recoveryRuleFromDoc, recoveryRuleToDoc, reserveFromDoc, reserveToDoc,
@@ -317,6 +317,34 @@ export function subscribeCategoryBudgets(
   );
 }
 
+/** 신용카드(P4). 몇 장뿐이라 전량 받는다. */
+export function subscribeCards(
+  db: Firestore, uid: string, cb: SnapSink<Card>, onError: ErrorSink,
+): Unsubscribe {
+  return onSnapshot(
+    col(db, uid, COL.cards), WITH_META,
+    keepingIdentity(cardFromDoc, cb),
+    (err) => onError('cards', err),
+  );
+}
+
+/**
+ * 카드에 걸린 거래 전량 (P4) — 카드 사용 · 카드 대금, 실제 · 예정 모두.
+ *
+ * 미결제는 청구(실제 카드 사용) − 납부(실제 카드 대금)를 회차마다 센 값이다(`card.ts`). 계산 창의 거래만 보면 창 밖의
+ * 지난 사용 · 대금이 빠져 미결제가 틀린다 — 그래서 달과 무관하게 받는다. `!= null` 은 그 필드가 없는 예전 문서와
+ * null 인 문서를 함께 뺀다. 단일 필드 색인으로 조회된다. 카드 거래가 쌓일수록 읽기가 늘어난다(남은 일).
+ */
+export function subscribeCardLinkedEntries(
+  db: Firestore, uid: string, cb: SnapSink<Entry>, onError: ErrorSink,
+): Unsubscribe {
+  return onSnapshot(
+    query(col(db, uid, COL.entries), where('money.cardId', '!=', null)), WITH_META,
+    keepingIdentity(entryFromDoc, cb),
+    (err) => onError('cardLinked', err),
+  );
+}
+
 /** 연간 카테고리 예산. 카테고리 × 연도라 작고 기간과 무관하게 전량 받는다. */
 export function subscribeAnnualBudgets(
   db: Firestore, uid: string, cb: SnapSink<AnnualBudget>, onError: ErrorSink,
@@ -450,17 +478,18 @@ export async function fetchPocketEntries(
  * 를 확인하면 안 된다. 오프라인이면 던진다.
  */
 export async function fetchLedgerFromServer(db: Firestore, uid: string): Promise<{
-  entries: Entry[]; accounts: Account[]; budgets: Budget[]; reserves: Reserve[];
+  entries: Entry[]; accounts: Account[]; budgets: Budget[]; reserves: Reserve[]; cards: Card[];
 }> {
-  const [e, a, b, r] = await Promise.all([
+  const [e, a, b, r, c] = await Promise.all([
     getDocsFromServer(col(db, uid, COL.entries)),
     getDocsFromServer(col(db, uid, COL.accounts)),
     getDocsFromServer(col(db, uid, COL.budgets)),
     getDocsFromServer(col(db, uid, COL.reserves)),
+    getDocsFromServer(col(db, uid, COL.cards)),
   ]);
   return {
     entries: mapSnap(e, entryFromDoc), accounts: mapSnap(a, accountFromDoc),
-    budgets: mapSnap(b, budgetFromDoc), reserves: mapSnap(r, reserveFromDoc),
+    budgets: mapSnap(b, budgetFromDoc), reserves: mapSnap(r, reserveFromDoc), cards: mapSnap(c, cardFromDoc),
   };
 }
 
@@ -578,9 +607,9 @@ export async function fetchAll(db: Firestore, uid: string): Promise<{
   entries: Entry[]; accounts: Account[]; debts: Debt[]; pins: Pin[];
   budgets: Budget[]; reserves: Reserve[];
   categories: Category[]; categoryBudgets: CategoryBudget[]; ledgerNotes: LedgerNote[];
-  annualBudgets: AnnualBudget[];
+  annualBudgets: AnnualBudget[]; cards: Card[];
 }> {
-  const [e, a, d, p, b, r, c, cb, ln, ab] = await Promise.all([
+  const [e, a, d, p, b, r, c, cb, ln, ab, cd] = await Promise.all([
     getDocs(col(db, uid, COL.entries)),
     getDocs(col(db, uid, COL.accounts)),
     getDocs(col(db, uid, COL.debts)),
@@ -591,6 +620,7 @@ export async function fetchAll(db: Firestore, uid: string): Promise<{
     getDocs(col(db, uid, COL.categoryBudgets)),
     getDocs(col(db, uid, COL.ledgerNotes)),
     getDocs(col(db, uid, COL.annualBudgets)),
+    getDocs(col(db, uid, COL.cards)),
   ]);
   return {
     entries: mapSnap(e, entryFromDoc),
@@ -603,6 +633,7 @@ export async function fetchAll(db: Firestore, uid: string): Promise<{
     categoryBudgets: mapSnap(cb, categoryBudgetFromDoc),
     ledgerNotes: mapSnap(ln, ledgerNoteFromDoc),
     annualBudgets: mapSnap(ab, annualBudgetFromDoc),
+    cards: mapSnap(cd, cardFromDoc),
   };
 }
 
@@ -638,7 +669,7 @@ export async function writeMany(
     entries?: Entry[]; accounts?: Account[]; debts?: Debt[]; pins?: Pin[];
     budgets?: Budget[]; reserves?: Reserve[];
     categories?: Category[]; categoryBudgets?: CategoryBudget[]; ledgerNotes?: LedgerNote[];
-    annualBudgets?: AnnualBudget[];
+    annualBudgets?: AnnualBudget[]; cards?: Card[];
   },
   onProgress?: (done: number, total: number) => void,
 ): Promise<WriteManyResult> {
@@ -656,6 +687,7 @@ export async function writeMany(
     })),
     ...(payload.ledgerNotes ?? []).map((x) => ({ name: COL.ledgerNotes, id: x.id, data: ledgerNoteToDoc(x) })),
     ...(payload.annualBudgets ?? []).map((x) => ({ name: COL.annualBudgets, id: x.id, data: annualBudgetToDoc(x) })),
+    ...(payload.cards ?? []).map((x) => ({ name: COL.cards, id: x.id, data: cardToDoc(x) })),
   ];
 
   const result: WriteManyResult = { written: 0, failed: [], allFailed: false };
@@ -714,7 +746,7 @@ export async function createManyIfAbsent(
     entries?: Entry[]; accounts?: Account[]; debts?: Debt[]; pins?: Pin[];
     budgets?: Budget[]; reserves?: Reserve[];
     categories?: Category[]; categoryBudgets?: CategoryBudget[]; ledgerNotes?: LedgerNote[];
-    annualBudgets?: AnnualBudget[];
+    annualBudgets?: AnnualBudget[]; cards?: Card[];
   },
   onProgress?: (done: number, total: number) => void,
 ): Promise<CreateManyResult> {
@@ -732,6 +764,7 @@ export async function createManyIfAbsent(
     })),
     ...(payload.ledgerNotes ?? []).map((x) => ({ name: COL.ledgerNotes, id: x.id, data: ledgerNoteToDoc(x) })),
     ...(payload.annualBudgets ?? []).map((x) => ({ name: COL.annualBudgets, id: x.id, data: annualBudgetToDoc(x) })),
+    ...(payload.cards ?? []).map((x) => ({ name: COL.cards, id: x.id, data: cardToDoc(x) })),
   ];
 
   const result: CreateManyResult = { created: 0, conflicts: [], failed: [], allFailed: false };

@@ -21,7 +21,7 @@
  *
  * 이 파일은 순수 함수만 담는다. 저장은 부르는 쪽이 평소 경로(`saveEntry`)로 한다.
  */
-import { normalizeDate } from './date';
+import { normalizeDate, ymOf } from './date';
 import { newEntry, newMoney, withDerived } from './entry';
 import {
   confirmedEntryId, confirmedKey, confirmedSetOf, isActual, moneyFlowOf, OUTFLOW_ONLY_FLOWS,
@@ -59,6 +59,10 @@ export interface ConfirmPatch {
   debtId?: string | null;
   /** 사용할 세이브(P3). 예정에 걸어 둔 연결이 기본값이다 — 확정하면 실제 거래가 이어받아 사용액에 들어간다. */
   reserveId?: string | null;
+  /** 카드(P4). 예정의 카드가 기본값이다. 카드 사용 · 카드 대금에만 남는다. */
+  cardId?: string | null;
+  /** 대금이 갚는 회차(P4). 기본은 예정에 적어 둔 회차, 반복 예정이면 그 회차의 달. */
+  cardCycle?: string | null;
 }
 
 export type ConfirmResult =
@@ -134,7 +138,12 @@ export function confirmOccurrence(
   let reserveId = patch.reserveId !== undefined ? patch.reserveId : m.reserveId ?? null;
   if (patch.budgetId || patch.debtId) reserveId = null;
   if (reserveId) { budgetId = null; debtId = null; }
-  if (type !== 'expense' || flow !== 'normal') reserveId = null;
+  // 카드(P4)는 지출의 카드 사용 · 카드 대금에만 남는다.
+  const cardId = type === 'expense' && (flow === 'cardSpend' || flow === 'cardPayment')
+    ? (patch.cardId !== undefined ? patch.cardId : m.cardId ?? null) : null;
+  const cardCycle = cardId && flow === 'cardPayment'
+    ? (patch.cardCycle ?? (!plan.recurrence ? m.cardCycle : null) ?? ymOf(occ)) : null;
+  if (type !== 'expense' || !(flow === 'normal' || (flow === 'cardSpend' && cardId))) reserveId = null;
 
   const entry = newEntry('money', {
     id: confirmedEntryId(plan.id, occ),
@@ -164,6 +173,8 @@ export function confirmOccurrence(
       plannedRef: { entryId: plan.id, date: occ },
       reserveId,
       outsidePocket: reserveId ? true : m.outsidePocket === true,
+      cardId,
+      cardCycle,
     }),
     createdAt: now,
   });

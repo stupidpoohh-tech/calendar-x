@@ -444,17 +444,29 @@ export function protectedReserveTotal(
 
 const NO_USAGE: ReadonlyMap<string, number> = new Map();
 
-/** 고르는 자리에 세이브를 띄울 거래인가 — 일반 지출 · 대출 연결 없음 · 반복 아님. 카드 사용은 P4 의 몫이다. */
+/**
+ * 세이브에 걸 수 있는 흐름인가 — 일반 지출, 또는 **등록한 카드의** 카드 사용(P4).
+ *
+ * 카드 사용을 세이브에 걸면 세이브의 남은 금액이 줄고, 같은 돈은 카드 미결제로 지켜진다(`tide.cardHoldOn`) —
+ * 지키는 자리가 옮겨 갈 뿐 두 번 빠지지 않는다. 카드가 정해지지 않은 카드 사용은 미결제로 지켜지지 않으므로 걸지
+ * 않는다(걸면 세이브만 줄고 그 빚은 대금을 적을 때까지 아무도 지키지 않아 한도가 부푼다).
+ */
+function reserveFlowOk(m: NonNullable<Entry['money']>): boolean {
+  const flow = moneyFlowOf(m);
+  return flow === 'normal' || (flow === 'cardSpend' && !!m.cardId);
+}
+
+/** 고르는 자리에 세이브를 띄울 거래인가 — 일반 지출 · 등록 카드 사용 · 대출 연결 없음 · 반복 아님. */
 export function reserveLinkable(e: Pick<Entry, 'money' | 'recurrence'>): boolean {
   const m = e.money;
   if (!m || m.type !== 'expense' || m.debtId || e.recurrence) return false;
-  return moneyFlowOf(m) === 'normal';
+  return reserveFlowOk(m);
 }
 
-/** 세이브 사용액으로 세는 거래인가 — 실제 · 일반 지출 · 세이브 연결. */
+/** 세이브 사용액으로 세는 거래인가 — 실제 · 일반 지출(또는 등록 카드 사용) · 세이브 연결. */
 export function countsAsReserveUse(e: Entry): boolean {
   return isActual(e) && !!e.money?.reserveId && e.money.type === 'expense'
-    && moneyFlowOf(e.money) === 'normal' && !e.recurrence;
+    && reserveFlowOk(e.money) && !e.recurrence;
 }
 
 /** 세이브 id → 연결된 실제 지출의 합. 같은 문서가 두 번 와도 한 번만 센다. */

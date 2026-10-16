@@ -10,7 +10,7 @@ import { MONEY_FLOWS, moneyFlowOf, moneyStatusOf } from '../domain/ledger';
 import { clampSettleDay } from '../domain/period';
 import { MONTH_NOS } from '../domain/annualBudget';
 import type {
-  AnnualBudget, MonthNo, Account, Budget, Category, CategoryBudget, ColorId, Debt, Entry, EntryKind, LedgerNote, LedgerSettings,
+  AnnualBudget, MonthNo, Account, Budget, Card, Category, CategoryBudget, ColorId, Debt, Entry, EntryKind, LedgerNote, LedgerSettings,
   MoneyFields, MoneyFlow, MoneyType, Pin, PlannedRef, Reserve, ReservePatch,
   RecoveryFields, RecoveryOption, RecoveryRule, RecoveryWindowId,
   Recurrence, RepeatFreq, TaskStatus,
@@ -68,8 +68,12 @@ function asPlannedRef(v: unknown): PlannedRef | null {
  * 3 은 세이브 연결(P3, `money.reserveId`)을 아는 판이다. 2 를 쓰는 앱(P2 까지)은 그 필드를 모르고 문서 전체를
  * 덮어쓰므로, 세이브에 건 거래를 그 앱에서 고치면 연결이 말없이 사라져 세이브 사용액이 줄어든다. 규칙이
  * "연결이 실린 거래에 3 미만의 쓰기" 를 거절한다(`keepsReserveLink`). 다른 문서는 2 이상이면 그대로 받는다.
+ *
+ * 4 는 신용카드(P4, `money.cardId` · `money.cardCycle`)를 아는 판이다. 3 을 쓰는 앱(P3 까지)이 카드에 건 거래를
+ * 고치면 연결이 사라져 미결제가 말없이 줄고(한도가 부푼다) 대금이 어느 회차를 갚는지 잊는다. 규칙이 "카드가 실린
+ * 거래에 4 미만의 쓰기" 를 거절한다(`keepsCardLink`).
  */
-export const LEDGER_SCHEMA = 3;
+export const LEDGER_SCHEMA = 4;
 
 const asTime = (v: unknown): string | null =>
   typeof v === 'string' && /^\d{2}:\d{2}$/.test(v) ? v : null;
@@ -233,6 +237,9 @@ export function entryFromDoc(id: string, raw: Raw): Entry {
           outsidePocket: moneyRaw?.outsidePocket === true,
           // P3. 예전 문서에는 없다 — 연결 없음.
           reserveId: optStr(moneyRaw?.reserveId),
+          // P4. 예전 문서에는 없다 — 카드가 정해지지 않은 거래.
+          cardId: optStr(moneyRaw?.cardId),
+          cardCycle: optStr(moneyRaw?.cardCycle),
         }
       : null,
     // 회복 표식은 할 일 위에만 얹힌다.
@@ -265,7 +272,8 @@ export function entryToDoc(e: Entry): Raw {
     recurrence: e.recurrence,
     task: e.task,
     // 반복 항목에는 세이브를 걸지 않는다(P3) — 한 연결이 여러 회차에 걸치면 사용액이 몇 번 들어갈지 애매하다.
-    money: e.money ? moneyToDoc(e.recurrence ? { ...e.money, reserveId: null } : e.money) : null,
+    // 반복 대금은 회차마다 그 달을 갚으므로 한 회차를 박아 두지 않는다(P4).
+    money: e.money ? moneyToDoc(e.recurrence ? { ...e.money, reserveId: null, cardCycle: null } : e.money) : null,
     recovery: e.recovery,
     schema: LEDGER_SCHEMA,
     // undefined 는 Firestore 가 받지 않는다. 늘 참/거짓으로 굳혀 쓴다.
@@ -275,9 +283,24 @@ export function entryToDoc(e: Entry): Raw {
   };
 }
 
+/** 카드(P4)는 지출의 카드 사용 · 카드 대금에만 남는다. 흐름을 바꾸면 연결이 걷힌다. */
+function cardIdToKeep(m: MoneyFields): string | null {
+  if (!m.cardId || m.type !== 'expense') return null;
+  const flow = moneyFlowOf(m);
+  return flow === 'cardSpend' || flow === 'cardPayment' ? m.cardId : null;
+}
+
+/** 대금이 갚는 회차는 카드에 걸린 대금에만, `YYYY-MM` 모양으로만. */
+function cardCycleToKeep(m: MoneyFields): string | null {
+  if (!cardIdToKeep(m) || moneyFlowOf(m) !== 'cardPayment') return null;
+  return typeof m.cardCycle === 'string' && /^\d{4}-(0[1-9]|1[0-2])$/.test(m.cardCycle) ? m.cardCycle : null;
+}
+
 function reserveIdToKeep(m: MoneyFields): string | null {
   if (!m.reserveId || m.budgetId || m.debtId || m.type !== 'expense') return null;
-  return moneyFlowOf(m) === 'normal' ? m.reserveId : null;
+  const flow = moneyFlowOf(m);
+  // 등록한 카드의 카드 사용도 세이브에 건다(P4). 카드가 없는 카드 사용은 미결제로 지켜지지 않아 걷는다.
+  return flow === 'normal' || (flow === 'cardSpend' && cardIdToKeep(m)) ? m.reserveId : null;
 }
 
 /** 저장된 `ymSpan` 이 없을 때 다시 만든다. `withDerived` 와 같은 규칙이다. */
@@ -311,6 +334,8 @@ function moneyToDoc(m: MoneyFields): Raw {
     // 세이브(P3)는 일반 지출에만, 주머니 · 대출과 함께 걸리지 않는다. 어긋난 연결은 저장할 때 걷는다 —
     // 흐름을 대출로 바꾸거나 주머니를 고르면 세이브 연결이 남아 있지 않는다.
     reserveId: reserveIdToKeep(m),
+    cardId: cardIdToKeep(m),
+    cardCycle: cardCycleToKeep(m),
   };
 }
 
@@ -556,6 +581,37 @@ export function annualBudgetToDoc(b: AnnualBudget): Raw {
     categoryId: b.categoryId, year: b.year, amountMinor: b.amountMinor,
     monthAllocations: { ...b.monthAllocations }, currency: b.currency,
     createdAt: b.createdAt, updatedAt: b.updatedAt,
+  };
+}
+
+/**
+ * 신용카드(P4). 읽기는 방어적이다 — 날짜가 깨졌으면 기본(말일 마감 · 다음 달 25일)으로, 결제 달 수는 0~2 로 묶는다.
+ * 계산(`card.ts`)도 말일 보정 · 0 달 보정을 하므로 어떤 값이 와도 회차는 만들어진다.
+ */
+export function cardFromDoc(id: string, raw: Raw): Card {
+  const day = (v: unknown, fallback: number) =>
+    typeof v === 'number' && Number.isInteger(v) && v >= 1 && v <= 31 ? v : fallback;
+  const off = raw.payMonthOffset;
+  return {
+    id,
+    name: str(raw.name),
+    closeDay: day(raw.closeDay, 31),
+    payDay: day(raw.payDay, 25),
+    payMonthOffset: typeof off === 'number' && Number.isInteger(off) && off >= 0 && off <= 2 ? off : 1,
+    accountId: optStr(raw.accountId),
+    currency: str(raw.currency, DEFAULT_CURRENCY),
+    order: typeof raw.order === 'number' && Number.isFinite(raw.order) ? raw.order : 0,
+    archivedAt: optStr(raw.archivedAt),
+    createdAt: str(raw.createdAt),
+    updatedAt: str(raw.updatedAt),
+  };
+}
+
+export function cardToDoc(c: Card): Raw {
+  return {
+    name: c.name, closeDay: c.closeDay, payDay: c.payDay, payMonthOffset: c.payMonthOffset,
+    accountId: c.accountId ?? null, currency: c.currency, order: c.order, archivedAt: c.archivedAt ?? null,
+    createdAt: c.createdAt, updatedAt: c.updatedAt,
   };
 }
 

@@ -12,7 +12,9 @@
  */
 import { isLoanCategory, pickableCategories } from '../domain/category';
 import { balanceInclusion, moneyFlowOf, reflectChoiceFor } from '../domain/ledger';
-import type { Account, Budget, Category, DateISO, Debt, MoneyFields, Reserve } from '../domain/types';
+import { activeCards, cardState, cycleByKey, cycleOfUse, defaultPaymentCycle, fmtMonthDay } from '../domain/card';
+import { formatAmount } from '../domain/money';
+import type { Account, Budget, Card, Category, DateISO, Debt, Entry, MoneyFields, Reserve } from '../domain/types';
 
 interface Props {
   /** 문서 id. 잔고 반영 판정(같은 날 고른 목록)에 쓴다. */
@@ -44,13 +46,26 @@ interface Props {
   reserves?: readonly Reserve[];
   /** 반복 예정인가. 반복은 세이브에 걸지 않는다 — 한 봉투에 몇 번 들어갈지가 애매해진다. */
   recurring?: boolean;
+  /**
+   * 신용카드(P4)와 카드에 걸린 거래 전량. 주면 지출에 '결제수단'(현금 · 계좌 / 카드) 줄이, 카드 대금에 '카드 · 회차'
+   * 줄이 붙는다. 거래 전량은 대금 회차의 남은 금액을 적는 데 쓴다.
+   */
+  cards?: readonly Card[];
+  cardEntries?: readonly Entry[];
+  /** 오늘. 회차가 마감됐는지 · 지났는지 적는다. */
+  todayISO?: DateISO;
 }
+
+const NO_CARDS: readonly Card[] = [];
+const NO_ENTRIES: readonly Entry[] = [];
+const dayLabel = (iso: string) => `${Number(iso.slice(5, 7))}/${Number(iso.slice(8, 10))}`;
 
 const NO_RESERVES: readonly Reserve[] = [];
 
 export function LedgerFields({
   entryId, type, date, money, onMoney, categories, categoriesReady, onSeedCategories,
   accounts, pockets, debts, only, reflected, onReflected, reserves = NO_RESERVES, recurring = false,
+  cards = NO_CARDS, cardEntries = NO_ENTRIES, todayISO = date,
 }: Props) {
   const flow = moneyFlowOf(money);
   const isLoan = flow === 'loanPrincipal' || flow === 'loanInterest';
@@ -67,8 +82,17 @@ export function LedgerFields({
   const reflect = onReflected
     ? reflectChoiceFor({ id: entryId, kind: 'money', startDate: date, money }, accounts)
     : { kind: 'none' as const };
-  // 세이브는 일반 지출에만 건다(`reserveLinkable`). 카드 사용은 P4 의 몫이라 아직 고르지 않는다.
-  const canReserve = isOutflow && flow === 'normal' && !money.debtId && !recurring;
+  // 세이브는 일반 지출 · 등록 카드의 카드 사용에 건다(`reserveLinkable`).
+  const canReserve = isOutflow && (flow === 'normal' || (flow === 'cardSpend' && !!money.cardId)) && !money.debtId && !recurring;
+  // 결제수단(P4) — 현금 · 계좌로 낸 지출인가, 어느 카드로 쓴 지출인가.
+  const pickableCards = activeCards(cards);
+  const linkedCard = money.cardId ? cards.find((c) => c.id === money.cardId) ?? null : null;
+  const showMethod = isOutflow && (flow === 'normal' || flow === 'cardSpend')
+    && (pickableCards.length > 0 || !!money.cardId || flow === 'cardSpend');
+  const cardUse = flow === 'cardSpend' && linkedCard ? cycleOfUse(linkedCard, date) : null;
+  const isCardPay = isOutflow && flow === 'cardPayment';
+  const payState = isCardPay && linkedCard ? cardState(linkedCard, cardEntries, todayISO) : null;
+  const payCycle = isCardPay && linkedCard && money.cardCycle && !recurring ? cycleByKey(linkedCard, money.cardCycle) : null;
   const pickableReserves = reserves.filter((r) => !r.archivedAt);
   const linkedReserve = money.reserveId ? reserves.find((r) => r.id === money.reserveId) ?? null : null;
   const showReserve = canReserve && (pickableReserves.length > 0 || !!money.reserveId);
@@ -78,7 +102,110 @@ export function LedgerFields({
   return (
     <>
       {/* 대출은 카테고리가 아니라 흐름이다. 대출에는 카테고리 칸이 없다 — 이미 붙은 값은 그대로 둔다. */}
-      {!isLoan && <div className="mod-row">
+      {/*
+        결제수단 (P4). 카드로 쓴 돈은 오늘 소비로 세고(현금 0) 결제일에 대금으로 나간다. 카드를 고르면 생활비에서
+        빠진다 — 카드 사용은 생활비에 걸지 않는다(P1-D). 세이브에는 걸 수 있다.
+      */}
+      {showMethod && (
+        <div className="mod-row">
+          <span className="mod-lbl">결제수단</span>
+          <div className="mod-chips" role="radiogroup" aria-label="결제수단">
+            <button
+              type="button" role="radio"
+              className={'chip' + (flow === 'normal' ? ' on' : '')}
+              aria-checked={flow === 'normal'}
+              onClick={() => onMoney({ flow: 'normal', cardId: null, cardCycle: null })}
+            >
+              현금 · 계좌
+            </button>
+            {pickableCards.map((c) => (
+              <button
+                key={c.id} type="button" role="radio"
+                className={'chip' + (flow === 'cardSpend' && money.cardId === c.id ? ' on' : '')}
+                aria-checked={flow === 'cardSpend' && money.cardId === c.id}
+                onClick={() => onMoney({ flow: 'cardSpend', cardId: c.id, cardCycle: null, budgetId: null, debtId: null })}
+              >
+                {c.name}
+              </button>
+            ))}
+            {money.cardId && (!linkedCard || linkedCard.archivedAt) && (
+              <span className="chip on" title={linkedCard ? '보관한 카드입니다' : '지금은 없는 카드입니다'}>
+                {linkedCard ? `${linkedCard.name} (보관)` : '지워진 카드'}
+              </span>
+            )}
+            {flow === 'cardSpend' && !money.cardId && (
+              <span className="chip on legacy" title="카드를 정하지 않은 예전 카드 사용입니다. 미결제로 세지 않습니다.">카드 (정하지 않음)</span>
+            )}
+          </div>
+        </div>
+      )}
+      {cardUse && (
+        <p className="mod-hint">
+          {money.status === 'actual'
+            ? `오늘 소비로 세고, 현금은 ${fmtMonthDay(cardUse.payDate)} 결제일에 대금으로 나갑니다. 그때까지 미결제로 가용 한도에서 빠집니다.`
+            : `예정 카드 사용은 확정해야 미결제가 됩니다. 확정하면 ${fmtMonthDay(cardUse.payDate)} 결제분에 들어갑니다.`}
+        </p>
+      )}
+      {flow === 'cardSpend' && !money.cardId && pickableCards.length > 0 && (
+        <p className="mod-hint">카드를 고르면 그 카드의 미결제로 세고, 결제일 예상 잔고에 대금이 잡힙니다.</p>
+      )}
+
+      {/*
+        카드 대금 (P4). 어느 카드의 어느 회차를 갚는가. 일부 납부 · 여러 번 납부는 같은 회차를 가리키는 대금 여러 건이다.
+        반복 예정은 회차마다 그 달을 갚는다.
+      */}
+      {isCardPay && (
+        <div className="mod-row">
+          <label className="mod-lbl" htmlFor={`card-${entryId}`}>카드</label>
+          <select
+            id={`card-${entryId}`} className="mod-input"
+            value={money.cardId ?? ''}
+            onChange={(e) => {
+              const id = e.target.value || null;
+              const c = id ? cards.find((x) => x.id === id) : null;
+              onMoney({ cardId: id, cardCycle: c && !recurring ? defaultPaymentCycle(cardState(c, cardEntries, todayISO), date) : null });
+            }}
+          >
+            <option value="">정하지 않음</option>
+            {pickableCards.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+            {linkedCard?.archivedAt && <option value={linkedCard.id}>{linkedCard.name} (보관)</option>}
+            {money.cardId && !linkedCard && <option value={money.cardId}>지워진 카드</option>}
+          </select>
+        </div>
+      )}
+      {isCardPay && linkedCard && !recurring && payState && (
+        <div className="mod-row">
+          <label className="mod-lbl" htmlFor={`cycle-${entryId}`}>청구 회차</label>
+          <select
+            id={`cycle-${entryId}`} className="mod-input"
+            value={money.cardCycle ?? ''}
+            onChange={(e) => onMoney({ cardCycle: e.target.value || null })}
+          >
+            {!money.cardCycle && <option value="">날짜의 달 ({date.slice(0, 7)})</option>}
+            {[...new Set([...payState.cycles.map((c) => c.key), ...(money.cardCycle ? [money.cardCycle] : [])])].sort().map((key) => {
+              const c = payState.cycles.find((x) => x.key === key);
+              const cy = cycleByKey(linkedCard, key);
+              return (
+                <option key={key} value={key}>
+                  {dayLabel(cy.payDate)} 결제 ({dayLabel(cy.start)}~{dayLabel(cy.close)}){c ? ` · 남음 ${formatAmount(c.remainingMinor)}` : ''}
+                </option>
+              );
+            })}
+          </select>
+        </div>
+      )}
+      {isCardPay && payCycle && (
+        <p className="mod-hint">
+          {dayLabel(payCycle.start)}~{dayLabel(payCycle.close)} 이용분을 갚습니다. 소비는 쓴 날 이미 셌으므로 대금은 소비에 더하지 않습니다.
+        </p>
+      )}
+      {isCardPay && !money.cardId && pickableCards.length > 0 && (
+        <p className="mod-hint">
+          카드를 정하면 그 카드의 미결제를 줄입니다.{money.status !== 'actual' ? ' 예정이면 그 회차의 예상 대금을 이 예정이 대신합니다 — 같은 돈을 두 번 빼지 않습니다.' : ''}
+        </p>
+      )}
+
+      {!isLoan && !isCardPay && <div className="mod-row">
         <span className="mod-lbl">카테고리</span>
         <div className="mod-chips">
           {pickable.map((c) => (
@@ -110,7 +237,7 @@ export function LedgerFields({
           )}
         </div>
       </div>}
-      {!isLoan && picked && isLoanCategory(picked) && (
+      {!isLoan && !isCardPay && picked && isLoanCategory(picked) && (
         <p className="mod-hint">
           예전에 '대출' 카테고리로 적은 거래입니다. 지금은 지출로 셉니다 — 빚을 갚은 돈이면 흐름에서 대출을 고르세요. 여러 건은 설정 &gt; 데이터 &gt; '예전 대출 카테고리 정리' 로 한꺼번에 옮깁니다.
         </p>
@@ -237,7 +364,7 @@ export function LedgerFields({
       {/* 카드 사용은 생활비에 걸지 않는다. 카드 대금과 이어 줄 연결 정보가 없어서, 걸면 주머니와
           대금에서 같은 돈이 두 번 빠진다. 고를 자리를 감추는 것에서 그치지 않고 이유를 적는다. */}
       {isOutflow && flow === 'cardSpend' && pockets.length > 0 && (
-        <p className="mod-hint">카드 사용은 생활비에 연결하지 않습니다 — 현금은 카드 대금을 내는 날 나가고, 그때 일반 지출로 셉니다.</p>
+        <p className="mod-hint">카드 사용은 생활비에 연결하지 않습니다 — 현금은 결제일에 대금으로 나가고, 생활비에 걸면 같은 돈이 두 번 빠집니다.</p>
       )}
       {canPocket && use === 'undecided' && (
         <p className="mod-hint">
