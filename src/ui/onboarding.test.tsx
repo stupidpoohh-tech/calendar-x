@@ -67,19 +67,30 @@ describe('온보딩 표시 규칙', () => {
 });
 
 describe('온보딩 모달', () => {
-  it('4단계 이동·이전·완료와 단계별 제목 포커스를 제공한다', () => {
+  it('6단계 이동·이전·완료와 단계별 제목 포커스를 제공한다', () => {
     const finish = vi.fn();
     render(<Onboarding onFinish={finish} />);
     expect(screen.getByRole('button', { name: '이전' })).toBeDisabled();
-    expect(screen.getByRole('heading', { name: '내 기록과 함께할 일을 구분합니다' })).toHaveFocus();
+    expect(screen.getByRole('heading', { name: '일정도, 생각도, 돈도. 오늘을 한눈에.' })).toHaveFocus();
     fireEvent.click(screen.getByRole('button', { name: '다음' }));
-    expect(screen.getByRole('heading', { name: '일정은 한눈에, 기록은 필요한 방식으로' })).toHaveFocus();
+    expect(screen.getByRole('heading', { name: '내 기록과 함께할 일을 구분합니다' })).toHaveFocus();
     fireEvent.click(screen.getByRole('button', { name: '이전' }));
-    expect(screen.getByText('1 / 4 · 공간')).toBeInTheDocument();
-    for (let i = 0; i < 3; i++) fireEvent.click(screen.getByRole('button', { name: '다음' }));
-    expect(screen.getByRole('heading', { name: '남겨 둘 돈에 목적을 정합니다' })).toHaveFocus();
+    expect(screen.getByText('1 / 6 · 대시보드')).toBeInTheDocument();
+    for (let i = 0; i < 5; i++) fireEvent.click(screen.getByRole('button', { name: '다음' }));
+    expect(screen.getByRole('heading', { name: '해야 할 일 사이에, 쉴 시간도 남겨 두세요' })).toHaveFocus();
     fireEvent.click(screen.getByRole('button', { name: '시작하기' }));
     expect(finish).toHaveBeenCalledWith('complete');
+  });
+
+  it('상단 내비게이터에서 원하는 단계로 바로 이동하고 완료 전에는 저장하지 않는다', () => {
+    const finish = vi.fn();
+    render(<Onboarding onFinish={finish} />);
+    fireEvent.click(screen.getByRole('button', { name: '6단계 리커버리' }));
+    expect(screen.getByRole('button', { name: '6단계 리커버리' })).toHaveAttribute('aria-current', 'step');
+    expect(screen.getByRole('heading', { name: '해야 할 일 사이에, 쉴 시간도 남겨 두세요' })).toHaveFocus();
+    fireEvent.click(screen.getByRole('button', { name: '2단계 공간' }));
+    expect(screen.getByRole('heading', { name: '내 기록과 함께할 일을 구분합니다' })).toHaveFocus();
+    expect(finish).not.toHaveBeenCalled();
   });
 
   it('체크 여부에 따라 건너뛰기와 Esc의 영구 숨김을 구분한다', () => {

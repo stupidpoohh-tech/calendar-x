@@ -52,7 +52,7 @@ export function LayoutSettings({ layout, onLayout, shared, section }: LayoutSett
         <div className="set-row-inline">
           <span>
             캘린더
-            <span className="set-row-s rec-sum">전체 · 캘린더 화면</span>
+            <span className="set-row-s rec-sum">대시보드 · 캘린더 화면</span>
           </span>
           <span className="set-fixed">항상 사용</span>
         </div>

@@ -77,6 +77,8 @@ export interface StoreState {
    * 화면용 자료의 상태. `loading` 은 이 값에서 나온다.
    */
   display: FeedState;
+  /** Dashboard counts need both the month window and recurring schedules. */
+  dashboardFeed?: FeedState;
   /**
    * 금액 계산용 자료의 상태.
    *
@@ -485,7 +487,7 @@ export function useStore(uid: string | null, cursorISO: string, todayISO: string
     entries, tideEntries, tideMonths,
     accounts, debts, pins, budgets, reserves, reserveLinked, reserveUsage, cards, cardLinked,
     categories, categoryBudgets, annualBudgets, ledger, ledgerMeta, ledgerNotes, ledgerNotesFeed,
-    display, calc,
+    display, calc, dashboardFeed: combineFeeds([display, recurringFeed]),
     loading: !display.ready, error, rulesBlocked,
   };
 }

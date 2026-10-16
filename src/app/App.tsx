@@ -20,7 +20,7 @@ import {
 } from '../data/restore';
 import { LENSES, LENS_BY_ID, SHARED_TABS } from '../domain/constants';
 import { calendarAmountCaption, lensVisible } from '../domain/layout';
-import { endOfMonth, fmtMonthTitle, startOfMonth, toISO } from '../domain/date';
+import { endOfMonth, fmtMonthTitle, parseDate, startOfMonth, toISO } from '../domain/date';
 import { convertKind, displayTitle, effectiveEndDate, newEntry, newMoney, uid as newId, withDerived } from '../domain/entry';
 import {
   INVITE_PARAM, isShareableTask, newNote, repinNotes, sharedChange, sharedTitle,
@@ -79,7 +79,7 @@ import { SpaceSwitch } from '../ui/SpaceSwitch';
 import { SharedScreen } from '../ui/SharedScreen';
 import { SharedJoinSheet, SharedSettingsSheet, SharedStartSheet } from '../ui/SharedInvite';
 import { SettingsSheet } from '../ui/SettingsSheet';
-import { TodayPanel } from '../ui/TodayPanel';
+import { Dashboard } from '../ui/Dashboard';
 import { useDialog } from '../ui/Dialog';
 import { useAuth } from './useAuth';
 import { usePrefs } from './usePrefs';
@@ -199,7 +199,7 @@ function Workspace({ uid, user, onSignOut }: WorkspaceProps) {
   const cursorISO = toISO(cursor);
   const isAnon = uid === null;
   // 훅은 조건부 호출이 안 된다. 둘 다 부르고 로그인 상태에 따라 결과를 고른다.
-  const liveStore = useStore(uid, cursorISO, today);
+  const liveStore = useStore(uid, prefs.lens === 'all' ? today : cursorISO, today);
   const demoStore = useDemoStore();
   const store = isAnon ? demoStore : liveStore;
   const { db } = getFirebase();
@@ -443,7 +443,7 @@ function Workspace({ uid, user, onSignOut }: WorkspaceProps) {
   const openCreate = useCallback((patch: Partial<Entry> = {}) => {
     if (isAnon) { void promptLogin(); return; }
     const kind = LENS_BY_ID[lens]?.kind ?? 'task';
-    const startDate = patch.startDate ?? cursorISOForCreate(today, cursor);
+    const startDate = patch.startDate ?? (lens === 'all' ? today : cursorISOForCreate(today, cursor));
     /*
       가계부는 날짜로 시작 상태를 정한다. 오늘까지는 이미 일어난 돈(실제 거래)이고, 앞날은
       예정이다. 편집 창 맨 위에서 언제든 바꿀 수 있고, 고른 쪽이 늘 보인다.
@@ -1029,7 +1029,8 @@ function Workspace({ uid, user, onSignOut }: WorkspaceProps) {
   // 필터는 달력 · 리스트에 그리는 항목을 거른다. 가계부에서는 그 달력이 있는 현금흐름에서만 뜻이 있다.
   // 마지막 보기는 세션 동안만 기억한다. 앱을 새로 열면 현금흐름부터 — 가계부의 기본 화면이다.
   const [ledgerTab, setLedgerTab] = useState<LedgerTabId>('cashflow');
-  const filterUsable = !ledgerOn || ledgerTab === 'cashflow';
+  const dashboardOn = lens === 'all' && !sharedOpen;
+  const filterUsable = !dashboardOn && (!ledgerOn || ledgerTab === 'cashflow');
   const ledgerRange = useLedgerFeed(uid, ledgerMonths, ledgerOn && !isAnon);
   const ledgerEntries = useMemo(() => {
     if (isAnon) return store.entries;
@@ -1865,7 +1866,7 @@ function Workspace({ uid, user, onSignOut }: WorkspaceProps) {
             <div className="mobile-more-panel" onClick={(e) => {
               if ((e.target as HTMLElement).closest('button')) e.currentTarget.closest('details')?.removeAttribute('open');
             }}>
-              {!sharedOpen && !ledgerOn && <>
+              {!sharedOpen && !ledgerOn && !dashboardOn && <>
                 <button onClick={() => set('view', 'calendar')} aria-pressed={view === 'calendar'}><Icon.Calendar size={16} />월간 보기</button>
                 <button onClick={() => set('view', 'list')} aria-pressed={view === 'list'}><Icon.List size={16} />리스트 보기</button>
               </>}
@@ -1896,19 +1897,6 @@ function Workspace({ uid, user, onSignOut }: WorkspaceProps) {
           </span>
           <span className="app-logo-name">캘린더 X</span>
         </div>
-      </div>
-      <header className="topbar" data-space={sharedOpen ? 'shared' : 'me'}>
-        <div className="header-left">
-
-
-        {/*
-          공간 전환. 탭보다 **위**이지만 자리는 작다 — 머리가 한 줄 더 늘면 모바일에서
-          캘린더가 그만큼 밀린다. 로그인해야 공유가 뜻이 있으므로 그 전에는 띄우지 않는다.
-        */}
-        {/*
-          연결이 있으면 설정의 '같이보기 공간 전환' 을 따른다. 연결이 없으면 고를 것이 없으므로 지금처럼
-          시작하는 칸(👥+)이 남는다.
-        */}
         {!isAnon && (layout.sharedSwitcher || !shared.board) && (
           <div className="space-context"><SpaceSwitch
             space={sharedOpen ? 'shared' : 'me'}
@@ -1918,9 +1906,11 @@ function Workspace({ uid, user, onSignOut }: WorkspaceProps) {
             onStart={() => setSharedSheet('start')}
           /></div>
         )}
-
+      </div>
+      <header className="topbar" data-space={sharedOpen ? 'shared' : 'me'}>
+        <div className="header-left">
           {/* 가계부는 보기마다 자기 기간 도구를 가진다 — 위에 달력 월을 하나 더 두면 무엇이 무엇을 바꾸는지 흐려진다. */}
-          {!sharedOpen && !ledgerOn && (
+          {!sharedOpen && !ledgerOn && !dashboardOn && (
         <div className="tool-l">
           <button className="ico-btn sm" aria-label="이전 달"
             onClick={() => setCursor((d) => new Date(d.getFullYear(), d.getMonth() - 1, 1))}>
@@ -1984,7 +1974,7 @@ function Workspace({ uid, user, onSignOut }: WorkspaceProps) {
         <div className="header-right">
           {!sharedOpen && (
         <div className="tool-r">
-          {!ledgerOn && (
+          {!ledgerOn && !dashboardOn && (
           <div className="seg">
             {(['calendar', 'list'] as ViewId[]).map((v) => (
               <button key={v} className={'seg-btn' + (view === v ? ' on' : '')} aria-label={v === 'calendar' ? '캘린더 보기' : '리스트 보기'} aria-pressed={view === v} onClick={() => set('view', v)}>
@@ -2130,11 +2120,6 @@ function Workspace({ uid, user, onSignOut }: WorkspaceProps) {
         <div className="banner bad"><Icon.Alert size={14} />{store.error}</div>
       )}
 
-      {/*
-        전체 렌즈의 요약 카드는 TodayPanel 하나다. 잔고·대출·고정 메모를 그 아래 줄줄이
-        세우면 모바일에서 캘린더가 화면 두 번 아래로 밀렸고, 잔고 금액이 오늘 카드와
-        잔고 카드에 두 번 나왔다. 잔고는 카드 안으로, 대출과 고정 메모는 각자의 렌즈로.
-      */}
       <div className="side">
         {/*
           빚이 0이면 아무것도 렌더링하지 않는다. 정상 상태에서 회복은 화면에 없어야 한다.
@@ -2154,42 +2139,20 @@ function Workspace({ uid, user, onSignOut }: WorkspaceProps) {
           />
         )}
 
-        {pinnedSection}
+        {!dashboardOn && pinnedSection}
         </div>
-
-        {lens === 'all' && (
-          <TodayPanel
-            todayISO={today}
-            entries={shownEntries}
-            showMoney={layout.ledger}
-            tideEntries={store.tideEntries}
-            tideFrom={tideFrom}
-            calcState={calcState}
-            accounts={store.accounts}
-            budgets={store.budgets}
-            reserves={store.reserves}
-            reserveUsage={store.reserveUsage}
-            cards={store.cards}
-            cardEntries={store.cardLinked}
-            hasBalance={hasBalance}
-            collapsed={prefs.todayCollapsed}
-            onToggleCollapsed={() => set('todayCollapsed', !prefs.todayCollapsed)}
-            moneyCollapsed={prefs.todayMoneyCollapsed}
-            onToggleMoneyCollapsed={() => set('todayMoneyCollapsed', !prefs.todayMoneyCollapsed)}
-            onEntryClick={openEdit}
-            onStatusChange={handleStatus}
-            onPromote={handlePromote}
-            onQuickIdea={persist}
-            onSaveAccount={saveBalance}
-          />
-        )}
-
-
-
       </div>
 
       <main className="main">
-        {ledgerOn ? (
+        {dashboardOn ? (
+          <>
+          <Dashboard today={today} store={store} showMoney={layout.ledger} showNotes={layout.notes} demo={isAnon}
+            onNavigate={(next) => { setCursor(parseDate(today)!); set('lens', next); setFilters(emptyFilters()); if (next === 'money') setLedgerTab('cashflow'); }}
+            onEntry={openEdit} onStatus={handleStatus} onPromote={handlePromote}
+            onCreate={(kind, date) => openCreate({ ...newEntry(kind, { startDate: date }), startDate: date })} />
+          <div className="utility-strip">{pinnedSection}</div>
+          </>
+        ) : ledgerOn ? (
           <LedgerScreen
             todayISO={today}
             settleDay={settleDay}
