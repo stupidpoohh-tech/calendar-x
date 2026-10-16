@@ -201,15 +201,15 @@ describe('세이브 — 보호 · 목표 · 보관 (P1)', () => {
       ...legacy, protected: false, targetAmountMinor: 1000000, targetDate: '2027-03-01', archivedAt: '2026-10-14T01:00:00.000Z',
     });
     const doc = reserveToDoc(r);
-    expect(doc).toMatchObject({ protected: false, targetAmountMinor: 1000000, targetDate: '2027-03-01', schema: 2 });
+    expect(doc).toMatchObject({ protected: false, targetAmountMinor: 1000000, targetDate: '2027-03-01', schema: LEDGER_SCHEMA });
     expect(reserveFromDoc('s1', doc)).toEqual(r);
     const old = reserveToDoc({ id: 's2', ...legacy });
-    expect(old).toMatchObject({ protected: true, targetAmountMinor: null, targetDate: null, archivedAt: null, schema: 2 });
+    expect(old).toMatchObject({ protected: true, targetAmountMinor: null, targetDate: null, archivedAt: null, schema: LEDGER_SCHEMA });
   });
 
   it('부분 쓰기는 담긴 칸과 판 번호만 쓴다', () => {
-    expect(reservePatchToDoc({ protected: false })).toEqual({ protected: false, schema: 2 });
-    expect(reservePatchToDoc({ amountMinor: 10, targetDate: null })).toEqual({ amountMinor: 10, targetDate: null, schema: 2 });
+    expect(reservePatchToDoc({ protected: false })).toEqual({ protected: false, schema: LEDGER_SCHEMA });
+    expect(reservePatchToDoc({ amountMinor: 10, targetDate: null })).toEqual({ amountMinor: 10, targetDate: null, schema: LEDGER_SCHEMA });
   });
 });
 

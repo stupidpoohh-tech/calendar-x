@@ -182,6 +182,9 @@ describe('생활비 · 세이브 창', () => {
     expect(screen.getByDisplayValue('생활비')).toBeInTheDocument();
     cleanup();
     const p = sheet({ kind: 'reserve', id: 'r1' });
+    // 세이브 줄로 들어오면 상세가 펼쳐진다(P3). 고치기는 줄의 톱니다.
+    expect(screen.getByRole('button', { name: /^비상금 남음/ })).toHaveAttribute('aria-expanded', 'true');
+    fireEvent.click(screen.getByRole('button', { name: '비상금 고치기' }));
     fireEvent.change(screen.getByDisplayValue('비상금'), { target: { value: '여행 적립' } });
     fireEvent.click(screen.getByRole('button', { name: '저장' }));
     expect(p.onSaveReserve).toHaveBeenCalledWith(
@@ -230,11 +233,12 @@ describe('세이브 보호 · 목표 · 보관 (P1)', () => {
   it('풀린 세이브는 "가용 한도에 포함" 이고, 금액은 그대로 보인다', () => {
     sheet([save({ protected: false })]);
     expect(screen.getByRole('button', { name: /비상금 보호/ })).toHaveAttribute('aria-pressed', 'false');
-    expect(screen.getByRole('button', { name: '비상금 고치기' }).textContent).toContain('300,000원 · 가용 한도에 포함');
+    expect(screen.getByRole('button', { name: /^비상금 남음/ }).textContent).toContain('남음 300,000원 · 가용 한도에 포함');
   });
 
   it('편집 창에서 보호 · 목표 금액 · 목표 날짜를 고친다 — 목표는 표시만 한다고 적는다', () => {
     const p = sheet([save()], { kind: 'reserve', id: 'r1' });
+    fireEvent.click(screen.getByRole('button', { name: '비상금 고치기' }));
     const dlg = screen.getByRole('dialog');
     fireEvent.click(within(dlg).getByRole('button', { name: '가용 한도에서 제외' }));
     expect(within(dlg).getByRole('button', { name: '가용 한도에 포함' })).toHaveAttribute('aria-pressed', 'false');
@@ -251,11 +255,12 @@ describe('세이브 보호 · 목표 · 보관 (P1)', () => {
 
   it('목표가 있으면 줄에 진행률을 적는다', () => {
     sheet([save({ targetAmountMinor: 1_000_000, targetDate: '2027-03-01' })]);
-    expect(screen.getByRole('button', { name: '비상금 고치기' }).textContent).toContain('목표 1,000,000 · 30%');
+    expect(screen.getByRole('button', { name: /^비상금 남음/ }).textContent).toContain('목표 1,000,000 · 30%');
   });
 
   it('보관은 "일반 목록에서 숨김 · 보호 해제" 이고, 보관한 세이브는 접힌 묶음에서 보관을 푼다', () => {
     const p = sheet([save()], { kind: 'reserve', id: 'r1' });
+    fireEvent.click(screen.getByRole('button', { name: '비상금 고치기' }));
     expect(screen.getByRole('dialog').textContent).toContain('보관: 일반 목록에서 숨김 · 보호 해제');
     fireEvent.click(screen.getByRole('button', { name: '보관' }));
     const [next, prev] = p.onSaveReserve.mock.calls[0]!;

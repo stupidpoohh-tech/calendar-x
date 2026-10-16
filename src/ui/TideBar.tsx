@@ -15,7 +15,7 @@
  * 고치는 자리는 확인 잔고 줄 하나다. 생활비 · 세이브로 확보된 몫은 접힌 줄에서 펼쳐 본다.
  */
 import { useMemo, type ReactNode } from 'react';
-import { activeReserves, budgetEnded, budgetStates, reserveProtects } from '../domain/budget';
+import { activeReserves, budgetEnded, budgetStates, reserveProtects, reserveRemaining } from '../domain/budget';
 import { MONEY_TYPE_BY_ID } from '../domain/constants';
 import { daysBetween, fmtDayShort } from '../domain/date';
 import { formatAmount, formatSigned } from '../domain/money';
@@ -44,6 +44,8 @@ interface Props {
    */
   budgets?: readonly Budget[];
   reserves?: readonly Reserve[];
+  /** 세이브마다 연결된 실제 지출의 합(P3). 한도는 확보액이 아니라 남은 금액을 뺀다. */
+  reserveUsage?: ReadonlyMap<string, number>;
   /** 계산 목록이 덮는 가장 이른 날. 정산이 자료 부족을 판정하는 데 쓴다. */
   tideFrom?: string | null;
   /**
@@ -67,9 +69,10 @@ interface Props {
 
 const NO_BUDGETS: readonly Budget[] = [];
 const NO_RESERVES: readonly Reserve[] = [];
+const NO_USAGE: ReadonlyMap<string, number> = new Map();
 
 export function TideBar({
-  todayISO, accounts, entries, budgets = NO_BUDGETS, reserves = NO_RESERVES,
+  todayISO, accounts, entries, budgets = NO_BUDGETS, reserves = NO_RESERVES, reserveUsage = NO_USAGE,
   tideFrom, calcState = CALC_READY,
   hasBalance, onSaveAccount, onEntryClick,
   collapsed, onToggleCollapsed, children, onOpenPockets,
@@ -78,11 +81,8 @@ export function TideBar({
   const editor = useBalanceEditor(accounts, entries, onSaveAccount, tideFrom, todayISO);
 
   // 통화가 섞이면 최소 단위가 달라 애초에 더할 수 없다. 숫자를 내지 않는다.
-  const scope = useMemo(
-    () => calcScopeOf(accounts, entries, { budgets, reserves }), [accounts, entries, budgets, reserves],
-  );
-
-  const res = useMemo(() => ({ budgets, reserves }), [budgets, reserves]);
+  const res = useMemo(() => ({ budgets, reserves, reserveUsage }), [budgets, reserves, reserveUsage]);
+  const scope = useMemo(() => calcScopeOf(accounts, entries, res), [accounts, entries, res]);
 
   const horizon = useMemo(() => horizonOf(entries, today), [entries, today]);
   // 머리 숫자를 정하는 날(구간 안 가용이 가장 작은 날 — 대개 입금 전날, 생활비가 구간 안에서
@@ -269,10 +269,16 @@ export function TideBar({
                 .filter((r) => (reserveProtects(r) ? onOpenPockets || r.amountMinor > 0 : !!onOpenPockets))
                 .map((r) => {
                   const locked = reserveProtects(r);
+                  // 사용한 적이 있으면 남은 금액을 적는다(확보 − 연결된 실제 지출). 초과면 초과로.
+                  const used = reserveUsage.get(r.id) ?? 0;
+                  const left = reserveRemaining(r, reserveUsage);
                   const body = (
                     <>
                       <span>{r.name} <i>{locked ? '세이브' : '세이브 · 한도에 포함'}</i></span>
-                      <span className={locked ? undefined : 'tide-pk-off'}>{formatAmount(r.amountMinor)}</span>
+                      <span className={locked ? undefined : 'tide-pk-off'}>
+                        {used === 0 ? formatAmount(r.amountMinor)
+                          : left < 0 ? `초과 ${formatAmount(-left)}` : `남음 ${formatAmount(left)}`}
+                      </span>
                     </>
                   );
                   return (

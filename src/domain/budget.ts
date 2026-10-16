@@ -140,7 +140,8 @@ export function defaultPocketFor(
 ): string | null {
   const m = e.money;
   if (!m || !isActual(e) || !pocketEligible(e)) return m?.budgetId ?? null;
-  if (m.budgetId || m.outsidePocket) return m.budgetId ?? null;
+  // 세이브에 건 지출(P3)도 사용처를 이미 정한 것이다 — 주머니를 덮어 고르지 않는다.
+  if (m.budgetId || m.outsidePocket || m.reserveId) return m.budgetId ?? null;
   const covering = budgets.filter((b) => budgetCovers(b, e.startDate));
   return covering.length === 1 ? covering[0]!.id : null;
 }
@@ -159,6 +160,8 @@ export function unlinkedSpendingFor(budget: Budget, entries: readonly Entry[]): 
       && !e.money.budgetId && !e.money.debtId && !e.recurrence
       // 일부러 생활비 밖에 둔 것은 경고하지 않는다 — 정하지 않은 것만 보여 준다.
       && !e.money.outsidePocket
+      // 세이브에서 쓴 지출(P3)은 사용처를 정한 것이다 — 미결정으로 경고하지 않는다.
+      && !e.money.reserveId
       && e.startDate >= budget.startDate && e.startDate <= budget.endDate)
     .sort((a, b) => a.startDate.localeCompare(b.startDate));
 }
@@ -201,6 +204,11 @@ export function pocketPeriodImpact(
 /** 주머니 연결을 푼 거래 — 미결정으로 돌아간다. "생활비 외" 로 바꾸지 않는다(사용자가 정한 적 없다). */
 export function unlinkedFromPocket(e: Entry, now: string): Entry {
   return { ...e, updatedAt: now, money: e.money ? { ...e.money, budgetId: null } : e.money };
+}
+
+/** 세이브 연결을 푼 거래(P3). 거래 자체 · 금액 · 생활비 사용처는 그대로다. */
+export function unlinkedFromReserve(e: Entry, now: string): Entry {
+  return { ...e, updatedAt: now, money: e.money ? { ...e.money, reserveId: null } : e.money };
 }
 
 /** 다른 주머니로 옮긴 거래. */
@@ -346,6 +354,11 @@ export function reservedOn(
   accounts?: readonly Account[],
   /** 오늘. 이 날이 종료일을 지난 주머니는 남은 잔액의 예약을 푼다. 없으면 풀지 않는다. */
   today?: DateISO,
+  /**
+   * 세이브마다 연결된 실제 지출의 합(`reserveUsageOf`). 계산 창이 아니라 **연결된 거래 전량**에서 센 값이어야
+   * 한다 — 창 밖의 지난 사용이 빠지면 남은 금액이 실제보다 크게 잡힌다. 없으면 사용액 0(P3 이전과 같다).
+   */
+  reserveUsage: ReadonlyMap<string, number> = NO_USAGE,
 ): number {
   let total = 0;
   const confirmed = confirmedSetOf(entries);
@@ -367,8 +380,8 @@ export function reservedOn(
     total += pocketReserve(budget, spendingIn(budget, entries, confirmed), inBalance, ended);
   }
 
-  // 세이브는 날짜가 없다. 언제 보든 같은 금액이 묶여 있다. 보호를 켠 활성 세이브만 뺀다.
-  total += protectedReserveTotal(reserves);
+  // 세이브는 날짜가 없다. 언제 보든 같은 금액이 묶여 있다. 보호를 켠 활성 세이브의 **남은 금액**만 뺀다(P3).
+  total += protectedReserveTotal(reserves, reserveUsage);
 
   return total;
 }
@@ -401,9 +414,73 @@ export function reserveProtects(r: Pick<Reserve, 'protected' | 'archivedAt'>): b
   return r.protected !== false && !r.archivedAt;
 }
 
-/** 가용 한도에서 빠지는 세이브 금액의 합 (`reservedOn` 의 세이브 몫). */
-export function protectedReserveTotal(reserves: readonly Reserve[]): number {
-  return reserves.reduce((t, r) => (reserveProtects(r) ? t + r.amountMinor : t), 0);
+/**
+ * 가용 한도에서 빠지는 세이브 금액의 합 (`reservedOn` 의 세이브 몫).
+ *
+ * P3 부터는 확보액이 아니라 **남은 금액**(확보액 − 연결된 실제 지출)을 뺀다. 세이브에서 쓴 지출은 현금 흐름에서
+ * 이미 한 번 빠지므로(잔고 밖이면 실제 거래로, 잔고에 반영됐으면 잔고 자체로), 확보액 전체를 계속 빼면 같은 돈이
+ * 두 번 빠진다. 남은 금액이 음수(초과 사용)면 0 으로 센다 — 초과분이 다른 돈을 늘려 주지 않는다.
+ */
+export function protectedReserveTotal(
+  reserves: readonly Reserve[], usage: ReadonlyMap<string, number> = NO_USAGE,
+): number {
+  return reserves.reduce((t, r) => (reserveProtects(r) ? t + Math.max(0, reserveRemaining(r, usage)) : t), 0);
+}
+
+/*
+  ── 세이브 사용 (P3) ───────────────────────────────────────────────
+
+  세이브는 가상 봉투다. 그 돈으로 실제로 쓴 지출은 원장에 **한 번만** 적히고(현금 흐름 · 소비 통계 그대로),
+  세이브 쪽에서는 그 지출을 가리킬 뿐이다(`money.reserveId`). 세이브의 원본 금액은 깎지 않는다 —
+
+    사용액   = 그 세이브를 가리키는 **실제** 일반 지출의 합      (`reserveUsageOf`)
+    남은 금액 = 확보액(`amountMinor`) − 사용액                 (`reserveRemaining`, 음수면 초과)
+
+  사용액이 거래에서 계산되므로 연결 · 해제 · 금액 수정 · 삭제 · 다른 세이브로 옮기기 · 백업에서 되살리기가 모두
+  같은 원장에서 저절로 맞는다. 저장을 두 번 해도 같은 문서 하나라 두 번 세지 않는다.
+
+  예정은 사용액이 아니다. 예정에 걸어 둔 연결은 확정할 때 실제 거래로 옮겨 가고(`confirmOccurrence`), 그때부터 센다.
+*/
+
+const NO_USAGE: ReadonlyMap<string, number> = new Map();
+
+/** 고르는 자리에 세이브를 띄울 거래인가 — 일반 지출 · 대출 연결 없음 · 반복 아님. 카드 사용은 P4 의 몫이다. */
+export function reserveLinkable(e: Pick<Entry, 'money' | 'recurrence'>): boolean {
+  const m = e.money;
+  if (!m || m.type !== 'expense' || m.debtId || e.recurrence) return false;
+  return moneyFlowOf(m) === 'normal';
+}
+
+/** 세이브 사용액으로 세는 거래인가 — 실제 · 일반 지출 · 세이브 연결. */
+export function countsAsReserveUse(e: Entry): boolean {
+  return isActual(e) && !!e.money?.reserveId && e.money.type === 'expense'
+    && moneyFlowOf(e.money) === 'normal' && !e.recurrence;
+}
+
+/** 세이브 id → 연결된 실제 지출의 합. 같은 문서가 두 번 와도 한 번만 센다. */
+export function reserveUsageOf(entries: readonly Entry[]): Map<string, number> {
+  const out = new Map<string, number>();
+  const seen = new Set<string>();
+  for (const e of entries) {
+    if (seen.has(e.id) || !countsAsReserveUse(e)) continue;
+    seen.add(e.id);
+    const id = e.money!.reserveId!;
+    out.set(id, (out.get(id) ?? 0) + Math.abs(e.money!.amountMinor));
+  }
+  return out;
+}
+
+/** 남은 금액 = 확보액 − 사용액. 음수면 그만큼 초과해 쓴 것이다. */
+export function reserveRemaining(r: Pick<Reserve, 'id' | 'amountMinor'>, usage: ReadonlyMap<string, number>): number {
+  return r.amountMinor - (usage.get(r.id) ?? 0);
+}
+
+/** 그 세이브에 걸린 거래 — 실제 · 예정 모두. 날짜 내림차순. 화면의 '연결된 거래' 목록이다. */
+export function reserveLinkedEntries(reserveId: string, entries: readonly Entry[]): Entry[] {
+  const seen = new Set<string>();
+  return entries
+    .filter((e) => e.money?.reserveId === reserveId && !seen.has(e.id) && (seen.add(e.id), true))
+    .sort((a, b) => b.startDate.localeCompare(a.startDate) || a.title.localeCompare(b.title));
 }
 
 /** 일반 목록에 보이는 세이브 — 보관하지 않은 것. */

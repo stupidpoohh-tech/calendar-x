@@ -38,6 +38,8 @@ interface Props {
   /** 한도에서 미리 빠져 있는 돈. 가계부 카드와 같은 값을 봐야 두 카드가 어긋나지 않는다. */
   budgets?: readonly Budget[];
   reserves?: readonly Reserve[];
+  /** 세이브마다 연결된 실제 지출의 합(P3). 한도는 확보액이 아니라 남은 금액을 뺀다. */
+  reserveUsage?: ReadonlyMap<string, number>;
   /** 잔고를 한 번도 입력하지 않았으면 tide 값을 0으로 단정하지 않는다. */
   hasBalance: boolean;
   collapsed: boolean;
@@ -58,6 +60,7 @@ interface Props {
 
 const NO_BUDGETS: readonly Budget[] = [];
 const NO_RESERVES: readonly Reserve[] = [];
+const NO_USAGE: ReadonlyMap<string, number> = new Map();
 
 function occursOnDay(e: Entry, iso: string): boolean {
   return e.startDate <= iso && effectiveEndDate(e) >= iso;
@@ -65,7 +68,7 @@ function occursOnDay(e: Entry, iso: string): boolean {
 
 export function TodayPanel({
   todayISO, entries, tideEntries, tideFrom, calcState = CALC_READY, accounts,
-  budgets = NO_BUDGETS, reserves = NO_RESERVES, hasBalance,
+  budgets = NO_BUDGETS, reserves = NO_RESERVES, reserveUsage = NO_USAGE, hasBalance,
   collapsed, onToggleCollapsed, moneyCollapsed, onToggleMoneyCollapsed,
   onEntryClick, onStatusChange, onPromote, onQuickIdea, onSaveAccount, showMoney = true,
 }: Props) {
@@ -91,7 +94,7 @@ export function TodayPanel({
   // '오늘 마감 예상' 대신 tide-over 규칙 — 다음 입금까지 남는 한도.
   const horizon = useMemo(() => horizonOf(tideEntries, todayISO), [tideEntries, todayISO]);
   // 통화가 섞이면 최소 단위가 달라 애초에 더할 수 없다.
-  const res = useMemo(() => ({ budgets, reserves }), [budgets, reserves]);
+  const res = useMemo(() => ({ budgets, reserves, reserveUsage }), [budgets, reserves, reserveUsage]);
   const scope = useMemo(() => calcScopeOf(accounts, tideEntries, res), [accounts, tideEntries, res]);
 
   const tideLimit = useMemo(

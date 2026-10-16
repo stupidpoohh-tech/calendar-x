@@ -60,6 +60,13 @@ service cloud.firestore {
         && isStrOrNull(m.get('categoryId', null), 200)
         && isStrOrNull(m.get('method', null), 100)
         && isStrOrNull(m.get('accountId', null), 200)
+        // 세이브 연결 (P3). 일반 지출에만, 생활비 주머니 · 대출과 함께 걸리지 않고, 반복 항목에는 걸지 않는다.
+        && isStrOrNull(m.get('reserveId', null), 200)
+        && (m.get('reserveId', null) == null || (
+             m.type == 'expense' && flow == 'normal'
+             && m.get('budgetId', null) == null && m.get('debtId', null) == null
+             && d.isRecurring == false
+           ))
         && (ref == null || (
              ref is map
              && ref.keys().hasOnly(['entryId', 'date'])
@@ -114,6 +121,18 @@ service cloud.firestore {
       return resource == null
         || !hasLedgerData(resource.data.get('money', null))
         || schemaOf(data()) >= 2;
+    }
+
+    /*
+      세이브 연결(P3)을 구버전 앱이 지우지 못하게 한다. P2 까지의 앱은 판 번호 2 를 쓰면서 `money.reserveId` 를
+      모른다 — 그 앱이 연결된 거래를 고치면 연결이 말없이 사라져 세이브 사용액이 줄어든다. 연결이 실린 거래에는
+      판 번호 3 이상의 쓰기만 받는다. 연결이 없는 문서는 지금처럼 2 이상이면 된다.
+    */
+    function keepsReserveLink() {
+      return resource == null
+        || !(resource.data.get('money', null) is map)
+        || resource.data.money.get('reserveId', null) == null
+        || schemaOf(data()) >= 3;
     }
 
     // 계좌의 잔고 반영 목록도 같다. 구버전이 지우면 반영된 거래가 한도에서 또 빠진다.
@@ -239,6 +258,7 @@ service cloud.firestore {
              ))
           && (!('schema' in data()) || data().schema is int)
           && keepsLedger()
+          && keepsReserveLink()
           // 같이 보기에 올리지 않는 표시. 옛 문서에는 없고 그것이 정상이다.
           && (!('keepPrivate' in data()) || data().keepPrivate is bool);
       }

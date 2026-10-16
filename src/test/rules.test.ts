@@ -530,6 +530,69 @@ describe('가계부 원장', () => {
     });
   });
 
+  describe('세이브 연결 (P3)', () => {
+    // 세이브 연결은 판 번호 3 부터다. 그 필드를 모르는 앱(판 2)이 연결을 지우지 못하게 한다.
+    const linked = (over: Record<string, unknown> = {}, top: Record<string, unknown> = {}) =>
+      ledgerEntry(ledgerMoney({ status: 'actual', reserveId: 'r1', outsidePocket: true, ...over }), { schema: 3, ...top });
+
+    it('일반 지출에 세이브를 건다 — 실제 · 예정 모두', async () => {
+      await assertSucceeds(setDoc(doc(db(ME), path('s1')), linked()));
+      await assertSucceeds(setDoc(doc(db(ME), path('s2')), linked({ status: 'planned' })));
+      await assertSucceeds(setDoc(doc(db(ME), path('s3')), linked({ reserveId: null })));
+    });
+
+    it('수입 · 카드 · 대출 · 이체에는 걸 수 없다', async () => {
+      await assertFails(setDoc(doc(db(ME), path('x1')), linked({ type: 'income' })));
+      for (const flow of ['cardSpend', 'cardPayment', 'loanPrincipal', 'loanInterest', 'transfer']) {
+        await assertFails(setDoc(doc(db(ME), path(`x-${flow}`)), linked({ flow })));
+      }
+    });
+
+    it('생활비 · 대출 연결과 함께 걸 수 없다 — 사용처는 하나다', async () => {
+      await assertFails(setDoc(doc(db(ME), path('x1')), linked({ budgetId: 'b1' })));
+      await assertFails(setDoc(doc(db(ME), path('x2')), linked({ debtId: 'd1' })));
+    });
+
+    it('반복 예정에는 걸 수 없다', async () => {
+      await assertFails(setDoc(doc(db(ME), path('x1')), linked({ status: 'planned' }, {
+        isRecurring: true, recurrence: { freq: 'monthly', interval: 1, until: null, count: null },
+      })));
+    });
+
+    it('모양: 문자열 200자 이하', async () => {
+      await assertFails(setDoc(doc(db(ME), path('x1')), linked({ reserveId: 7 })));
+      await assertFails(setDoc(doc(db(ME), path('x2')), linked({ reserveId: 'x'.repeat(201) })));
+    });
+
+    it('남은 못 쓴다', async () => {
+      await assertFails(setDoc(doc(db(OTHER), path('s1')), linked()));
+    });
+
+    it('연결된 거래는 판 2 쓰기로 덮을 수 없다 — 그 필드를 모르는 앱이 연결을 지우지 못한다', async () => {
+      await assertSucceeds(setDoc(doc(db(ME), path('s1')), linked()));
+      // 판 2 앱이 고친 모양: reserveId 가 없다.
+      await assertFails(setDoc(doc(db(ME), path('s1')), ledgerEntry(ledgerMoney({ status: 'actual' }), { title: '판 2 수정' })));
+      await assertFails(setDoc(doc(db(ME), path('s1')), oldShape()));
+      const snap = await getDoc(doc(db(ME), path('s1')));
+      expect(snap.data()?.money?.reserveId).toBe('r1');
+      // 판 3 은 연결을 풀 수 있다.
+      await assertSucceeds(setDoc(doc(db(ME), path('s1')), linked({ reserveId: null })));
+      // 연결이 없는 문서는 판 2 도 지금처럼 고친다.
+      await assertSucceeds(setDoc(doc(db(ME), path('s1')), ledgerEntry(ledgerMoney({ status: 'actual' }))));
+    });
+
+    it('판 번호는 이미 있는 연결을 지키는 데만 쓴다 — 새 문서는 판 2 로도 모양만 맞으면 받는다', async () => {
+      // 판 2 앱은 이 필드를 모르므로 실제로 연결을 만들지 않는다. 규칙은 저장된 연결이 있을 때만 판 3 을 요구한다.
+      await assertSucceeds(setDoc(doc(db(ME), path('s1')), linked({}, { schema: 2 })));
+    });
+
+    it('부분 갱신은 합쳐진 문서의 판 번호로 통과한다 — 지우기는 막지 않는다', async () => {
+      await assertSucceeds(setDoc(doc(db(ME), path('s1')), linked()));
+      await assertSucceeds(updateDoc(doc(db(ME), path('s1')), { title: '부분' }));
+      await assertSucceeds(deleteDoc(doc(db(ME), path('s1'))));
+    });
+  });
+
   describe('계좌의 잔고 반영 목록', () => {
     const account = {
       name: '주계좌', balanceMinor: 1350000, currency: 'KRW', asOf: '2026-08-19',

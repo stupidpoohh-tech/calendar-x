@@ -382,6 +382,23 @@ export async function fetchActualEntries(db: Firestore, uid: string): Promise<En
 }
 
 /**
+ * 세이브에 건 거래 전량 (P3) — 실제 · 예정 모두.
+ *
+ * 세이브의 사용액은 연결된 실제 지출의 합이다(`budget.reserveUsageOf`). 계산 창(잔고 기준일 ~ +14달)의 거래만
+ * 보면 창 밖의 지난 사용이 빠져 남은 금액이 실제보다 크게 잡힌다 — 그래서 달과 무관하게 연결된 거래를 따로 받는다.
+ * `!= null` 은 그 필드가 없는 예전 문서와 null 인 문서를 함께 뺀다. 단일 필드 색인으로 조회된다.
+ */
+export function subscribeReserveLinkedEntries(
+  db: Firestore, uid: string, cb: SnapSink<Entry>, onError: ErrorSink,
+): Unsubscribe {
+  return onSnapshot(
+    query(col(db, uid, COL.entries), where('money.reserveId', '!=', null)), WITH_META,
+    keepingIdentity(entryFromDoc, cb),
+    (err) => onError('reserveLinked', err),
+  );
+}
+
+/**
  * 실제 거래 전량을 구독한다 — 전체 검색이 켜져 있는 동안만.
  *
  * 한 번 읽어 두면 검색 결과에서 고치거나 지운 거래가 옛 모습 그대로 남는다. 구독이면

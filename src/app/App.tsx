@@ -34,14 +34,15 @@ import {
 } from '../domain/confirm';
 import { applyReflectChoice, isActual, reflectChoiceFor } from '../domain/ledger';
 import {
-  movedToPocket, pocketPeriodImpact, reservePatchOf, reservePatchSummary, unlinkedFromPocket,
+  movedToPocket, pocketPeriodImpact, reserveLinkedEntries, reservePatchOf, reservePatchSummary, unlinkedFromPocket,
+  unlinkedFromReserve,
 } from '../domain/budget';
 import { daySummary } from '../domain/daySummary';
 import { balanceViewOn, calcScopeOf } from '../domain/tide';
 import { ymOf } from '../domain/date';
 import { isRecoveryEntry } from '../domain/recovery';
 import type {
-  AnnualBudget, Account, Budget, Category, CategoryBudget, Entry, Filters, LedgerNote, LedgerTabId, LensId, SharedInvite, SharedNote, SharedTodoItem,
+  AnnualBudget, Account, Budget, Category, CategoryBudget, Entry, Filters, LedgerNote, LedgerTabId, LensId, Reserve, SharedInvite, SharedNote, SharedTodoItem,
   TaskStatus, ViewId, YearMonth,
 } from '../domain/types';
 import { ConfirmSheet } from '../ui/ConfirmSheet';
@@ -899,6 +900,48 @@ function Workspace({ uid, user, onSignOut }: WorkspaceProps) {
     commit({ kind: 'ledgerBatch', label: '생활비 삭제', summary: `${b.name} · 연결 해제 ${n(linked.length)}건`, payload });
   }, [isAnon, uid, promptLogin, pocketLinks, dialog, commit]);
 
+  /**
+   * 세이브 삭제 (P3). 연결된 거래가 있으면 보관을 먼저 권한다 — 보관하면 연결과 사용 기록이 그대로 남는다.
+   * 그래도 지우면 걸린 거래의 연결을 같은 배치에서 푼다. 거래는 지우지 않고 금액 · 날짜도 그대로다.
+   * 연결된 거래는 날짜와 무관하게 전량 구독한 목록(`reserveLinked`)에서 센다.
+   */
+  const deleteReserve = useCallback(async (r: Reserve) => {
+    if (isAnon || !uid) { void promptLogin(); return; }
+    const linked = reserveLinkedEntries(r.id, store.reserveLinked);
+    if (linked.length === 0) {
+      const ok = await dialog.confirm({ title: `'${r.name}'을(를) 삭제할까요?`, danger: true, confirmLabel: '삭제' });
+      if (ok) commit({ kind: 'reserveDelete', label: '세이브 삭제', summary: r.name, payload: { id: r.id } });
+      return;
+    }
+    const n = (v: number) => v.toLocaleString('ko-KR');
+    const sum = linked.reduce((t, e) => t + Math.abs(e.money?.amountMinor ?? 0), 0);
+    const choice = await dialog.choose(`'${r.name}'에 연결된 거래가 ${n(linked.length)}건 있습니다`, [
+      { id: 'archive', label: '보관하기', hint: '연결과 사용 기록이 그대로 남습니다. 보관을 풀면 다시 보입니다.' },
+      { id: 'delete', label: '삭제하고 연결 풀기', hint: `거래 ${n(linked.length)}건(${formatAmount(sum)})은 지워지지 않고, 이 세이브와의 연결만 풀립니다.`, danger: true },
+    ], <p>보관하면 가용 한도에서 빠지지 않습니다. 거래는 어느 쪽이든 원장에 그대로 남고 잔고 · 예상 잔고는 바뀌지 않습니다.</p>);
+    const now = new Date().toISOString();
+    if (choice === 'archive') {
+      const patch = reservePatchOf(r, { ...r, archivedAt: now, updatedAt: now });
+      if (patch) {
+        commit({
+          kind: 'reservePatch', label: '세이브', summary: `${r.name} — ${reservePatchSummary(patch)}`,
+          payload: { id: r.id, patch, updatedAt: now },
+        });
+      }
+      return;
+    }
+    if (choice !== 'delete') return;
+    const payload = {
+      entries: linked.map((e) => withDerived(unlinkedFromReserve(e, now))),
+      deleteIds: [], accounts: [], deleteReserveIds: [r.id],
+    };
+    if (ledgerBatchSize(payload) > LEDGER_BATCH_MAX) {
+      dialog.toast(`연결된 거래가 너무 많아(${n(linked.length)}건) 한 번에 풀 수 없습니다. 보관을 써 주세요.`, 'bad');
+      return;
+    }
+    commit({ kind: 'ledgerBatch', label: '세이브 삭제', summary: `${r.name} · 연결 해제 ${n(linked.length)}건`, payload });
+  }, [isAnon, uid, promptLogin, store.reserveLinked, dialog, commit]);
+
   /*
     ── 가계부 상세(내역 · 예산 · 월별 · 통계) ──────────────────────────
 
@@ -1702,8 +1745,8 @@ function Workspace({ uid, user, onSignOut }: WorkspaceProps) {
   const ledgerDayReady = store.display.ready && !(store.display.empty && store.display.fromCache);
   // 달력 칸의 가용 · 생활비 잔여가 보는 예약. 카드 · 날짜 상세와 같은 값이다.
   const reservations = useMemo(
-    () => ({ budgets: store.budgets, reserves: store.reserves }),
-    [store.budgets, store.reserves],
+    () => ({ budgets: store.budgets, reserves: store.reserves, reserveUsage: store.reserveUsage }),
+    [store.budgets, store.reserves, store.reserveUsage],
   );
   const ledgerSummary = useMemo(
     () => ({ entries: store.entries, ready: ledgerDayReady }),
@@ -1717,10 +1760,10 @@ function Workspace({ uid, user, onSignOut }: WorkspaceProps) {
   const daySheetBalance = useMemo(() => {
     if (!daySheet || !ledgerOn || daySheet < today || !hasBalance || calcState.kind !== 'ready') return null;
     if (!store.tideMonths.includes(ymOf(daySheet))) return null;
-    const res = { budgets: store.budgets, reserves: store.reserves };
+    const res = { budgets: store.budgets, reserves: store.reserves, reserveUsage: store.reserveUsage };
     if (!calcScopeOf(store.accounts, store.tideEntries, res).ok) return null;
     return balanceViewOn(store.accounts, store.tideEntries, daySheet, today, res);
-  }, [daySheet, ledgerOn, today, hasBalance, calcState.kind, store.tideMonths, store.accounts, store.tideEntries, store.budgets, store.reserves]);
+  }, [daySheet, ledgerOn, today, hasBalance, calcState.kind, store.tideMonths, store.accounts, store.tideEntries, store.budgets, store.reserves, store.reserveUsage]);
   // 가계부 날짜 상세는 필터와 무관하게 그 날의 가계부 항목을 빠짐없이 보여 준다(소액 포함).
   const ledgerDayEntries = daySheet && ledgerOn
     ? materialized.filter((e) => e.kind === 'money' && e.startDate <= daySheet && effectiveEndDate(e) >= daySheet)
@@ -2057,6 +2100,7 @@ function Workspace({ uid, user, onSignOut }: WorkspaceProps) {
             accounts={store.accounts}
             budgets={store.budgets}
             reserves={store.reserves}
+            reserveUsage={store.reserveUsage}
             hasBalance={hasBalance}
             collapsed={prefs.todayCollapsed}
             onToggleCollapsed={() => set('todayCollapsed', !prefs.todayCollapsed)}
@@ -2127,6 +2171,7 @@ function Workspace({ uid, user, onSignOut }: WorkspaceProps) {
             entries={store.tideEntries}
             budgets={store.budgets}
             reserves={store.reserves}
+            reserveUsage={store.reserveUsage}
             tideFrom={tideFrom}
             calcState={calcState}
             hasBalance={hasBalance}
@@ -2244,6 +2289,8 @@ function Workspace({ uid, user, onSignOut }: WorkspaceProps) {
           onClose={() => setPocketFocus(null)}
           budgets={store.budgets}
           reserves={store.reserves}
+          reserveUsage={store.reserveUsage}
+          reserveLinked={store.reserveLinked}
           entries={store.tideEntries}
           accounts={store.accounts}
           todayISO={today}
@@ -2264,11 +2311,7 @@ function Workspace({ uid, user, onSignOut }: WorkspaceProps) {
               payload: { id: r.id, patch, updatedAt: r.updatedAt },
             });
           }}
-          onDeleteReserve={async (r) => {
-            if (isAnon || !uid) { void promptLogin(); return; }
-            const ok = await dialog.confirm({ title: `'${r.name}'을(를) 삭제할까요?`, danger: true, confirmLabel: '삭제' });
-            if (ok) commit({ kind: 'reserveDelete', label: '세이브 삭제', summary: r.name, payload: { id: r.id } });
-          }}
+          onDeleteReserve={(r) => { void deleteReserve(r); }}
           onEntryClick={(e) => { setPocketFocus(null); openEdit(e); }}
           onLinkEntries={linkToPocket}
           onMarkOutside={markOutsidePocket}
@@ -2333,6 +2376,7 @@ function Workspace({ uid, user, onSignOut }: WorkspaceProps) {
         allTags={allTags}
         linkableTasks={linkableTasks}
         budgets={store.budgets}
+        reserves={store.reserves}
         debts={store.debts}
         sharedActive={!!shared.board}
         categories={store.categories}
@@ -2357,6 +2401,7 @@ function Workspace({ uid, user, onSignOut }: WorkspaceProps) {
           onSeedCategories={seedCategories}
           accounts={store.accounts}
           budgets={store.budgets}
+          reserves={store.reserves}
           debts={store.debts}
           onSave={(actual, opts) => {
             setConfirming(null);

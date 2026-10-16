@@ -16,7 +16,7 @@ import type { Entry } from '../domain/types';
 import { newEntry } from '../domain/entry';
 import type { SnapMeta } from '../data/repo';
 
-type Kind = 'entries' | 'recurring' | 'accounts' | 'debts' | 'pins' | 'budgets' | 'reserves'
+type Kind = 'entries' | 'recurring' | 'accounts' | 'debts' | 'pins' | 'budgets' | 'reserves' | 'reserveLinked'
   | 'categories' | 'categoryBudgets' | 'annualBudgets' | 'ledgerNotes' | 'ledger';
 
 interface Sub {
@@ -61,6 +61,8 @@ vi.mock('../data/repo', async (importOriginal) => {
       record('budgets', uid, [], cb, onError),
     subscribeReserves: (_db: unknown, uid: string, cb: unknown, onError: unknown) =>
       record('reserves', uid, [], cb, onError),
+    subscribeReserveLinkedEntries: (_db: unknown, uid: string, cb: unknown, onError: unknown) =>
+      record('reserveLinked', uid, [], cb, onError),
     subscribeCategories: (_db: unknown, uid: string, cb: unknown, onError: unknown) =>
       record('categories', uid, [], cb, onError),
     subscribeCategoryBudgets: (_db: unknown, uid: string, cb: unknown, onError: unknown) =>
@@ -175,6 +177,7 @@ describe('월 경계 — 계산 창이 바뀔 때', () => {
       one('accounts').push([{ id: 'a1' }], LIVE);
       one('budgets').push([], LIVE);
       one('reserves').push([], LIVE);
+      one('reserveLinked').push([], LIVE);
     });
     expect(result.current.calc.status).toBe('live');
 
@@ -268,6 +271,7 @@ describe('계산 상태는 다섯 구독을 종합한다', () => {
     act(() => {
       one('budgets').push([], LIVE);
       one('reserves').push([], LIVE);
+      one('reserveLinked').push([], LIVE);
     });
     return h;
   };
@@ -457,11 +461,33 @@ describe('계산 상태는 다섯 구독을 종합한다', () => {
     expect(result.current.calc.status).toBe('live');
   });
 
+  it('세이브 연결 거래 구독이 아직이면 준비되지 않았다 (P3)', () => {
+    // 세이브의 남은 금액은 연결된 실제 지출에서 센다. 아직 안 온 사이에 확정으로 내보내면
+    // 확보액 전체가 한도에서 빠져, 실제보다 작은 한도가 떴다가 잠시 뒤 커진다.
+    const { result } = mountBare();
+    act(() => {
+      one('budgets').push([], LIVE);
+      one('reserves').push([], LIVE);
+    });
+    deliver({ month: true, recurring: true, accounts: true });
+    expect(result.current.calc.ready).toBe(false);
+
+    act(() => {
+      one('reserveLinked').push([{
+        id: 'x', kind: 'money', startDate: '2026-09-10',
+        money: { type: 'expense', status: 'actual', amountMinor: 30_000, reserveId: 'r1' },
+      }] as never, LIVE);
+    });
+    expect(result.current.calc.ready).toBe(true);
+    expect(result.current.reserveUsage.get('r1')).toBe(30_000);
+  });
+
   it('예산과 세이브가 도착하면 화면이 그대로 받는다', () => {
     const { result } = mountBare();
     act(() => {
       one('budgets').push([{ id: 'b1', name: '9월 생활비', amountMinor: 700_000 }], LIVE);
       one('reserves').push([{ id: 'r1', name: '비상금', amountMinor: 100_000 }], LIVE);
+      one('reserveLinked').push([], LIVE);
     });
     deliver({ month: true, recurring: true, accounts: true });
 
@@ -483,6 +509,7 @@ describe('잔고 기준일이 오래됐을 때 — 계산 창이 거슬러 간�
     one('accounts').push(accounts, LIVE);
     one('budgets').push([], LIVE);
     one('reserves').push([], LIVE);
+    one('reserveLinked').push([], LIVE);
   };
   const aliveCalc = () => subs.filter((s) => s.kind === 'entries' && s.alive && s.months.includes('2026-12'));
 

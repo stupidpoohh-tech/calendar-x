@@ -13,7 +13,7 @@ import { confirmOccurrence, needsTypeChoice, pocketChoiceFor, type ConfirmRefusa
 import { confirmedEntryId, moneyFlowOf } from '../domain/ledger';
 import { fmtDayShort } from '../domain/date';
 import { formatAmount, minorToInput, parseAmountToMinor } from '../domain/money';
-import type { Account, Budget, Category, Debt, Entry, MoneyFields } from '../domain/types';
+import type { Account, Budget, Category, Debt, Entry, MoneyFields, Reserve } from '../domain/types';
 import { Icon } from './Icon';
 import { FlowChips } from './FlowChips';
 import { LedgerFields } from './LedgerFields';
@@ -29,11 +29,15 @@ interface Props {
   onSeedCategories?: () => void;
   accounts: readonly Account[];
   budgets: readonly Budget[];
+  /** 세이브(P3). 예정에 걸어 둔 세이브가 기본값이고, 확정하면 그때부터 사용으로 센다. */
+  reserves?: readonly Reserve[];
   debts: readonly Debt[];
   /** `reflected` — "이 잔고에 이미 반영됨" 을 고른 값. 손대지 않았으면 undefined. */
   onSave: (actual: Entry, opts?: { reflected?: boolean }) => void;
   onClose: () => void;
 }
+
+const NO_RESERVES: readonly Reserve[] = [];
 
 const REASONS: Record<ConfirmRefusal, string> = {
   'not-money': '가계부 항목이 아닙니다.',
@@ -50,7 +54,7 @@ const REASONS: Record<ConfirmRefusal, string> = {
 
 export function ConfirmSheet({
   plan, occurrenceDate, categories, categoriesReady, onSeedCategories,
-  accounts, budgets, debts, onSave, onClose,
+  accounts, budgets, reserves = NO_RESERVES, debts, onSave, onClose,
 }: Props) {
   const legacy = needsTypeChoice(plan);
   const planMoney = plan.money!;
@@ -70,7 +74,7 @@ export function ConfirmSheet({
       status: 'actual',
     };
     // 일반 지출만, 그리고 예정에서 이미 고른 사용처(주머니 · 생활비 외)는 덮지 않는다.
-    if (base.budgetId || base.outsidePocket || !pocketEligible({ money: base, recurrence: null })) return base;
+    if (base.budgetId || base.outsidePocket || base.reserveId || !pocketEligible({ money: base, recurrence: null })) return base;
     return { ...base, budgetId: pocketChoiceFor(occurrenceDate, budgets).selected?.id ?? null };
   });
   const [typeChosen, setTypeChosen] = useState(!legacy);
@@ -104,7 +108,7 @@ export function ConfirmSheet({
 
   const changeDate = (d: string) => {
     setDate(d);
-    if (pocketTouched || money.outsidePocket || !pocketEligible({ money, recurrence: null })) return;
+    if (pocketTouched || money.outsidePocket || money.reserveId || !pocketEligible({ money, recurrence: null })) return;
     setMoney((m) => ({ ...m, budgetId: pocketChoiceFor(d, budgets).selected?.id ?? null }));
   };
 
@@ -123,6 +127,7 @@ export function ConfirmSheet({
       accountId: money.accountId ?? null,
       budgetId: money.budgetId ?? null,
       debtId: money.debtId ?? null,
+      reserveId: money.reserveId ?? null,
     });
     if (!r.ok) { setError(REASONS[r.reason]); return; }
     onSave(r.entry, { reflected });
@@ -191,6 +196,7 @@ export function ConfirmSheet({
             onSeedCategories={onSeedCategories}
             accounts={accounts}
             pockets={pockets}
+            reserves={reserves}
             debts={debts}
             reflected={reflected}
             onReflected={setReflected}

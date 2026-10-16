@@ -67,6 +67,12 @@ export interface Reservations {
   budgets?: readonly Budget[];
   /** 세이브. 잔고는 그대로 두고 한도에서만 빠진다. */
   reserves?: readonly Reserve[];
+  /**
+   * 세이브마다 연결된 실제 지출의 합(P3, `budget.reserveUsageOf`). 한도에서는 확보액이 아니라 남은 금액을 뺀다 —
+   * 세이브에서 쓴 돈은 현금 흐름에서 이미 빠지기 때문이다. 연결된 거래 **전량**에서 센 값을 넘긴다(계산 창의 거래만
+   * 세면 창 밖의 지난 사용이 빠진다). 없으면 사용액 0 — P3 이전과 같은 숫자다.
+   */
+  reserveUsage?: ReadonlyMap<string, number>;
 }
 
 const NO_BUDGETS: readonly Budget[] = [];
@@ -519,7 +525,7 @@ export function limitOn(
     .filter((o) => !inAnyBudget(o.entry, budgets));
   total += netOf(actuals);
   // 확보해 둔 돈(생활비 예산 · 세이브)은 쓸 수 있는 한도에서 미리 빠진다.
-  return total - reservedOn(budgets, reserves, entries, date, from, accounts, today);
+  return total - reservedOn(budgets, reserves, entries, date, from, accounts, today, res.reserveUsage);
 }
 
 /**

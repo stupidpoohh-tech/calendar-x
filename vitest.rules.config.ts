@@ -29,6 +29,7 @@ export default defineConfig({
       'src/test/relink.emulator.test.ts',
       'src/test/pocket.emulator.test.ts',
       'src/test/pastPlanned.emulator.test.ts',
+      'src/test/reserve.emulator.test.ts',
     ],
     testTimeout: 20_000,
     hookTimeout: 30_000,

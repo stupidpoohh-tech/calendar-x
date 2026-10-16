@@ -19,7 +19,7 @@ import { initializeTestEnvironment, type RulesTestEnvironment } from '@firebase/
 import { doc, getDoc, setDoc, type Firestore } from 'firebase/firestore';
 import { readFileSync } from 'node:fs';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
-import { buildBackup, countBackup, type BackupData } from '../data/backup';
+import { BACKUP_VERSION, buildBackup, countBackup, type BackupData } from '../data/backup';
 import { readBackupFile } from '../data/backupFile';
 import { categoryToDoc, recoveryRuleFromDoc } from '../data/converters';
 import {
@@ -182,7 +182,7 @@ describe('내보내기 → 빈 계정으로 가져오기', () => {
 
     const file = await exportFile(dbA, A);
     const parsed = JSON.parse(file) as { version: number };
-    expect(parsed.version).toBe(9);
+    expect(parsed.version).toBe(BACKUP_VERSION);
     const incoming = readOk(file);
     expect(countBackup(incoming)).toBe(countBackup(original));
     expect(incoming.ledger).toEqual({ settleDay: 25 });

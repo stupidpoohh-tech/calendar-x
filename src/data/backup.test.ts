@@ -4,7 +4,7 @@
  * 읽기는 `backupFile.test.ts` 가 파일 문자열부터 시작해 확인한다.
  */
 import { describe, expect, it } from 'vitest';
-import { newEntry } from '../domain/entry';
+import { newEntry, newMoney } from '../domain/entry';
 import { defaultRecoveryRule } from '../domain/recovery';
 import { readBackupFile } from './backupFile';
 import { BACKUP_VERSION, buildBackup, countBackup, mergeBackup } from './backup';
@@ -64,7 +64,7 @@ describe('buildBackup', () => {
     })));
     expect(r.ok).toBe(true);
     if (r.ok) {
-      expect(r.file.format).toBe('v9');
+      expect(r.file.format).toBe(`v${BACKUP_VERSION}`);
       expect(r.file.data.budgets[0]).toEqual(budget);
       expect(r.file.data.reserves[0]).toEqual(reserve);
       // 건수는 파일 총계와 맞아떨어져야 한다.
@@ -186,8 +186,8 @@ describe('v9 — 연간 카테고리 예산 (P2)', () => {
     const r = readBackupFile(JSON.stringify(buildBackup({ ...empty, annualBudgets: [y26, y27] })));
     expect(r.ok).toBe(true);
     if (r.ok) {
-      expect(r.file.version).toBe(9);
-      expect(r.file.format).toBe('v9');
+      expect(r.file.version).toBe(BACKUP_VERSION);
+      expect(r.file.format).toBe(`v${BACKUP_VERSION}`);
       expect(r.file.data.annualBudgets).toEqual([y26, y27]);
       expect(countBackup(r.file.data)).toBe(2);
     }
@@ -234,5 +234,64 @@ describe('v9 — 연간 카테고리 예산 (P2)', () => {
   it('병합은 이미 있는 같은 해 같은 카테고리의 연간 예산을 덮지 않는다', () => {
     const mine = { ...y27, amountMinor: 900_000, monthAllocations: {} };
     expect(planMerge({ ...empty, annualBudgets: [mine] }, { ...empty, annualBudgets: [y26, y27] }).annualBudgets).toEqual([y26]);
+  });
+});
+
+describe('v10 — 세이브 지출 연결 (P3)', () => {
+  const empty = {
+    entries: [], accounts: [], debts: [], pins: [], budgets: [], reserves: [], categories: [], categoryBudgets: [],
+    ledgerNotes: [], annualBudgets: [], ledger: null, recovery: null,
+  };
+  const save = newReserve({ id: 'r1', name: '여행', amountMinor: 300_000 });
+  const air = newEntry('money', {
+    id: 'air', title: '항공권', startDate: '2026-10-05',
+    money: newMoney({ type: 'expense', amountMinor: 120_000, status: 'actual', flow: 'normal', reserveId: 'r1' }),
+  });
+  const plan = newEntry('money', {
+    id: 'hotel', title: '숙소', startDate: '2026-11-02',
+    money: newMoney({ type: 'expense', amountMinor: 90_000, reserveId: 'r1' }),
+  });
+
+  it('연결이 내보내기 → 가져오기 뒤에도 그대로다 — 실제 · 예정 모두', () => {
+    const r = readBackupFile(JSON.stringify(buildBackup({ ...empty, reserves: [save], entries: [air, plan] })));
+    expect(r.ok).toBe(true);
+    if (r.ok) {
+      expect(r.file.version).toBe(10);
+      expect(r.file.data.entries.map((e) => e.money?.reserveId)).toEqual(['r1', 'r1']);
+      expect(r.file.data.reserves[0]!.amountMinor).toBe(300_000);
+    }
+  });
+
+  it('없는 세이브를 가리키는 연결도 그대로 읽는다 — 계산은 그 연결을 무시한다', () => {
+    const r = readBackupFile(JSON.stringify(buildBackup({ ...empty, entries: [air] })));
+    expect(r.ok).toBe(true);
+    if (r.ok) expect(r.file.data.entries[0]!.money?.reserveId).toBe('r1');
+  });
+
+  it('앱이 만들지 않는 모양은 아무것도 넣지 않는다 — 수입 · 생활비와 함께 · 반복 · 대출 흐름', () => {
+    const bad = (money: object, extra: object = {}) => {
+      const file = JSON.parse(JSON.stringify(buildBackup({ ...empty, entries: [air] })));
+      Object.assign(file.entries[0].money, money);
+      Object.assign(file.entries[0], extra);
+      return readBackupFile(JSON.stringify(file)).ok;
+    };
+    expect(bad({})).toBe(true);
+    expect(bad({ type: 'income' })).toBe(false);
+    expect(bad({ budgetId: 'b1' })).toBe(false);
+    expect(bad({ debtId: 'd1' })).toBe(false);
+    expect(bad({ flow: 'cardSpend' })).toBe(false);
+    expect(bad({ reserveId: 7 })).toBe(false);
+    expect(bad({ reserveId: 'x'.repeat(201) })).toBe(false);
+    expect(bad({ status: 'planned' }, { recurrence: { freq: 'monthly', interval: 1, until: null, count: null } })).toBe(false);
+  });
+
+  it('병합은 이미 있는 거래의 연결을 덮지 않는다 — 같은 파일을 두 번 가져와도 사용이 두 번 세어지지 않는다', () => {
+    const file = buildBackup({ ...empty, reserves: [save], entries: [air] });
+    const r = readBackupFile(JSON.stringify(file));
+    if (!r.ok) throw new Error('읽기 실패');
+    const current = { ...empty, reserves: [save], entries: [{ ...air, money: { ...air.money!, reserveId: null } }] };
+    const plan2 = planMerge(current, r.file.data);
+    expect(plan2.entries).toEqual([]);
+    expect(plan2.reserves).toEqual([]);
   });
 });

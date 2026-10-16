@@ -14,7 +14,7 @@ import { budgetCovers } from '../domain/budget';
 import { pocketChoiceFor } from '../domain/confirm';
 import { pocketEligible } from '../domain/budget';
 import type {
-  Account, Budget, Category, Debt, Entry, EntryKind, MoneyFields, NewMoneyType, RepeatFreq, TaskStatus,
+  Account, Budget, Category, Debt, Entry, Reserve, EntryKind, MoneyFields, NewMoneyType, RepeatFreq, TaskStatus,
 } from '../domain/types';
 import { Icon } from './Icon';
 import { FlowChips } from './FlowChips';
@@ -32,6 +32,8 @@ interface Props {
   linkableTasks: readonly Entry[];
   /** 지출을 걸 수 있는 생활비 예산. 없으면 '생활비에서 사용' 자리가 뜨지 않는다. */
   budgets: readonly Budget[];
+  /** 세이브(P3). 일반 지출에 '사용할 세이브' 칸을 띄운다. */
+  reserves?: readonly Reserve[];
   /** 상환을 걸 수 있는 대출. */
   debts: readonly Debt[];
   /** 같이 보기 보드가 있는가. 없으면 비공개 토글을 띄울 이유가 없다. */
@@ -85,6 +87,7 @@ function moneyUseOf(money: Entry['money']): MoneyUse {
 
 const NO_CATEGORIES: readonly Category[] = [];
 const NO_ACCOUNTS: readonly Account[] = [];
+const NO_RESERVES: readonly Reserve[] = [];
 
 /**
  * 새 실제 지출의 생활비 주머니 기본값.
@@ -102,7 +105,7 @@ function withDefaultPocket(e: Entry, budgets: readonly Budget[]): Entry {
 }
 
 export function EntryModal({
-  open, mode, initial, allTags, linkableTasks, budgets, debts, sharedActive = false,
+  open, mode, initial, allTags, linkableTasks, budgets, reserves = NO_RESERVES, debts, sharedActive = false,
   categories = NO_CATEGORIES, categoriesReady = true, onSeedCategories,
   accounts = NO_ACCOUNTS, occurrenceDate = null, onConfirm, onUnconfirm,
   onSave, onDelete, onClose, ledgerVisible = true,
@@ -207,7 +210,7 @@ export function EntryModal({
   /** 사용처. 한 번에 하나만 걸린다 — 같이 걸면 어느 쪽에서 나간 돈인지가 두 개가 된다. */
   const setUse = (use: Exclude<MoneyUse, 'debt'>) => {
     if (use === 'plain') { setMoney({ budgetId: null, debtId: null }); return; }
-    setMoney({ budgetId: form.money?.budgetId ?? budgets[0]?.id ?? null, debtId: null });
+    setMoney({ budgetId: form.money?.budgetId ?? budgets[0]?.id ?? null, debtId: null, reserveId: null });
   };
 
   /** 실제 거래 칸에서 온 변경. 생활비를 건드렸으면 그 뒤로는 기본값을 다시 고르지 않는다. */
@@ -396,6 +399,8 @@ export function EntryModal({
                     accounts={accounts}
                     pockets={pockets}
                     debts={debts}
+                    reserves={reserves}
+                    recurring={!!form.recurrence}
                     reflected={reflected}
                     onReflected={setReflected}
                   />
@@ -513,6 +518,8 @@ export function EntryModal({
                   accounts={accounts}
                   pockets={pockets}
                   debts={debts}
+                  reserves={reserves}
+                  recurring={!!form.recurrence}
                 />
               )}
 

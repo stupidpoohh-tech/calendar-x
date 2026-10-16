@@ -37,8 +37,11 @@ import type {
  *
  * 9 부터 `annualBudgets`(연간 카테고리 예산)가 **필수**다 — v8 에 없는 것은 정상(그 구조가 없던 시절),
  * v9 에 없는 것은 잘린 파일이다. 예전 앱은 이 파일을 거절한다(연간 예산을 버린 채 가져오지 않게).
+ *
+ * 10 은 9 와 구조가 같다. 지출에 세이브 연결(`money.reserveId`, P3)이 실릴 수 있어 올렸다 — 그 필드를 모르는
+ * 예전 앱이 가져오면 연결이 말없이 떨어져 세이브의 남은 금액이 확보액 전체로 돌아가고 한도가 그만큼 준다.
  */
-export const BACKUP_VERSION = 9;
+export const BACKUP_VERSION = 10;
 
 export interface BackupPayload {
   app: 'Dada Calendar';

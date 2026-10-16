@@ -11,6 +11,7 @@
  * 지우는 것은 고른 한 번짜리 예정 문서뿐이다. 실제 거래 · 반복 예정 · 잔고 · 생활비 · 세이브에는
  * 쓰지 않는다.
  */
+import { reserveUsageOf } from '../domain/budget';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { readBackupFile } from '../data/backupFile';
 import { MONEY_TYPE_BY_ID } from '../domain/constants';
@@ -68,7 +69,7 @@ export function PastPlanSheet({ todayISO, load, onBackup, onDelete, onClose }: P
       setData(d);
       // 처음에는 후보만 골라 둔다. 확인 필요는 사용자가 직접 고른다. 막힘은 고를 수 없다.
       // 자료와 같은 순간에 정한다 — 그린 뒤 effect 로 고르면, 그 사이에 누른 '전체 선택' 을 덮는다.
-      const sc = scanPastPlanned(d.entries, d.accounts, todayISO, { budgets: d.budgets, reserves: d.reserves });
+      const sc = scanPastPlanned(d.entries, d.accounts, todayISO, { budgets: d.budgets, reserves: d.reserves, reserveUsage: reserveUsageOf(d.entries) });
       setSelected(new Set(sc.items.filter((i) => i.group === 'candidate').map((i) => i.entry.id)));
       setPhase('ready');
       return d;
@@ -82,7 +83,10 @@ export function PastPlanSheet({ todayISO, load, onBackup, onDelete, onClose }: P
   };
   useEffect(() => { void reload(); }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const res = useMemo(() => ({ budgets: data?.budgets ?? [], reserves: data?.reserves ?? [] }), [data]);
+  // 세이브 사용액은 서버에서 읽은 원장 전량에서 센다 — 지울 후보는 예정뿐이라 이 값을 바꾸지 않는다.
+  const res = useMemo(() => ({
+    budgets: data?.budgets ?? [], reserves: data?.reserves ?? [], reserveUsage: reserveUsageOf(data?.entries ?? []),
+  }), [data]);
   const scan = useMemo(
     () => (data ? scanPastPlanned(data.entries, data.accounts, todayISO, res) : null),
     [data, todayISO, res],

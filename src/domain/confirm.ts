@@ -57,6 +57,8 @@ export interface ConfirmPatch {
   accountId?: string | null;
   budgetId?: string | null;
   debtId?: string | null;
+  /** 사용할 세이브(P3). 예정에 걸어 둔 연결이 기본값이다 — 확정하면 실제 거래가 이어받아 사용액에 들어간다. */
+  reserveId?: string | null;
 }
 
 export type ConfirmResult =
@@ -128,6 +130,11 @@ export function confirmOccurrence(
   else if (patch.debtId) budgetId = null;
   if (type === 'income') { budgetId = null; debtId = null; }
   if (flow === 'cardSpend') budgetId = null;
+  // 세이브(P3)도 사용처 하나다. 주머니 · 대출과 함께 걸리지 않고, 일반 지출에만 남는다.
+  let reserveId = patch.reserveId !== undefined ? patch.reserveId : m.reserveId ?? null;
+  if (patch.budgetId || patch.debtId) reserveId = null;
+  if (reserveId) { budgetId = null; debtId = null; }
+  if (type !== 'expense' || flow !== 'normal') reserveId = null;
 
   const entry = newEntry('money', {
     id: confirmedEntryId(plan.id, occ),
@@ -155,6 +162,8 @@ export function confirmOccurrence(
       method: patch.method !== undefined ? patch.method : m.method ?? null,
       accountId: patch.accountId !== undefined ? patch.accountId : m.accountId ?? null,
       plannedRef: { entryId: plan.id, date: occ },
+      reserveId,
+      outsidePocket: reserveId ? true : m.outsidePocket === true,
     }),
     createdAt: now,
   });

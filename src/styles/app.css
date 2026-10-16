@@ -665,6 +665,11 @@
 .rv-lock.on { color: var(--ink); }
 .rv-lock:hover, .rv-lock:focus-visible { background: var(--accent-soft); color: var(--ink); }
 .rv-target { display: block; }
+/* 세이브 상세 (P3) — 확보 · 사용 · 남음과 연결 거래. 생활비 상세와 같은 조각(.bp-stats · .bp-ul)을 쓴다. */
+.rv-detail { display: flex; flex-direction: column; gap: 4px; padding: 0 10px 8px 40px; }
+.rv-detail .bp-stats { flex-direction: row; flex-wrap: wrap; gap: 2px 10px; margin: 0; }
+.rv-detail .bp-ul, .rv-detail .bp-empty { padding-left: 0; }
+.rv-edit { align-self: flex-start; }
 .rv-prot {
   display: inline-flex; align-items: center; gap: 6px; align-self: flex-start;
   padding: 5px 10px; border: 1px solid var(--line); border-radius: 999px;

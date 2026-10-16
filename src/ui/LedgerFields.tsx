@@ -12,7 +12,7 @@
  */
 import { isLoanCategory, pickableCategories } from '../domain/category';
 import { balanceInclusion, moneyFlowOf, reflectChoiceFor } from '../domain/ledger';
-import type { Account, Budget, Category, DateISO, Debt, MoneyFields } from '../domain/types';
+import type { Account, Budget, Category, DateISO, Debt, MoneyFields, Reserve } from '../domain/types';
 
 interface Props {
   /** 문서 id. 잔고 반영 판정(같은 날 고른 목록)에 쓴다. */
@@ -37,11 +37,20 @@ interface Props {
    */
   reflected?: boolean;
   onReflected?: (b: boolean) => void;
+  /**
+   * 세이브 (P3). 주면 일반 지출에 '사용할 세이브' 칸이 붙는다. 보관한 세이브는 고르는 자리에 없고,
+   * 이미 걸려 있으면 그대로 보여 준다.
+   */
+  reserves?: readonly Reserve[];
+  /** 반복 예정인가. 반복은 세이브에 걸지 않는다 — 한 봉투에 몇 번 들어갈지가 애매해진다. */
+  recurring?: boolean;
 }
+
+const NO_RESERVES: readonly Reserve[] = [];
 
 export function LedgerFields({
   entryId, type, date, money, onMoney, categories, categoriesReady, onSeedCategories,
-  accounts, pockets, debts, only, reflected, onReflected,
+  accounts, pockets, debts, only, reflected, onReflected, reserves = NO_RESERVES, recurring = false,
 }: Props) {
   const flow = moneyFlowOf(money);
   const isLoan = flow === 'loanPrincipal' || flow === 'loanInterest';
@@ -58,6 +67,12 @@ export function LedgerFields({
   const reflect = onReflected
     ? reflectChoiceFor({ id: entryId, kind: 'money', startDate: date, money }, accounts)
     : { kind: 'none' as const };
+  // 세이브는 일반 지출에만 건다(`reserveLinkable`). 카드 사용은 P4 의 몫이라 아직 고르지 않는다.
+  const canReserve = isOutflow && flow === 'normal' && !money.debtId && !recurring;
+  const pickableReserves = reserves.filter((r) => !r.archivedAt);
+  const linkedReserve = money.reserveId ? reserves.find((r) => r.id === money.reserveId) ?? null : null;
+  const showReserve = canReserve && (pickableReserves.length > 0 || !!money.reserveId);
+  const planned = money.status !== 'actual';
   const day = (iso: string) => `${Number(iso.slice(5, 7))}월 ${Number(iso.slice(8, 10))}일`;
 
   return (
@@ -98,6 +113,52 @@ export function LedgerFields({
       {!isLoan && picked && isLoanCategory(picked) && (
         <p className="mod-hint">
           예전에 '대출' 카테고리로 적은 거래입니다. 지금은 지출로 셉니다 — 빚을 갚은 돈이면 흐름에서 대출을 고르세요. 여러 건은 설정 &gt; 데이터 &gt; '예전 대출 카테고리 정리' 로 한꺼번에 옮깁니다.
+        </p>
+      )}
+
+
+      {/*
+        사용할 세이브 (P3). 세이브는 가상 봉투다 — 고르면 이 지출이 그 봉투에서 쓴 돈으로 세어져 남은 금액이 준다.
+        잔고 · 예상 잔고는 그대로이고, 세이브의 확보액도 바뀌지 않는다. 생활비와 같이 걸지 않는다(사용처는 하나).
+      */}
+      {showReserve && (
+        <div className="mod-row">
+          <span className="mod-lbl">세이브</span>
+          <div className="mod-chips" role="radiogroup" aria-label="사용할 세이브">
+            <button
+              type="button" role="radio"
+              className={'chip' + (!money.reserveId ? ' on' : '')}
+              aria-checked={!money.reserveId}
+              onClick={() => onMoney({ reserveId: null })}
+            >
+              사용 안 함
+            </button>
+            {pickableReserves.map((r) => (
+              <button
+                key={r.id} type="button" role="radio"
+                className={'chip' + (money.reserveId === r.id ? ' on' : '')}
+                aria-checked={money.reserveId === r.id}
+                onClick={() => onMoney({ reserveId: r.id, budgetId: null, outsidePocket: true, debtId: null })}
+              >
+                {r.name}
+              </button>
+            ))}
+            {/* 보관했거나 지워진 세이브를 가리키는 연결도 보여 준다. 안 보이면 무엇에 걸려 있는지 모른다. */}
+            {money.reserveId && (!linkedReserve || linkedReserve.archivedAt) && (
+              <span className="chip on" title={linkedReserve ? '보관한 세이브입니다' : '지금은 없는 세이브입니다'}>
+                {linkedReserve ? `${linkedReserve.name} (보관)` : '지워진 세이브'}
+              </span>
+            )}
+          </div>
+        </div>
+      )}
+      {showReserve && money.reserveId && (
+        <p className="mod-hint">
+          {planned
+            ? '예정은 아직 쓴 돈이 아닙니다. 확정해 실제 거래가 되면 그때 이 세이브의 사용으로 셉니다.'
+            : linkedReserve && !linkedReserve.archivedAt
+              ? '이 세이브의 남은 금액에서 빠집니다. 잔고 · 예상 잔고는 바뀌지 않습니다.'
+              : '연결된 세이브가 보관됐거나 없어 가용 한도에는 영향이 없습니다. 다른 세이브를 고르거나 사용 안 함으로 둘 수 있습니다.'}
         </p>
       )}
 
@@ -156,7 +217,7 @@ export function LedgerFields({
                 key={b.id} type="button" role="radio"
                 className={'chip' + (money.budgetId === b.id ? ' on' : '')}
                 aria-checked={money.budgetId === b.id}
-                onClick={() => onMoney({ budgetId: b.id, outsidePocket: false, debtId: null })}
+                onClick={() => onMoney({ budgetId: b.id, outsidePocket: false, debtId: null, reserveId: null })}
               >
                 {/* 이름에 이미 '생활비' 가 있으면 앞말을 겹쳐 적지 않는다. */}
                 {b.name.includes('생활비') ? b.name : `생활비 · ${b.name}`}
@@ -193,7 +254,7 @@ export function LedgerFields({
           <select
             id={`debt-${entryId}`} className="mod-input"
             value={money.debtId ?? ''}
-            onChange={(e) => onMoney(e.target.value ? { debtId: e.target.value, budgetId: null } : { debtId: null })}
+            onChange={(e) => onMoney(e.target.value ? { debtId: e.target.value, budgetId: null, reserveId: null } : { debtId: null })}
           >
             <option value="">연결 안 함</option>
             {debts.map((d) => <option key={d.id} value={d.id}>{d.name || '(이름 없음)'}</option>)}

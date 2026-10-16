@@ -27,6 +27,7 @@
  * | v7 | `version: 7` | v6 + `ledgerNotes`(정산 기간 메모) **필수** |
  * | v8 | `version: 8` | v7 과 같은 구조. 세이브에 보호 · 목표 · 보관(P1)이 실릴 수 있다 — 없으면 보호 켬 |
  * | v9 | `version: 9` | v8 + `annualBudgets`(연간 카테고리 예산, P2) **필수** |
+ * | v10 | `version: 10` | v9 와 같은 구조. 지출에 세이브 연결(`money.reserveId`, P3)이 실릴 수 있다 |
  *
  * 없는 컬렉션을 빈 배열로 넘겨 짚지 않는다. v2·v3 파일에 `debts` 가 없다면 그건
  * 빈 백업이 아니라 깨진 파일이다.
@@ -47,10 +48,10 @@ import {
 } from './converters';
 import { convertLegacyItems } from './migrate';
 
-export const SUPPORTED_VERSIONS = [1, 2, 3, 4, 5, 6, 7, 8, 9] as const;
-export const LATEST_VERSION = 9;
+export const SUPPORTED_VERSIONS = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10] as const;
+export const LATEST_VERSION = 10;
 
-export type BackupFormat = 'legacy' | 'v2' | 'v3' | 'v4' | 'v5' | 'v6' | 'v7' | 'v8' | 'v9';
+export type BackupFormat = 'legacy' | 'v2' | 'v3' | 'v4' | 'v5' | 'v6' | 'v7' | 'v8' | 'v9' | 'v10';
 
 /** 파일 한 곳이 왜 들어갈 수 없는지. */
 export interface FileProblem {
@@ -335,6 +336,24 @@ function checkLedgerRaw(c: Collector, where: string, e: Raw, m: Raw): void {
   for (const key of ['highlight', 'outsidePocket'] as const) {
     if (m[key] !== undefined && m[key] !== null && typeof m[key] !== 'boolean') {
       c.add(`${at}.${key}`, `참·거짓이 아닙니다: ${describe(m[key])}`);
+    }
+  }
+
+  /*
+    세이브 연결 (P3). 앱은 일반 지출 · 반복 아님 · 생활비 · 대출 연결 없음에만 이 값을 적는다. 그 밖의 모양은
+    손으로 고친 파일이고, 규칙도 거절한다 — 저장하며 조용히 떼어 내면 세이브 사용이 말없이 사라지므로 먼저 막는다.
+  */
+  optStr(c, `${at}.reserveId`, m.reserveId, LIMITS.refId);
+  if (typeof m.reserveId === 'string' && m.reserveId) {
+    if (m.type !== 'expense') c.add(`${at}.reserveId`, `세이브는 지출에만 겁니다: ${describe(m.type)}`);
+    if (m.flow !== undefined && m.flow !== null && m.flow !== 'normal') {
+      c.add(`${at}.reserveId`, `세이브는 일반 지출에만 겁니다: ${describe(m.flow)}`);
+    }
+    if ((typeof m.budgetId === 'string' && m.budgetId) || (typeof m.debtId === 'string' && m.debtId)) {
+      c.add(`${at}.reserveId`, '세이브와 생활비 · 대출을 함께 걸 수 없습니다 — 사용처는 하나입니다.');
+    }
+    if (e.recurrence !== undefined && e.recurrence !== null) {
+      c.add(`${at}.reserveId`, '반복 항목은 세이브에 걸지 않습니다.');
     }
   }
 
@@ -653,7 +672,7 @@ export function readBackupFile(text: string): ReadResult {
     return { ok: false, problems: [{ where: 'version', reason: '버전이 없습니다. 백업 파일이 맞는지 확인해 주세요.' }] };
   }
 
-  const format: BackupFormat = version >= 9 ? 'v9' : version === 8 ? 'v8' : version === 7 ? 'v7' : version === 6 ? 'v6' : version === 5 ? 'v5'
+  const format: BackupFormat = version >= 10 ? 'v10' : version === 9 ? 'v9' : version === 8 ? 'v8' : version === 7 ? 'v7' : version === 6 ? 'v6' : version === 5 ? 'v5'
     : version === 4 ? 'v4' : version === 3 ? 'v3' : 'v2';
   const hasPockets = version >= 4;
   const hasCategories = version >= 6;

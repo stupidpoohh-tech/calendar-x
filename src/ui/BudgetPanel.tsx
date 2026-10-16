@@ -23,7 +23,7 @@ export type PocketFocus =
 import { useEffect, useRef, useState, type KeyboardEvent } from 'react';
 import {
   activeReserves, archivedReserves, budgetEnded, budgetStates, newBudget, newReserve, reservedTotal,
-  reserveProtects, spendingIn, unlinkedSpendingFor, type BudgetState,
+  reserveLinkedEntries, reserveProtects, reserveRemaining, spendingIn, unlinkedSpendingFor, type BudgetState,
 } from '../domain/budget';
 import { fmtDayShort } from '../domain/date';
 import { formatAmount, minorToInput, parseAmountToMinor } from '../domain/money';
@@ -65,21 +65,34 @@ interface Props {
   onMarkOutside?: (e: Entry) => void;
   /** 처음 열 때 펼쳐 둘 것. 그 줄로 스크롤한다. */
   focus?: PocketFocus;
+  /** 세이브마다 연결된 실제 지출의 합(P3, `reserveUsageOf`). 없으면 사용 0 으로 본다. */
+  reserveUsage?: ReadonlyMap<string, number>;
+  /**
+   * 세이브에 걸린 거래 전량(실제 · 예정). 날짜 창과 무관하게 받은 목록이어야 한다 — 계산 창으로 거르면
+   * 지난 사용이 목록에서 빠져 합계와 줄이 어긋난다.
+   */
+  reserveLinked?: readonly Entry[];
 }
+
+const NO_USAGE: ReadonlyMap<string, number> = new Map();
+const NO_ENTRIES: readonly Entry[] = [];
 
 export function BudgetPanel({
   budgets, reserves, entries, collapsed: collapsedPref, onToggleCollapsed, bare = false, todayISO, accounts,
   onSaveBudget, onDeleteBudget, onSaveReserve, onDeleteReserve, onEntryClick, onLinkEntries, onMarkOutside, focus,
+  reserveUsage = NO_USAGE, reserveLinked = NO_ENTRIES,
 }: Props) {
   const [draft, setDraft] = useState<Budget | null>(() => (focus?.kind === 'newBudget' ? newBudget() : null));
   const [amountText, setAmountText] = useState('');
   const [openId, setOpenId] = useState<string | null>(focus?.kind === 'budget' ? focus.id : null);
-  const [reserveDraft, setReserveDraft] = useState<Reserve | null>(() => {
-    if (focus?.kind === 'newReserve') return newReserve();
-    // 보관한 세이브는 편집 창 대신 보관 묶음을 펼쳐 보인다(아래 showArchived).
-    if (focus?.kind === 'reserve') return reserves.find((r) => r.id === focus.id && !r.archivedAt) ?? null;
-    return null;
-  });
+  const [reserveDraft, setReserveDraft] = useState<Reserve | null>(
+    () => (focus?.kind === 'newReserve' ? newReserve() : null),
+  );
+  // 세이브 줄로 들어오면 그 세이브를 펼쳐 둔다(확보 · 사용 · 남음 · 연결 거래). 고치기는 줄의 톱니다.
+  // 보관한 세이브는 펼치지 않고 보관 묶음을 펼쳐 보인다(아래 showArchived).
+  const [openReserveId, setOpenReserveId] = useState<string | null>(
+    () => (focus?.kind === 'reserve' && reserves.some((r) => r.id === focus.id && !r.archivedAt) ? focus.id : null),
+  );
   const [reserveText, setReserveText] = useState(() => {
     const r = focus?.kind === 'reserve' ? reserves.find((x) => x.id === focus.id) : null;
     return r?.amountMinor ? minorToInput(r.amountMinor, r.currency) : '';
@@ -237,6 +250,12 @@ export function BudgetPanel({
             ) : (
               <ReserveRow
                 key={r.id} reserve={r} focusKey={r.id}
+                usedMinor={reserveUsage.get(r.id) ?? 0}
+                remainingMinor={reserveRemaining(r, reserveUsage)}
+                linked={openReserveId === r.id ? reserveLinkedEntries(r.id, reserveLinked) : NO_ENTRIES}
+                open={openReserveId === r.id}
+                onToggle={() => setOpenReserveId(openReserveId === r.id ? null : r.id)}
+                onEntryClick={onEntryClick}
                 onEdit={() => startReserve(r)}
                 onToggleProtect={() => toggleProtect(r)}
                 onDelete={() => onDeleteReserve(r)}
@@ -523,36 +542,101 @@ function targetLine(r: Reserve): string | null {
  * 눈 그림을 쓰지 않는다. 이것은 화면에서 감추는 것이 아니라 쓸 수 있는 돈을 바꾸는 일이다.
  */
 function ReserveRow({
-  reserve: r, focusKey, onEdit, onToggleProtect, onDelete,
+  reserve: r, focusKey, usedMinor, remainingMinor, linked, open, onToggle, onEntryClick, onEdit, onToggleProtect, onDelete,
 }: {
   reserve: Reserve;
   focusKey?: string;
+  /** 연결된 실제 지출의 합. 예정은 들어 있지 않다. */
+  usedMinor: number;
+  /** 확보액 − 사용. 음수면 그만큼 초과해 쓴 것이다. */
+  remainingMinor: number;
+  /** 펼쳤을 때 보일 연결 거래(실제 · 예정). 접혀 있으면 비어 있다. */
+  linked: readonly Entry[];
+  open: boolean;
+  onToggle: () => void;
+  onEntryClick?: (e: Entry) => void;
   onEdit: () => void;
   onToggleProtect: () => void;
   onDelete: () => void;
 }) {
   const locked = reserveProtects(r);
   const target = targetLine(r);
+  const over = remainingMinor < 0;
   return (
-    <div className="debt-i rv-i" data-focus={focusKey}>
-      <button
-        className={'rv-lock' + (locked ? ' on' : '')} onClick={onToggleProtect}
-        aria-pressed={locked}
-        aria-label={`${r.name} 보호 — ${locked ? '가용 한도에서 제외 중. 누르면 포함' : '가용 한도에 포함 중. 누르면 제외'}`}
-        title={locked ? '가용 한도에서 제외' : '가용 한도에 포함'}
-      >
-        {locked ? <Icon.Lock size={14} /> : <Icon.Unlock size={14} />}
-      </button>
-      <button className="debt-i-main" onClick={onEdit} aria-label={`${r.name} 고치기`}>
-        <span className="debt-n">{r.name}</span>
-        <span className="debt-d num">
-          {formatAmount(r.amountMinor)}원 · {locked ? '가용 한도에서 제외' : '가용 한도에 포함'}
-        </span>
-        {target && <span className="debt-d num rv-target">{target}</span>}
-      </button>
-      <button className="debt-x" onClick={onDelete} aria-label={`${r.name} 삭제`}>
-        <Icon.X size={12} />
-      </button>
+    <div className="bp-i" data-focus={focusKey}>
+      <div className="debt-i rv-i">
+        <button
+          className={'rv-lock' + (locked ? ' on' : '')} onClick={onToggleProtect}
+          aria-pressed={locked}
+          aria-label={`${r.name} 보호 — ${locked ? '가용 한도에서 제외 중. 누르면 포함' : '가용 한도에 포함 중. 누르면 제외'}`}
+          title={locked ? '가용 한도에서 제외' : '가용 한도에 포함'}
+        >
+          {locked ? <Icon.Lock size={14} /> : <Icon.Unlock size={14} />}
+        </button>
+        <button className="debt-i-main" onClick={onToggle} aria-expanded={open}>
+          <span className="debt-n">{r.name}</span>
+          {/*
+            목록에는 남은 금액을 적는다(확보 − 연결된 실제 지출). 쓴 적이 없으면 확보액과 같다.
+            확보액은 거래를 연결해도 줄지 않는다 — 줄어드는 것은 남은 금액이다.
+          */}
+          <span className="debt-d num">
+            {over
+              ? <b className="bp-over">초과 {formatAmount(-remainingMinor)}원</b>
+              : <>남음 {formatAmount(remainingMinor)}원</>}
+            {' · '}{locked ? '가용 한도에서 제외' : '가용 한도에 포함'}
+          </span>
+          {target && <span className="debt-d num rv-target">{target}</span>}
+        </button>
+        <button className="bp-e" onClick={onEdit} aria-label={`${r.name} 고치기`}>
+          <Icon.Settings size={12} />
+        </button>
+        <button className="debt-x" onClick={onDelete} aria-label={`${r.name} 삭제`}>
+          <Icon.X size={12} />
+        </button>
+      </div>
+      {open && (
+        <div className="rv-detail">
+          <p className="bp-stats num" aria-label={`${r.name} 확보 · 사용 · 남음`}>
+            <span>확보 <b>{formatAmount(r.amountMinor)}</b></span>
+            <span>사용 <b>{formatAmount(usedMinor)}</b></span>
+            {over
+              ? <span>남음 <b>0</b> · <b className="bp-over">초과 {formatAmount(-remainingMinor)}</b></span>
+              : <span>남음 <b>{formatAmount(remainingMinor)}</b></span>}
+          </p>
+          {over && (
+            <p className="bp-note">
+              확보한 금액보다 {formatAmount(-remainingMinor)}원 더 썼습니다. 넘친 몫은 세이브 밖의 돈에서 나간 것으로 보고,
+              가용 한도를 늘려 주지 않습니다.
+            </p>
+          )}
+          {linked.length > 0 ? (
+            <ul className="bp-ul" aria-label={`${r.name} 연결 거래`}>
+              {linked.map((e) => {
+                const actual = e.money?.status === 'actual';
+                return (
+                  <li key={e.id}>
+                    <button className={'bp-li' + (actual ? '' : ' planned')} onClick={() => onEntryClick?.(e)}>
+                      <span className="bp-li-d num">{fmtDayShort(e.startDate)}</span>
+                      <span className="bp-li-t">
+                        <i className={'bp-st' + (actual ? '' : ' plan')}>{actual ? '실제' : '예정'}</i>
+                        {e.title.trim() || '(제목 없음)'}
+                      </span>
+                      <span className="bp-li-a num">{formatAmount(Math.abs(e.money?.amountMinor ?? 0))}</span>
+                    </button>
+                  </li>
+                );
+              })}
+            </ul>
+          ) : (
+            <p className="bp-empty">아직 이 세이브에서 쓴 거래가 없습니다. 지출을 적을 때 &lsquo;세이브&rsquo; 칸에서 고릅니다.</p>
+          )}
+          {linked.some((e) => e.money?.status !== 'actual') && (
+            <p className="bp-note">예정은 아직 쓴 돈이 아닙니다 — 확정하면 사용으로 셉니다.</p>
+          )}
+          {/* 줄의 톱니는 마우스를 올려야 보인다. 손가락으로 쓰는 화면에서도 고칠 자리가 보이게 둔다. */}
+          <button className="chip rv-edit" onClick={onEdit}>확보액 · 목표 고치기</button>
+        </div>
+      )}
     </div>
   );
 }

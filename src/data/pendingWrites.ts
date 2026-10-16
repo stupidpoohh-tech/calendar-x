@@ -117,6 +117,11 @@ export interface LedgerBatchPayload {
    */
   budgets?: Budget[];
   deleteBudgetIds?: string[];
+  /**
+   * 세이브 지우기(P3). 걸린 거래의 연결(`money.reserveId`)을 같은 배치에서 푼다 — 없는 세이브를 가리키는
+   * 연결을 남기지 않는다. 옛 큐에는 없는 필드다.
+   */
+  deleteReserveIds?: string[];
 }
 
 /** 한 배치의 상한(500)보다 여유를 둔다. 넘으면 부르는 쪽이 나눠 보내지 않고 멈춘다. */
@@ -124,7 +129,7 @@ export const LEDGER_BATCH_MAX = 450;
 
 export function ledgerBatchSize(p: LedgerBatchPayload): number {
   return p.entries.length + p.deleteIds.length + p.accounts.length
-    + (p.budgets?.length ?? 0) + (p.deleteBudgetIds?.length ?? 0);
+    + (p.budgets?.length ?? 0) + (p.deleteBudgetIds?.length ?? 0) + (p.deleteReserveIds?.length ?? 0);
 }
 
 /**
@@ -295,6 +300,7 @@ export function sendPending(db: Firestore, uid: string, op: CommitInput): Promis
       for (const a of p.accounts) batch.set(docIn(db, uid, COL.accounts, a.id), accountToDoc(a));
       for (const id of p.deleteBudgetIds ?? []) batch.delete(docIn(db, uid, COL.budgets, id));
       for (const b of p.budgets ?? []) batch.set(docIn(db, uid, COL.budgets, b.id), budgetToDoc(b));
+      for (const id of p.deleteReserveIds ?? []) batch.delete(docIn(db, uid, COL.reserves, id));
       return batch.commit();
     }
     /* 이웃 필드(recovery · migratedAt)를 지우지 않도록 merge 로 쓴다. */

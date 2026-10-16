@@ -1,10 +1,11 @@
+import { reserveUsageOf } from '../domain/budget';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { describeFirestoreError, isPermissionDenied } from '../data/errors';
 import { getFirebase } from '../data/firebase';
 import {
   monthWindow, subscribeAccounts, subscribeBudgets, subscribeAnnualBudgets, subscribeCategories, subscribeCategoryBudgets,
   subscribeDebts, subscribeEntriesForMonths, subscribeLedgerNotes, subscribeLedgerSettings,
-  subscribePins, subscribeRecurringEntries, subscribeReserves, tideWindow, tideWindowReaches,
+  subscribePins, subscribeRecurringEntries, subscribeReserveLinkedEntries, subscribeReserves, tideWindow, tideWindowReaches,
   earliestAsOfOf,
   type SnapMeta,
 } from '../data/repo';
@@ -39,6 +40,13 @@ export interface StoreState {
   budgets: Budget[];
   /** 세이브. 마찬가지로 한도를 깎는다. */
   reserves: Reserve[];
+  /**
+   * 세이브에 건 거래 전량(P3, 실제 · 예정). 달과 무관하게 받는다 — 세이브의 사용액은 이 목록에서 센다.
+   * 한도를 바꾸는 값이라 계산 상태(`calc`)가 이 구독까지 종합한다.
+   */
+  reserveLinked: Entry[];
+  /** 세이브마다 연결된 실제 지출의 합 — `reserveLinked` 에서 센다(`budget.reserveUsageOf`). */
+  reserveUsage: ReadonlyMap<string, number>;
   /**
    * 가계부 결산 — 카테고리 · 카테고리 예산 · 정산 시작일.
    *
@@ -169,7 +177,7 @@ const DEFAULT_LEDGER: LedgerSettings = { settleDay: DEFAULT_SETTLE_DAY };
 
 const EMPTY: StoreState = {
   entries: [], tideEntries: [], tideMonths: [],
-  accounts: [], debts: [], pins: [], budgets: [], reserves: [],
+  accounts: [], debts: [], pins: [], budgets: [], reserves: [], reserveLinked: [], reserveUsage: new Map(),
   categories: [], categoryBudgets: [], annualBudgets: [], ledger: DEFAULT_LEDGER, ledgerMeta: FEED_LOADING,
   ledgerNotes: [], ledgerNotesFeed: FEED_LOADING,
   display: FEED_LOADING, calc: FEED_LOADING,
@@ -221,6 +229,8 @@ export function useStore(uid: string | null, cursorISO: string, todayISO: string
   const [budgetsFeed, setBudgetsFeed] = useState<FeedState>(FEED_LOADING);
   const [reserves, setReserves] = useState<Reserve[]>([]);
   const [reservesFeed, setReservesFeed] = useState<FeedState>(FEED_LOADING);
+  const [reserveLinked, setReserveLinked] = useState<Entry[]>([]);
+  const [reserveLinkedFeed, setReserveLinkedFeed] = useState<FeedState>(FEED_LOADING);
   const [categories, setCategories] = useState<Category[]>([]);
   const [categoriesFeed, setCategoriesFeed] = useState<FeedState>(FEED_LOADING);
   const [categoryBudgets, setCategoryBudgets] = useState<CategoryBudget[]>([]);
@@ -254,6 +264,7 @@ export function useStore(uid: string | null, cursorISO: string, todayISO: string
     setDebts([]); setPins([]);
     setBudgets([]); setBudgetsFeed(FEED_LOADING);
     setReserves([]); setReservesFeed(FEED_LOADING);
+    setReserveLinked([]); setReserveLinkedFeed(FEED_LOADING);
     setCategories([]); setCategoriesFeed(FEED_LOADING);
     setCategoryBudgets([]); setCategoryBudgetsFeed(FEED_LOADING);
     setAnnualBudgets([]); setAnnualBudgetsFeed(FEED_LOADING);
@@ -364,6 +375,11 @@ export function useStore(uid: string | null, cursorISO: string, todayISO: string
         own(uid, (items, meta) => { setReserves(items); setReservesFeed(feedFrom(items.length, meta)); }),
         own(uid, (scope, err) => failWith(setReservesFeed, scope, err)),
       ),
+      subscribeReserveLinkedEntries(
+        db, uid,
+        own(uid, (items, meta) => { setReserveLinked(items); setReserveLinkedFeed(feedFrom(items.length, meta)); }),
+        own(uid, (scope, err) => failWith(setReserveLinkedFeed, scope, err)),
+      ),
       subscribeCategories(
         db, uid,
         own(uid, (items, meta) => { setCategories(items); setCategoriesFeed(feedFrom(items.length, meta)); }),
@@ -424,10 +440,13 @@ export function useStore(uid: string | null, cursorISO: string, todayISO: string
     () => (tideOutOfRange
       ? { ...FEED_LOADING, outOfRange: true }
       : combineFeeds([
-        tideNow?.feed ?? FEED_LOADING, recurringFeed, accountsFeed, budgetsFeed, reservesFeed,
+        tideNow?.feed ?? FEED_LOADING, recurringFeed, accountsFeed, budgetsFeed, reservesFeed, reserveLinkedFeed,
       ])),
-    [tideOutOfRange, tideNow?.feed, recurringFeed, accountsFeed, budgetsFeed, reservesFeed],
+    [tideOutOfRange, tideNow?.feed, recurringFeed, accountsFeed, budgetsFeed, reservesFeed, reserveLinkedFeed],
   );
+
+  // 세이브 사용액(P3). 연결된 거래 전량에서 센다 — 계산 창의 거래만 세면 창 밖의 지난 사용이 빠진다.
+  const reserveUsage = useMemo(() => reserveUsageOf(reserveLinked), [reserveLinked]);
 
   const ledgerMeta = useMemo(
     () => combineFeeds([categoriesFeed, categoryBudgetsFeed, annualBudgetsFeed, ledgerFeed]),
@@ -439,7 +458,7 @@ export function useStore(uid: string | null, cursorISO: string, todayISO: string
 
   return {
     entries, tideEntries, tideMonths,
-    accounts, debts, pins, budgets, reserves,
+    accounts, debts, pins, budgets, reserves, reserveLinked, reserveUsage,
     categories, categoryBudgets, annualBudgets, ledger, ledgerMeta, ledgerNotes, ledgerNotesFeed,
     display, calc,
     loading: !display.ready, error, rulesBlocked,

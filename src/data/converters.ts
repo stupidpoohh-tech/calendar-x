@@ -64,8 +64,12 @@ function asPlannedRef(v: unknown): PlannedRef | null {
  * `money` 안이 아니라 **문서 맨 위**에 둔다. 예전 앱이 가계부 항목을 할 일로 바꾸면
  * `money: null` 을 쓰는데, 표식이 `money` 안에 있으면 그 쓰기에서는 비교할 표식 자체가
  * 없어 막을 수 없다.
+ *
+ * 3 은 세이브 연결(P3, `money.reserveId`)을 아는 판이다. 2 를 쓰는 앱(P2 까지)은 그 필드를 모르고 문서 전체를
+ * 덮어쓰므로, 세이브에 건 거래를 그 앱에서 고치면 연결이 말없이 사라져 세이브 사용액이 줄어든다. 규칙이
+ * "연결이 실린 거래에 3 미만의 쓰기" 를 거절한다(`keepsReserveLink`). 다른 문서는 2 이상이면 그대로 받는다.
  */
-export const LEDGER_SCHEMA = 2;
+export const LEDGER_SCHEMA = 3;
 
 const asTime = (v: unknown): string | null =>
   typeof v === 'string' && /^\d{2}:\d{2}$/.test(v) ? v : null;
@@ -227,6 +231,8 @@ export function entryFromDoc(id: string, raw: Raw): Entry {
           plannedRef,
           highlight: moneyRaw?.highlight === true,
           outsidePocket: moneyRaw?.outsidePocket === true,
+          // P3. 예전 문서에는 없다 — 연결 없음.
+          reserveId: optStr(moneyRaw?.reserveId),
         }
       : null,
     // 회복 표식은 할 일 위에만 얹힌다.
@@ -258,7 +264,8 @@ export function entryToDoc(e: Entry): Raw {
     isRecurring: e.isRecurring,
     recurrence: e.recurrence,
     task: e.task,
-    money: e.money ? moneyToDoc(e.money) : null,
+    // 반복 항목에는 세이브를 걸지 않는다(P3) — 한 연결이 여러 회차에 걸치면 사용액이 몇 번 들어갈지 애매하다.
+    money: e.money ? moneyToDoc(e.recurrence ? { ...e.money, reserveId: null } : e.money) : null,
     recovery: e.recovery,
     schema: LEDGER_SCHEMA,
     // undefined 는 Firestore 가 받지 않는다. 늘 참/거짓으로 굳혀 쓴다.
@@ -266,6 +273,11 @@ export function entryToDoc(e: Entry): Raw {
     createdAt: e.createdAt,
     updatedAt: e.updatedAt,
   };
+}
+
+function reserveIdToKeep(m: MoneyFields): string | null {
+  if (!m.reserveId || m.budgetId || m.debtId || m.type !== 'expense') return null;
+  return moneyFlowOf(m) === 'normal' ? m.reserveId : null;
 }
 
 /** 저장된 `ymSpan` 이 없을 때 다시 만든다. `withDerived` 와 같은 규칙이다. */
@@ -296,6 +308,9 @@ function moneyToDoc(m: MoneyFields): Raw {
     highlight: m.highlight === true,
     // 주머니에 걸렸으면 "생활비 외" 는 뜻이 없다. 둘이 함께 남지 않게 굳힌다.
     outsidePocket: m.outsidePocket === true && !m.budgetId,
+    // 세이브(P3)는 일반 지출에만, 주머니 · 대출과 함께 걸리지 않는다. 어긋난 연결은 저장할 때 걷는다 —
+    // 흐름을 대출로 바꾸거나 주머니를 고르면 세이브 연결이 남아 있지 않는다.
+    reserveId: reserveIdToKeep(m),
   };
 }
 
