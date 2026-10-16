@@ -1,0 +1,65 @@
+.ob-backdrop { position: fixed; inset: 0; z-index: 2000; display: grid; place-items: center; padding: 24px; background: var(--scrim); overscroll-behavior: contain; }
+.ob-dialog { width: min(100%, 760px); max-height: calc(100dvh - 48px); overflow-y: auto; background: var(--bg-elev); color: var(--ink); border: 1px solid var(--line-strong); border-radius: 18px; box-shadow: var(--shadow-3); }
+.ob-header { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 18px 28px 10px; }
+.ob-brand { font-weight: 700; font-size: .875rem; }
+.ob-text-button { border: 0; background: transparent; color: var(--ink-2); display: inline-flex; align-items: center; gap: 8px; cursor: pointer; min-height: 44px; padding: 8px; font-size: .8125rem; }
+.ob-progress { display: grid; grid-template-columns: repeat(4, 1fr); list-style: none; gap: 12px; margin: 0; padding: 0 28px 22px; }
+.ob-progress li { display: flex; align-items: center; gap: 7px; color: var(--ink-3); border-top: 3px solid var(--line); padding-top: 10px; font-size: .75rem; }
+.ob-progress li[aria-current] { border-color: var(--accent); color: var(--ink); font-weight: 700; }
+.ob-progress li > span { font-variant-numeric: tabular-nums; }
+.ob-content { padding: 0 28px; }
+.ob-preview { background: var(--bg-soft); border: 1px solid var(--line); border-radius: 12px; padding: 18px; min-height: 218px; }
+.ob-preview-head { display: flex; justify-content: space-between; gap: 10px; margin-bottom: 16px; font-size: .6875rem; color: var(--ink-3); }
+.ob-preview-head > :first-child { color: var(--ink-2); font-weight: 700; }
+.ob-spaces, .ob-records, .ob-reserve { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+.ob-card { background: var(--bg-elev); border: 1px solid var(--line); border-radius: 9px; padding: 16px; display: flex; flex-direction: column; gap: 9px; min-width: 0; }
+.ob-card > svg { color: var(--accent); }
+.ob-card strong { font-size: .9375rem; }
+.ob-card > span { font-size: .75rem; color: var(--ink-2); }
+.ob-lines { display: grid; gap: 6px; margin-top: 4px; }
+.ob-lines i { height: 5px; background: var(--line); width: 80%; border-radius: 8px; }
+.ob-lines i:nth-child(2) { width: 60%; }
+.ob-tags { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 4px; }
+.ob-tags span { background: var(--bg-soft); border: 1px solid var(--line); border-radius: 5px; padding: 4px 8px; font-size: .6875rem; color: var(--ink-2); }
+.ob-tags .selected { border-color: var(--accent); color: var(--ink); font-weight: 700; }
+.ob-calendar { display: grid; grid-template-columns: repeat(7, 1fr); gap: 3px; }
+.ob-calendar i { font-style: normal; text-align: center; font-size: .625rem; padding: 2px; color: var(--ink-3); }
+.ob-calendar .marked { background: var(--accent); color: #fff; border-radius: 3px; }
+.ob-task { padding-bottom: 6px; border-bottom: 1px solid var(--line); }
+.ob-note { padding: 8px; background: var(--bg-soft); border-radius: 5px; }
+.ob-flow-row { display: flex; justify-content: space-between; align-items: center; gap: 10px; margin-top: 20px; font-size: .8125rem; }
+.ob-flow-row strong { color: var(--ink-2); font-weight: 500; }
+.ob-chart { height: 82px; display: flex; align-items: end; gap: 12px; border-bottom: 1px solid var(--line-strong); margin-top: 10px; }
+.ob-chart i { flex: 1; height: 65%; background: var(--accent); opacity: .8; border-radius: 4px 4px 0 0; }
+.ob-chart i:nth-child(2n) { height: 45%; }.ob-chart i:nth-child(3n) { height: 80%; }.ob-chart i:last-child { height: 36%; }
+.ob-flow-caption { display: flex; justify-content: space-between; margin-top: 8px; font-size: .6875rem; color: var(--ink-3); }
+.ob-reserve .ob-card { min-height: 144px; justify-content: center; }
+.ob-save { border-color: var(--accent); }.ob-save small { font-size: .6875rem; color: var(--ink-3); font-weight: 500; }
+.ob-meter { height: 7px; border-radius: 8px; background: var(--line); margin: 10px 0; }.ob-meter i { display: block; width: 60%; height: 100%; background: var(--accent); border-radius: inherit; }
+.ob-copy { padding: 23px 0 20px; min-height: 213px; }
+.ob-eyebrow { color: var(--accent); font-size: .75rem; font-weight: 700; margin: 0 0 8px; }
+.ob-copy h2 { font-size: 1.4rem; line-height: 1.4; letter-spacing: -.035em; margin: 0 0 12px; }
+.ob-copy h2:focus { outline: none; }
+.ob-copy > p:not(.ob-eyebrow) { line-height: 1.75; font-size: .875rem; color: var(--ink-2); margin: 0; word-break: keep-all; overflow-wrap: anywhere; }
+.ob-copy > .ob-tip { margin-top: 12px !important; padding-left: 12px; border-left: 2px solid var(--line-strong); font-size: .75rem !important; }
+.ob-footer { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 18px 28px; border-top: 1px solid var(--line); }
+.ob-preference label { display: flex; align-items: center; gap: 8px; min-height: 44px; font-size: .8125rem; cursor: pointer; }
+.ob-preference input { width: 18px; height: 18px; accent-color: var(--accent); margin: 0; }
+.ob-preference > span { display: block; color: var(--ink-3); font-size: .6875rem; }
+.ob-actions { display: flex; gap: 8px; }
+.ob-button { display: inline-flex; align-items: center; justify-content: center; gap: 12px; min-height: 44px; min-width: 82px; border: 1px solid var(--line-strong); border-radius: 7px; background: var(--bg-elev); padding: 10px 16px; font-size: .8125rem; cursor: pointer; }
+.ob-button:disabled { opacity: .45; cursor: default; }.ob-primary { background: var(--ink); color: var(--bg-elev); border-color: var(--ink); }
+@media (max-width: 520px) {
+  .ob-backdrop { padding: 12px; }
+  .ob-dialog { max-height: calc(100dvh - 24px); border-radius: 12px; }
+  .ob-header { padding: 10px 16px 6px; }.ob-content { padding: 0 16px; }
+  .ob-progress { padding: 0 16px 16px; gap: 8px; }.ob-progress li { gap: 4px; font-size: .6875rem; }
+  .ob-preview { padding: 12px; min-height: 190px; }.ob-card { padding: 12px; gap: 8px; }
+  .ob-spaces, .ob-records, .ob-reserve { gap: 8px; }.ob-card strong { font-size: .8125rem; }
+  .ob-card > span { font-size: .6875rem; }.ob-copy { min-height: 0; padding: 20px 0; }.ob-copy h2 { font-size: 1.1875rem; }
+  .ob-footer { padding: 12px 16px 16px; flex-wrap: wrap; gap: 12px; }.ob-actions { margin-left: auto; }.ob-button { min-width: 72px; padding: 10px 12px; }
+}
+@media (max-height: 620px) {
+  .ob-preview { display: none; }
+  .ob-copy { min-height: 0; padding-top: 8px; }
+}

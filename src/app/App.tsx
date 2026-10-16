@@ -58,6 +58,8 @@ import { monthsOfPeriods, periodByKey, periodOf, periodsBetween, periodsOfYear, 
 import { combineFeeds, FEED_DEMO } from './useStore';
 import { useLedgerFeed } from './useLedgerFeed';
 import { Auth } from '../ui/Auth';
+import { Onboarding } from '../ui/Onboarding';
+import { useOnboarding } from './useOnboarding';
 import { BrandFooter } from '../ui/BrandFooter';
 import { DaySheet } from '../ui/DaySheet';
 import { calcStateOf, type CalcState } from '../ui/calcState';
@@ -126,6 +128,7 @@ interface WorkspaceProps {
 const EMPTY_MONTHS: YearMonth[] = [];
 
 function Workspace({ uid, user, onSignOut }: WorkspaceProps) {
+  const onboarding = useOnboarding(uid);
   const dialog = useDialog();
   const { prefs, set } = usePrefs();
   const [cursor, setCursor] = useState(() => new Date());
@@ -2575,8 +2578,18 @@ function Workspace({ uid, user, onSignOut }: WorkspaceProps) {
 
       <BrandFooter />
 
+      {onboarding.open && !showAuth && !showSettings && !join && !sharedSheet &&
+        !new URLSearchParams(window.location.search).has(INVITE_PARAM) && (
+        <Onboarding key={uid ?? 'guest'} onFinish={(outcome) => {
+          if (!onboarding.finish(outcome)) {
+            dialog.toast('이 브라우저에 안내 설정을 저장하지 못했습니다. 다음 접속 시 다시 표시될 수 있습니다.', 'bad');
+          }
+        }} />
+      )}
+
       {showSettings && user && (
         <SettingsSheet
+          onShowOnboarding={() => { setShowSettings(false); onboarding.reopen(); }}
           user={user}
           theme={prefs.theme}
           fontScale={prefs.fontScale}
