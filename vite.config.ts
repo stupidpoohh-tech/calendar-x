@@ -1,4 +1,6 @@
 import { defineConfig } from 'vitest/config';
+import { readFileSync } from 'node:fs';
+import type { Plugin } from 'vite';
 import react from '@vitejs/plugin-react';
 import { fileURLToPath, URL } from 'node:url';
 
@@ -40,8 +42,16 @@ const tideRoute = {
   configurePreviewServer: rewriteTide,
 };
 
+// Keep the user's root OG.png as the single source for deployed link previews.
+const socialImage: Plugin = {
+  name: 'calendar-social-image',
+  generateBundle() {
+    this.emitFile({ type: 'asset', fileName: 'OG.png', source: readFileSync(entry('./OG.png')) });
+  },
+};
+
 export default defineConfig({
-  plugins: [react(), tideRoute],
+  plugins: [react(), tideRoute, socialImage],
   // 페이지가 둘이다. SPA fallback 을 끄지 않으면 /tide 요청이 루트 index.html 로
   // 떨어져 잔고캘린더 대신 캘린더X 가 뜬다.
   appType: 'mpa',

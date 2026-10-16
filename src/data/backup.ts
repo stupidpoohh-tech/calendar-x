@@ -46,7 +46,8 @@ import type {
  * 파일이다. 거래에는 카드 연결(`money.cardId` · `money.cardCycle`)이 실릴 수 있다 — 예전 앱이 가져오면 연결이 떨어져
  * 미결제가 사라지고 한도가 부푼다. 예전 앱은 모르는 버전을 거절한다.
  */
-export const BACKUP_VERSION = 11;
+// v12 preserves Recovery off/do classifications; older apps must not silently discard them.
+export const BACKUP_VERSION = 12;
 
 export interface BackupPayload {
   app: 'Dada Calendar';

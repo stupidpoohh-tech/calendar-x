@@ -1885,17 +1885,11 @@ function Workspace({ uid, user, onSignOut }: WorkspaceProps) {
     <div className="app" data-lens={lens} style={{ ['--lens' as string]: `var(${lensDef.accentVar})` }}>
       <div className="app-masthead">
         <div className="app-logo" aria-label="캘린더 X">
-          {/*
-            글리프 'X' 대신 획을 직접 긋는다. 글꼴의 X 는 굵기를 font-weight 로만
-            건드릴 수 있어 로고로 쓰기에는 획이 가늘다.
-          */}
+          {/* Calendar mark shared with the browser favicon. */}
           <span className="app-logo-mark" aria-hidden="true">
-            <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor"
-                 strokeWidth="4.2" strokeLinecap="round">
-              <path d="M5.5 5.5 19 19M19 5.5 5.5 19" />
-            </svg>
+            <svg viewBox="0 0 32 32" width="32" height="32" fill="none"><rect width="32" height="32" rx="9" fill="currentColor" /><rect x="8" y="9" width="16" height="16" rx="3" stroke="white" strokeWidth="1.8" /><path d="M12 7v4m8-4v4M8 14h16m-11 4 6 5m0-5-6 5" stroke="white" strokeWidth="1.8" strokeLinecap="round" /></svg>
           </span>
-          <span className="app-logo-name">캘린더 X</span>
+          <span className="app-logo-name">Calendar <b>X</b></span>
         </div>
         {!isAnon && (layout.sharedSwitcher || !shared.board) && (
           <div className="space-context"><SpaceSwitch

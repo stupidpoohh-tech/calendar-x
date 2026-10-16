@@ -456,8 +456,12 @@ export interface Pin {
 /** 회복 단위. 하루 중 어느 구간을 끌 것인가. */
 export type RecoveryWindowId = 'evening' | 'afternoon' | 'day';
 
-/** Rule 이 소유하는 OFF 옵션 정의. 사용자가 이름을 바꾸거나 지울 수 있다. */
+export type RecoveryOptionKind = 'off' | 'do';
+
+/** Rule 이 소유하는 회복 옵션 정의. 사용자가 이름을 바꾸거나 지울 수 있다. */
 export interface RecoveryOption {
+  /** 옛 항목에 없으면 끌 것(off). */
+  kind?: RecoveryOptionKind;
   id: string;
   label: string;
   order: number;
@@ -470,6 +474,8 @@ export interface RecoveryOption {
  * 지난 회차가 "무엇을 끄고 쉬었는지" 를 잃지 않는다. (id 만 두면 지운 순간 뜻이 사라진다)
  */
 export interface RecoveryOptionSnapshot {
+  /** 회차 생성 시점의 분류. 옛 기록은 off. */
+  kind?: RecoveryOptionKind;
   id: string;
   label: string;
 }

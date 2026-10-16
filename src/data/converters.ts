@@ -105,7 +105,7 @@ function asRecoveryFields(v: unknown): RecoveryFields | null {
   return {
     options: rawOptions
       .filter((x): x is Raw => x !== null && typeof x === 'object' && !Array.isArray(x))
-      .map((x) => ({ id: str(x.id), label: str(x.label) }))
+      .map((x) => ({ id: str(x.id), label: str(x.label), ...(x.kind === 'do' || x.kind === 'off' ? { kind: x.kind as 'off' | 'do' } : {}) }))
       .filter((o) => o.id !== ''),
     repayment: bool(r.repayment),
     movedCount: Math.max(0, Math.trunc(num(r.movedCount))),
@@ -119,7 +119,7 @@ function asRecoveryOptions(v: unknown): RecoveryOption[] {
   if (!Array.isArray(v)) return DEFAULT_RECOVERY_OPTIONS.map((o) => ({ ...o }));
   const out = v
     .filter((x): x is Raw => x !== null && typeof x === 'object' && !Array.isArray(x))
-    .map((x, i) => ({ id: str(x.id), label: str(x.label), order: num(x.order, i) }))
+    .map((x, i) => ({ id: str(x.id), label: str(x.label), ...(x.kind === 'do' || x.kind === 'off' ? { kind: x.kind as 'off' | 'do' } : {}), order: num(x.order, i) }))
     .filter((o) => o.id !== '' && o.label !== '');
   // 옵션을 전부 지운 상태도 사용자의 선택이다. 배열 자체가 없을 때만 기본값으로 돌린다.
   return out;
@@ -168,7 +168,7 @@ export function recoveryRuleToDoc(r: RecoveryRule): Raw {
     prevCompletedAt: r.prevCompletedAt,
     defaultMemo: r.defaultMemo,
     defaultOptionIds: r.defaultOptionIds,
-    options: r.options.map((o) => ({ id: o.id, label: o.label, order: o.order })),
+    options: r.options.map((o) => ({ id: o.id, label: o.label, ...(o.kind ? { kind: o.kind } : {}), order: o.order })),
   };
 }
 

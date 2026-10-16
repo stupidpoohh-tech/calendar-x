@@ -29,7 +29,7 @@
 import { addDaysISO, normalizeDate } from './date';
 import { newEntry, uid, withDerived } from './entry';
 import type {
-  DateISO, Entry, RecoveryFields, RecoveryOption, RecoveryOptionSnapshot,
+  DateISO, Entry, RecoveryFields, RecoveryOption, RecoveryOptionKind, RecoveryOptionSnapshot,
   RecoveryRule, RecoveryWindowId, TimeHM,
 } from './types';
 
@@ -140,7 +140,7 @@ export function snapshotOptions(rule: RecoveryRule): RecoveryOptionSnapshot[] {
     .map((id) => byId.get(id))
     .filter((o): o is RecoveryOption => o != null)
     .sort((a, b) => a.order - b.order)
-    .map((o) => ({ id: o.id, label: o.label }));
+    .map((o) => ({ id: o.id, label: o.label, ...(o.kind ? { kind: o.kind } : {}) }));
 }
 
 export interface BuildOptions {
@@ -391,10 +391,14 @@ export function normalizeOptionLabel(raw: string): string {
  * 이름은 사용자가 직접 관리하는 목록이라, 같은 것을 두 번 적는 일이 실제로 생긴다
  * ('사우나' 와 '사우나 '). 대소문자와 공백만 무시하고 같은 것으로 본다.
  */
-export function findRecoveryOption(rule: RecoveryRule, label: string): RecoveryOption | undefined {
+export function recoveryOptionKind(option: { kind?: RecoveryOptionKind }): RecoveryOptionKind {
+  return option.kind === 'do' ? 'do' : 'off';
+}
+
+export function findRecoveryOption(rule: RecoveryRule, label: string, kind: RecoveryOptionKind = 'off'): RecoveryOption | undefined {
   const key = normalizeOptionLabel(label).toLowerCase();
   if (!key) return undefined;
-  return rule.options.find((o) => normalizeOptionLabel(o.label).toLowerCase() === key);
+  return rule.options.find((o) => recoveryOptionKind(o) === kind && normalizeOptionLabel(o.label).toLowerCase() === key);
 }
 
 /**
@@ -403,11 +407,11 @@ export function findRecoveryOption(rule: RecoveryRule, label: string): RecoveryO
  * 같은 이름이 이미 있으면 목록을 불리지 않고 그것의 기본 선택만 켠다 —
  * 이 목록은 사용자가 직접 손으로 관리하므로, 중복이 쌓이면 관리 자체가 일이 된다.
  */
-export function addRecoveryOption(rule: RecoveryRule, label: string): RecoveryRule {
+export function addRecoveryOption(rule: RecoveryRule, label: string, kind: RecoveryOptionKind = 'off'): RecoveryRule {
   const text = normalizeOptionLabel(label);
   if (!text) return rule;
 
-  const existing = findRecoveryOption(rule, text);
+  const existing = findRecoveryOption(rule, text, kind);
   if (existing) {
     return rule.defaultOptionIds.includes(existing.id) ? rule : toggleDefaultOption(rule, existing.id);
   }
@@ -415,6 +419,7 @@ export function addRecoveryOption(rule: RecoveryRule, label: string): RecoveryRu
   const option: RecoveryOption = {
     id: uid(),
     label: text,
+    kind,
     order: rule.options.reduce((m, o) => Math.max(m, o.order), -1) + 1,
   };
   return {
@@ -429,9 +434,20 @@ export function renameRecoveryOption(rule: RecoveryRule, id: string, label: stri
   const text = normalizeOptionLabel(label);
   if (!text) return rule;
   // 다른 옵션이 이미 그 이름이면 두 개가 같은 이름으로 남는다. 그대로 둔다.
-  const clash = findRecoveryOption(rule, text);
+  const current = rule.options.find((o) => o.id === id);
+  if (!current) return rule;
+  const clash = findRecoveryOption(rule, text, recoveryOptionKind(current));
   if (clash && clash.id !== id) return rule;
   return { ...rule, options: rule.options.map((o) => (o.id === id ? { ...o, label: text } : o)) };
+}
+
+/** 분류를 바꿔도 이미 생성한 회차의 스냅샷은 유지한다. */
+export function setRecoveryOptionKind(rule: RecoveryRule, id: string, kind: RecoveryOptionKind): RecoveryRule {
+  const current = rule.options.find((o) => o.id === id);
+  if (!current || recoveryOptionKind(current) === kind) return rule;
+  const clash = findRecoveryOption(rule, current.label, kind);
+  if (clash && clash.id !== id) return rule;
+  return { ...rule, options: rule.options.map((o) => o.id === id ? { ...o, kind } : o) };
 }
 
 /**
@@ -486,6 +502,7 @@ export function setRecoveryInterval(rule: RecoveryRule, intervalDays: number): R
 // ---------- 개별 회차 편집 ----------
 
 export interface RecoveryOptionChoice {
+  kind?: RecoveryOptionKind;
   id: string;
   label: string;
   on: boolean;
@@ -502,18 +519,19 @@ export interface RecoveryOptionChoice {
  * 지금의 이름이 맞다.
  */
 export function recoveryOptionChoices(rule: RecoveryRule, entry: Entry): RecoveryOptionChoice[] {
-  const chosen = new Map((entry.recovery?.options ?? []).map((o) => [o.id, o.label]));
+  const chosen = new Map((entry.recovery?.options ?? []).map((o) => [o.id, o]));
   const out: RecoveryOptionChoice[] = [...rule.options]
     .sort((a, b) => a.order - b.order)
     .map((o) => ({
       id: o.id,
-      label: chosen.get(o.id) ?? o.label,
+      label: chosen.get(o.id)?.label ?? o.label,
+      ...((chosen.get(o.id) ?? o).kind ? { kind: (chosen.get(o.id) ?? o).kind } : {}),
       on: chosen.has(o.id),
       gone: false,
     }));
   const known = new Set(rule.options.map((o) => o.id));
-  for (const [id, label] of chosen) {
-    if (!known.has(id)) out.push({ id, label, on: true, gone: true });
+  for (const [id, snapshot] of chosen) {
+    if (!known.has(id)) out.push({ ...snapshot, on: true, gone: true });
   }
   return out;
 }
@@ -532,7 +550,7 @@ export function toggleEntryOption(rule: RecoveryRule, entry: Entry, id: string):
   const def = rule.options.find((o) => o.id === id);
   if (!def) return entry;
   const order = new Map(rule.options.map((o) => [o.id, o.order]));
-  const next = [...rec.options, { id: def.id, label: def.label }]
+  const next = [...rec.options, { id: def.id, label: def.label, ...(def.kind ? { kind: def.kind } : {}) }]
     .sort((a, b) => (order.get(a.id) ?? 999) - (order.get(b.id) ?? 999));
   return withDerived({ ...entry, recovery: { ...rec, options: next } });
 }
@@ -548,13 +566,13 @@ export function toggleEntryOption(rule: RecoveryRule, entry: Entry, id: string):
  * 만들 것이 없으면(빈 문자열) null 을 돌려준다 — 부르는 쪽이 아무것도 저장하지 않는다.
  */
 export function addOptionFromEntry(
-  rule: RecoveryRule, entry: Entry, label: string,
+  rule: RecoveryRule, entry: Entry, label: string, kind: RecoveryOptionKind = 'off',
 ): { rule: RecoveryRule; entry: Entry } | null {
   const text = normalizeOptionLabel(label);
   if (!text || !entry.recovery) return null;
 
-  const existing = findRecoveryOption(rule, text);
-  const nextRule = addRecoveryOption(rule, text);
+  const existing = findRecoveryOption(rule, text, kind);
+  const nextRule = addRecoveryOption(rule, text, kind);
   const option = existing
     ?? nextRule.options.find((o) => !rule.options.some((x) => x.id === o.id));
   if (!option) return null;

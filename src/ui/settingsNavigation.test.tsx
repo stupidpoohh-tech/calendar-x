@@ -92,6 +92,7 @@ describe('설정 화면 위계', () => {
     fireEvent.click(screen.getByRole('button', { name: /사용 안내 튜토리얼/ }));
     fireEvent.click(screen.getByRole('button', { name: /튜토리얼 다시 보기/ }));
     expect(props.onShowOnboarding).toHaveBeenCalledOnce();
+    expect(screen.getByRole('link', { name: /클리어위크 살펴보기/ })).toHaveAttribute('href', 'https://clear-week.pages.dev/');
     fireEvent.keyDown(screen.getByRole('heading', { level: 2, name: '사용 안내' }), { key: 'Escape' });
     expect(screen.getByRole('heading', { level: 2, name: '설정' })).toBeVisible();
     fireEvent.keyDown(screen.getByRole('dialog'), { key: 'Escape' });

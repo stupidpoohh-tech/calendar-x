@@ -49,10 +49,10 @@ import {
 } from './converters';
 import { convertLegacyItems } from './migrate';
 
-export const SUPPORTED_VERSIONS = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11] as const;
-export const LATEST_VERSION = 11;
+export const SUPPORTED_VERSIONS = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12] as const;
+export const LATEST_VERSION = 12;
 
-export type BackupFormat = 'legacy' | 'v2' | 'v3' | 'v4' | 'v5' | 'v6' | 'v7' | 'v8' | 'v9' | 'v10' | 'v11';
+export type BackupFormat = 'legacy' | 'v2' | 'v3' | 'v4' | 'v5' | 'v6' | 'v7' | 'v8' | 'v9' | 'v10' | 'v11' | 'v12';
 
 /** 파일 한 곳이 왜 들어갈 수 없는지. */
 export interface FileProblem {
@@ -716,7 +716,7 @@ export function readBackupFile(text: string): ReadResult {
     return { ok: false, problems: [{ where: 'version', reason: '버전이 없습니다. 백업 파일이 맞는지 확인해 주세요.' }] };
   }
 
-  const format: BackupFormat = version >= 11 ? 'v11' : version === 10 ? 'v10' : version === 9 ? 'v9' : version === 8 ? 'v8' : version === 7 ? 'v7' : version === 6 ? 'v6' : version === 5 ? 'v5'
+  const format: BackupFormat = version >= 12 ? 'v12' : version === 11 ? 'v11' : version === 10 ? 'v10' : version === 9 ? 'v9' : version === 8 ? 'v8' : version === 7 ? 'v7' : version === 6 ? 'v6' : version === 5 ? 'v5'
     : version === 4 ? 'v4' : version === 3 ? 'v3' : 'v2';
   const hasPockets = version >= 4;
   const hasCategories = version >= 6;

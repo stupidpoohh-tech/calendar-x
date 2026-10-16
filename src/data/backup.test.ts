@@ -316,7 +316,7 @@ describe('v11 — 신용카드 (P4)', () => {
     const r = readBackupFile(JSON.stringify(buildBackup({ ...empty, cards: [life], entries: [shoe, paid] })));
     expect(r.ok).toBe(true);
     if (r.ok) {
-      expect(r.file.format).toBe('v11');
+      expect(r.file.format).toBe('v12');
       expect(r.file.data.cards).toEqual([life]);
       expect(r.file.data.entries.map((e) => [e.money?.cardId, e.money?.cardCycle ?? null, e.money?.reserveId ?? null])).toEqual([
         ['life', null, 'trip'], ['life', '2026-11', null],

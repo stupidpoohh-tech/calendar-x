@@ -154,7 +154,7 @@ export function SettingsSheet({
             <div className="settings-menu">
               {menu('data', Icon.Download, '백업 · 가져오기 · 데이터 정리', legacyCount && !migratedAt ? '이관 가능' : undefined)}
               {menu('account', Icon.User, user.email ?? '로그인 계정')}
-              {onShowOnboarding && menu('help', Icon.Bulb, '튜토리얼 다시 보기')}
+              {menu('help', Icon.Bulb, '튜토리얼 · 클리어위크')}
             </div>
           </section>
 
@@ -337,11 +337,18 @@ export function SettingsSheet({
           <section className="settings-page" hidden={page !== 'help'} aria-label="사용 안내">
             <div className="set-grp">
               <h3 className="set-gt">처음 시작하기</h3>
-              <button className="set-row" onClick={onShowOnboarding}>
+              {onShowOnboarding && <button className="set-row" onClick={onShowOnboarding}>
                 <span className="set-ico"><Icon.Calendar size={18} /></span>
-                <span className="set-row-b"><span className="set-row-t">튜토리얼 다시 보기</span><span className="set-row-s">대시보드부터 리커버리까지 6단계로 안내합니다. 상단에서 원하는 단계를 바로 열 수 있습니다.</span></span>
+                <span className="set-row-b"><span className="set-row-t">튜토리얼 다시 보기</span><span className="set-row-s">대시보드부터 같이 보기까지 6단계로 안내합니다. 상단에서 원하는 단계를 바로 열 수 있습니다.</span></span>
                 <Icon.Chevron size={16} />
-              </button>
+              </button>}
+            </div>
+            <div className="settings-service">
+              <span className="settings-service-eyebrow">함께 쓰면 좋은 서비스</span>
+              <h3>한 주를 가볍게, 클리어위크</h3>
+              <p>종이 플래너처럼 한 주의 할 일을 펼쳐 보고, 떠오른 생각을 여백에 적어 보세요. 주간 계획에 집중하고 싶을 때 이용할 수 있는 별도 서비스입니다.</p>
+              <div className="settings-service-preview" aria-hidden="true"><span>MON<i /></span><span>TUE<i /></span><span>WED<i /></span><span>THU<i /></span><span>FRI<i /></span><span>주간 메모<i /></span></div>
+              <a href="https://clear-week.pages.dev/" target="_blank" rel="noopener noreferrer">클리어위크 살펴보기 <span>↗</span><span className="sr-only"> (새 탭)</span></a>
             </div>
           </section>
         </div>
