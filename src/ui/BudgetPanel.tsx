@@ -331,7 +331,7 @@ function BudgetRow({
   onMarkOutside?: (e: Entry) => void;
 }) {
   const {
-    budget, actualMinor, plannedMinor, unsettledMinor, remainingMinor, remainingWithPlannedMinor,
+    budget, actualMinor, plannedMinor, unsettledMinor, cardMinor, remainingMinor, remainingWithPlannedMinor,
     overspentMinor, plannedOverMinor, count,
   } = state;
   // 총 예산이 0이면 비율을 낼 수 없다. 막대를 그리지 않는다. 막대는 실제로 쓴 돈만 채운다.
@@ -379,6 +379,7 @@ function BudgetRow({
               </span>
             )}
             {unsettledMinor > 0 && <span>잔고에 아직 안 들어간 사용 {formatAmount(unsettledMinor)}</span>}
+            {cardMinor > 0 && <span>그 가운데 카드 사용 {formatAmount(cardMinor)} — 현금은 결제일에 대금으로 나갑니다</span>}
             {count > 0 && <span className="bp-count">연결 {count}건</span>}
           </span>
           {ended && (

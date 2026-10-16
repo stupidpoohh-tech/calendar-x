@@ -9,22 +9,27 @@
  */
 import { useEffect, useState } from 'react';
 import {
-  activeCards, archivedCards, cardProblem, cardState, cycleByKey, describeCycle, fmtMonthDay, newCard, type CardState, type CycleState,
+  activeCards, archivedCards, cardProblem, cardState, cycleByKey, describeCycle, fmtMonthDay, newCard, suspectCardPayments,
+  type CardState, type CycleState,
 } from '../domain/card';
 import { fmtDayShort } from '../domain/date';
 import { formatAmount } from '../domain/money';
 import type { Account, Card, DateISO, Entry } from '../domain/types';
 import { Icon } from './Icon';
 
+const NO_ENTRIES: readonly Entry[] = [];
 const md = (iso: string) => `${Number(iso.slice(5, 7))}/${Number(iso.slice(8, 10))}`;
 
 /** 현금흐름 카드 안의 한 줄. 카드가 없으면 '카드 등록' 하나만 얇게. */
-export function CardLine({ cards, cardEntries, todayISO, onOpen }: {
+export function CardLine({ cards, cardEntries, plans = NO_ENTRIES, todayISO, onOpen }: {
   cards: readonly Card[];
   cardEntries: readonly Entry[];
+  /** 계산용 원본 목록. 카드에 연결되지 않은 예정 카드대금(중복 가능성)을 센다. */
+  plans?: readonly Entry[];
   todayISO: DateISO;
   onOpen: () => void;
 }) {
+  const suspects = activeCards(cards).length > 0 ? suspectCardPayments(plans, todayISO).length : 0;
   const states = activeCards(cards).map((c) => cardState(c, cardEntries, todayISO));
   // 보관한 카드에도 빚이 남아 있으면 미결제에 넣는다 — 보관은 고르는 자리에서 빼는 것일 뿐이다.
   const archivedDebt = archivedCards(cards)
@@ -41,7 +46,7 @@ export function CardLine({ cards, cardEntries, todayISO, onOpen }: {
         <span className={'debt-h-n num' + (overdue ? ' bp-over' : '')}>
           {cards.length === 0
             ? '카드 등록'
-            : <>미결제 {formatAmount(outstanding)}{next && ` · ${md(next.payDate)} 결제 ${formatAmount(next.remainingMinor)}`}{overdue && ' · 결제일 지남'}</>}
+            : <>미결제 {formatAmount(outstanding)}{next && ` · ${md(next.payDate)} 결제 ${formatAmount(next.remainingMinor)}`}{overdue && ' · 결제일 지남'}{suspects > 0 && ` · 확인 ${suspects}건`}</>}
         </span>
       </button>
     </div>
@@ -60,6 +65,10 @@ interface SheetProps {
   onEntryClick: (e: Entry) => void;
   /** 대금을 거래 창으로 적는다. 실제(오늘) 또는 예정(결제일). 금액 · 회차를 미리 채운다. */
   onRecordPayment: (c: Card, cycle: CycleState, planned: boolean) => void;
+  /** 계산용 원본 목록 — 카드에 연결되지 않은 예정 카드대금을 찾는다. */
+  plans?: readonly Entry[];
+  /** 사용자가 고른 예정을 그 카드의 대금으로 잇는다. 자동으로 부르지 않는다. */
+  onLinkPlanned?: (e: Entry, c: Card) => void;
 }
 
 export function CardSheet({ onClose, ...panel }: SheetProps) {
@@ -89,6 +98,7 @@ export function CardSheet({ onClose, ...panel }: SheetProps) {
 
 function CardPanel({
   cards, cardEntries, accounts, todayISO, onSaveCard, onDeleteCard, onEntryClick, onRecordPayment,
+  plans = NO_ENTRIES, onLinkPlanned,
 }: Omit<SheetProps, 'onClose'>) {
   const [draft, setDraft] = useState<Card | null>(
     () => (cards.length === 0 ? newCard({ name: '', accountId: accounts[0]?.id ?? null }) : null),
@@ -104,9 +114,39 @@ function CardPanel({
     setOpenId(c.id);
   };
 
+  const suspects = active.length > 0 ? suspectCardPayments(plans, todayISO) : [];
+
   return (
     <div className="bp bare">
       <div className="debt-b">
+        {/*
+          카드를 등록하기 전부터 적어 둔 예정 카드대금. 카드 미결제와 따로 빠져 같은 돈이 두 번 빠질 수 있다.
+          자동으로 바꾸지 않는다 — 카드에 이을지 사용자가 고른다. 잇지 않을 예정이면 그 줄을 눌러 고치거나 지운다.
+        */}
+        {suspects.length > 0 && (
+          <div className="cd-suspect" role="group" aria-label="카드에 연결되지 않은 예정 카드대금">
+            <p className="bp-note">
+              카드에 연결되지 않은 예정 카드대금이 {suspects.length}건 있습니다. 같은 대금을 카드 미결제가 이미 지키고 있다면
+              한도에서 두 번 빠집니다. 카드에 이으면 그 회차의 대금으로 한 번만 셉니다.
+            </p>
+            <ul className="bp-ul">
+              {suspects.map((e) => (
+                <li key={e.id} className="cd-suspect-i">
+                  <button className="bp-li planned" onClick={() => onEntryClick(e)}>
+                    <span className="bp-li-d num">{e.recurrence ? `매월 ${Number(e.startDate.slice(8, 10))}일` : fmtMonthDay(e.startDate)}</span>
+                    <span className="bp-li-t">{e.title.trim() || '(제목 없음)'}</span>
+                    <span className="bp-li-a num">{formatAmount(Math.abs(e.money?.amountMinor ?? 0))}</span>
+                  </button>
+                  {onLinkPlanned && active.map((c) => (
+                    <button key={c.id} className="chip" onClick={() => onLinkPlanned(e, c)} aria-label={`${e.title.trim() || '예정'}을(를) ${c.name} 대금으로 잇기`}>
+                      {c.name}에 잇기
+                    </button>
+                  ))}
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
         {active.map((c) => (
           draft?.id === c.id ? (
             <CardForm key={c.id} draft={draft} accounts={accounts} onDraft={setDraft} onCancel={() => setDraft(null)} onSave={save}

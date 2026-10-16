@@ -693,6 +693,9 @@
 .cd-cy .bp-li-t { white-space: normal; font-size: 0.6875rem; color: var(--ink-3); }
 .cd-cy .bp-li-d { min-width: 56px; }
 .cd-cy-b { padding: 0 0 6px 10px; }
+.cd-suspect { border: 1px dashed var(--line-strong, var(--line)); border-radius: var(--radius-sm); padding: 8px 10px; margin-bottom: 6px; }
+.cd-suspect-i { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; }
+.cd-suspect-i .bp-li { flex: 1 1 200px; }
 .cd-f-row { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px; }
 .cd-f-row label { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
 @media (max-width: 480px) { .cd-f-row { grid-template-columns: 1fr 1fr; } }

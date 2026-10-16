@@ -133,7 +133,8 @@ export function confirmOccurrence(
   if (patch.budgetId) debtId = null;
   else if (patch.debtId) budgetId = null;
   if (type === 'income') { budgetId = null; debtId = null; }
-  if (flow === 'cardSpend') budgetId = null;
+  // 카드가 정해지지 않은 카드 사용은 주머니에 걸지 않는다(`budget.inBudget`). 등록 카드의 사용은 건다(P1-D).
+  if (flow === 'cardSpend' && !(patch.cardId !== undefined ? patch.cardId : m.cardId)) budgetId = null;
   // 세이브(P3)도 사용처 하나다. 주머니 · 대출과 함께 걸리지 않고, 일반 지출에만 남는다.
   let reserveId = patch.reserveId !== undefined ? patch.reserveId : m.reserveId ?? null;
   if (patch.budgetId || patch.debtId) reserveId = null;

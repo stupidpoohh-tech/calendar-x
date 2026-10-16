@@ -237,6 +237,52 @@ export function defaultPaymentCycle(st: CardState, date: DateISO): YearMonth {
   return ymOf(normalizeDate(date) || date);
 }
 
+// ---------- 중복 가능성 — 카드에 연결되지 않은 예정 카드대금 ----------
+
+/** 제목으로 카드대금처럼 보이는가. 넓게 잡지 않는다 — '카드지갑' 같은 지출을 붙잡지 않게. */
+const CARD_PAYMENT_TITLE = /카드\s*(값|대금|결제|청구)/;
+
+/**
+ * 카드를 등록하기 전부터 적어 둔 예정 카드대금 — 카드에 연결되지 않아 미결제와 따로 빠진다.
+ *
+ * 카드 사용을 적기 시작하면 그 회차의 빚은 카드 미결제가 지키는데, 같은 돈을 '매월 25일 카드값' 같은 예정이 한 번 더
+ * 뺄 수 있다. **자동으로 바꾸지 않는다** — 이 함수는 후보만 고르고, 연결은 사용자가 고른다. 고르는 것은 아직 끝나지
+ * 않은(앞날 회차가 남은) 예정 가운데 흐름이 카드 대금이거나 제목이 카드대금처럼 보이는 지출뿐이다.
+ */
+export function suspectCardPayments(entries: readonly Entry[], today: DateISO): Entry[] {
+  const seen = new Set<string>();
+  return entries.filter((e) => {
+    const m = e.money;
+    if (e.kind !== 'money' || !m || isActual(e) || m.type !== 'expense' || m.cardId || seen.has(e.id)) return false;
+    if ((e as Entry & { virtual?: boolean }).virtual) return false;
+    const flow = moneyFlowOf(m);
+    const looks = flow === 'cardPayment' || (flow === 'normal' && CARD_PAYMENT_TITLE.test(e.title));
+    if (!looks) return false;
+    const live = e.recurrence
+      ? !e.recurrence.until || e.recurrence.until >= today
+      : (e.endDate ?? e.startDate) >= today;
+    if (live) seen.add(e.id);
+    return live;
+  }).sort((a, b) => a.startDate.localeCompare(b.startDate) || a.title.localeCompare(b.title));
+}
+
+/**
+ * 예정을 카드대금으로 잇는다 — 사용자가 고른 뒤에만 부른다. 흐름 · 카드만 바꾸고 금액 · 날짜 · 반복은 그대로다.
+ * 반복 예정은 회차마다 그 달을 갚으므로 회차를 박지 않는다. 대금은 생활비 · 세이브에 걸리지 않는다.
+ */
+export function linkPlannedToCard(e: Entry, cardId: string, now = new Date().toISOString()): Entry {
+  return {
+    ...e,
+    updatedAt: now,
+    money: {
+      ...e.money!,
+      flow: 'cardPayment', cardId,
+      cardCycle: e.recurrence ? null : ymOf(normalizeDate(e.startDate) || e.startDate),
+      budgetId: null, reserveId: null, debtId: null,
+    },
+  };
+}
+
 // ---------- 카드 · 정렬 ----------
 
 export function newCard(over: Partial<Card> = {}, now = new Date().toISOString()): Card {

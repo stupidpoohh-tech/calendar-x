@@ -633,6 +633,12 @@ describe('가계부 원장', () => {
       await assertFails(setDoc(doc(db(OTHER), path('c1')), cardUse()));
     });
 
+    it('카드 사용을 생활비에 거는 것(P1-D)은 게시된 판 4 규칙이 그대로 받는다 — 규칙을 바꾸지 않았다', async () => {
+      await assertSucceeds(setDoc(doc(db(ME), path('p1')), cardUse({ budgetId: 'b1' })));
+      // 세이브와 함께는 여전히 안 된다(사용처는 하나).
+      await assertFails(setDoc(doc(db(ME), path('p2')), cardUse({ budgetId: 'b1', reserveId: 'trip' })));
+    });
+
     it('카드가 실린 거래는 판 3 쓰기로 덮을 수 없다 — 그 필드를 모르는 앱이 연결을 지우지 못한다', async () => {
       await assertSucceeds(setDoc(doc(db(ME), path('c1')), cardUse()));
       // P3 앱이 고친 모양: 카드가 없고 판 3.

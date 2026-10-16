@@ -312,3 +312,38 @@ describe('저장 형태', () => {
     expect(entryFromDoc('r', entryToDoc(recurring)).money).toMatchObject({ cardId: 'life', cardCycle: null });
   });
 });
+
+describe('기존 예정 카드대금 — 중복 가능성 탐지 (자동으로 바꾸지 않는다)', () => {
+  const monthly = (over: Partial<MoneyFields> = {}, title = '카드값') => newEntry('money', {
+    id: `m-${title}`, title, startDate: '2026-08-25',
+    recurrence: { freq: 'monthly', interval: 1, until: null, count: null },
+    money: newMoney({ type: 'expense', amountMinor: 300_000, ...over }),
+  });
+
+  it('카드에 연결되지 않은, 앞날 회차가 남은 예정만 고른다 — 흐름이 카드 대금이거나 제목이 카드대금처럼 보이는 것', async () => {
+    const { suspectCardPayments } = await import('./card');
+    const list = [
+      monthly({}, '카드값'),
+      monthly({ flow: 'cardPayment' }, '현대'),
+      monthly({}, '카드지갑'),                                  // 제목이 카드대금이 아니다
+      monthly({ flow: 'cardPayment', cardId: 'life' }, '연결됨'),   // 이미 연결
+      { ...monthly({}, '끝난 카드값'), recurrence: { freq: 'monthly' as const, interval: 1, until: '2026-09-30', count: null } },
+      newEntry('money', { id: 'once-old', title: '카드 대금', startDate: '2026-09-25', money: newMoney({ type: 'expense', amountMinor: 1 }) }),
+      newEntry('money', { id: 'once-new', title: '카드 대금', startDate: '2026-10-25', money: newMoney({ type: 'expense', amountMinor: 1 }) }),
+      use('real', 1, TODAY, { flow: 'cardPayment', cardId: null }),  // 실제 거래는 예정이 아니다
+    ];
+    expect(suspectCardPayments(list, TODAY).map((e) => e.title)).toEqual(['카드값', '현대', '카드 대금']);
+  });
+
+  it('연결하기 전에는 미결제와 예정이 같은 돈을 두 번 빼고, 사용자가 연결하면 한 번만 뺀다', async () => {
+    const { linkPlannedToCard } = await import('./card');
+    const shoe = use('shoe', 300_000, '2026-09-20'); // 10/25 결제분
+    const plan = monthly();
+    const d = '2026-10-31';
+    expect(limit([acct(1_000_000)], [shoe, plan], {}, d)).toBe(400_000);
+    const linked = linkPlannedToCard(plan, 'life');
+    expect(linked.money).toMatchObject({ flow: 'cardPayment', cardId: 'life', cardCycle: null, amountMinor: 300_000 });
+    expect(linked.recurrence).toEqual(plan.recurrence);
+    expect(limit([acct(1_000_000)], [shoe, linked], {}, d)).toBe(700_000);
+  });
+});

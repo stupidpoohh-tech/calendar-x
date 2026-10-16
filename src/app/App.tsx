@@ -49,7 +49,7 @@ import { ConfirmSheet } from '../ui/ConfirmSheet';
 import { LedgerScreen, type SubscribeAll } from '../ui/LedgerScreen';
 import { PocketSheet } from '../ui/PocketSheet';
 import { CardLine, CardSheet } from '../ui/CardSheet';
-import type { CycleState } from '../domain/card';
+import { linkPlannedToCard, type CycleState } from '../domain/card';
 import { LoanCategorySheet } from '../ui/LoanCategorySheet';
 import { PastPlanSheet } from '../ui/PastPlanSheet';
 import type { PocketFocus } from '../ui/BudgetPanel';
@@ -971,6 +971,20 @@ function Workspace({ uid, user, onSignOut }: WorkspaceProps) {
     });
     if (ok) commit({ kind: 'card', label: '카드 보관', summary: c.name, payload: { ...c, archivedAt: new Date().toISOString(), updatedAt: new Date().toISOString() } });
   }, [isAnon, uid, promptLogin, store.cardLinked, dialog, commit]);
+
+  /**
+   * 카드에 연결되지 않은 예정 카드대금을 사용자가 고른 카드에 잇는다(P4 마감). 확인창이 무엇이 바뀌는지 먼저 말한다 —
+   * 흐름과 카드만 바뀌고 금액 · 날짜 · 반복은 그대로다. 자동으로 부르는 길은 없다.
+   */
+  const linkPlannedCard = useCallback(async (e: Entry, c: Card) => {
+    if (isAnon || !uid) { void promptLogin(); return; }
+    const ok = await dialog.confirm({
+      title: `'${e.title.trim() || '예정'}'을(를) ${c.name} 대금으로 이을까요?`,
+      body: <p>금액 · 날짜 · 반복은 그대로이고, 이 예정이 그 카드의 회차 대금이 됩니다. 그 회차의 미결제와 한 번만 셉니다.{e.money?.budgetId ? ' 생활비 연결은 풀립니다(대금은 생활비에서 나가지 않습니다).' : ''}</p>,
+      confirmLabel: '잇기',
+    });
+    if (ok) commit({ kind: 'entry', label: '카드 대금 연결', summary: e.title, payload: withDerived(linkPlannedToCard(e, c.id)) });
+  }, [isAnon, uid, promptLogin, dialog, commit]);
 
   /** 대금을 거래 창으로 적는다(P4). 금액은 그 회차의 남은 금액, 계좌는 카드의 결제 계좌. 창에서 고친다. */
   const openCardPayment = useCallback((c: Card, cycle: CycleState, planned: boolean) => {
@@ -2234,7 +2248,7 @@ function Workspace({ uid, user, onSignOut }: WorkspaceProps) {
             onOpenPockets={setPocketFocus}
             onOpenCards={() => setCardSheetOpen(true)}
           >
-            <CardLine cards={store.cards} cardEntries={store.cardLinked} todayISO={today} onOpen={() => setCardSheetOpen(true)} />
+            <CardLine cards={store.cards} cardEntries={store.cardLinked} plans={store.tideEntries} todayISO={today} onOpen={() => setCardSheetOpen(true)} />
             <MoneyPanel
               debts={store.debts}
               collapsed={prefs.debtsCollapsed}
@@ -2348,6 +2362,8 @@ function Workspace({ uid, user, onSignOut }: WorkspaceProps) {
           onDeleteCard={(c) => { void deleteCard(c); }}
           onEntryClick={(e) => { setCardSheetOpen(false); openEdit(e); }}
           onRecordPayment={openCardPayment}
+          plans={store.tideEntries}
+          onLinkPlanned={(e, c) => { void linkPlannedCard(e, c); }}
         />
       )}
       {pocketFocus && ledgerOn && (

@@ -68,8 +68,9 @@ import type { Account, Budget, DateISO, Entry, Reserve, ReservePatch } from './t
  *   1. `budgetId` 가 그 예산을 가리킨다
  *   2. 날짜가 예산 기간 **안**에 있다 — 기간 밖 지출은 일반 지출이다
  *   3. 반복 항목이 아니다 — 주머니 하나에 몇 번 들어갈지가 애매해진다
- *   4. 카드 사용이 아니다 — 카드 사용의 현금은 나중에 카드 대금으로 나간다. 주머니가
- *      그 사용을 쓴 돈으로 세면, 대금이 나갈 때 일반 지출로 한 번 더 빠진다.
+ *   4. 카드가 정해지지 않은 카드 사용이 아니다 — 그 사용은 미결제로 지켜지지 않아, 주머니가 쓴 돈으로
+ *      세면 대금이 나갈 때 한 번 더 빠진다. **등록한 카드의 카드 사용은 건다**(P1-D) — 그 돈은 카드 미결제가
+ *      지키므로 주머니 예약에서 덜어 낸다(`pocketReserve` 의 `coveredByCard`).
  *
  * 2~4번이 어긋나면 일반 지출로 돌아간다. 어디에도 안 세어지는 돈은 만들지 않는다.
  */
@@ -77,7 +78,7 @@ export function inBudget(entry: Entry, budget: Budget): boolean {
   const m = entry.money;
   if (!m || m.budgetId !== budget.id) return false;
   if (entry.recurrence) return false;
-  if (moneyFlowOf(m) === 'cardSpend') return false;
+  if (moneyFlowOf(m) === 'cardSpend' && !m.cardId) return false;
   return entry.startDate >= budget.startDate && entry.startDate <= budget.endDate;
 }
 
@@ -109,8 +110,8 @@ export function spendingIn(
  * 있거나 반복이면 걸지 않는다. legacy 종류(`living` · `save` · `free` · `repay` · `priority`)도
  * 걸지 않는다 — 무엇인지 코드로 정할 수 없다.
  *
- * 카드 사용을 막는 이유: 카드 대금과 이어 줄 연결 정보가 없다. 걸면 주머니(사용)와 일반 흐름
- * (대금)에서 같은 돈이 두 번 빠지고, 대금을 낸 뒤에도 주머니가 그 채무를 계속 잡아 둔다.
+ * 등록한 카드의 카드 사용은 건다(P1-D) — 쓴 날 주머니의 사용이 되고, 그 돈은 카드 미결제가 지킨다.
+ * 카드가 정해지지 않은 카드 사용은 미결제로 지켜지지 않아 걸지 않는다.
  *
  * 이 판정은 **새로 고르는 자리**(자동 선택 · 고를 칩)에만 쓴다. 이미 저장된 연결은 건드리지
  * 않는다 — 계산은 지금처럼 `inBudget` 이 정한다.
@@ -118,7 +119,19 @@ export function spendingIn(
 export function pocketEligible(e: Pick<Entry, 'money' | 'recurrence'>): boolean {
   const m = e.money;
   if (!m || m.type !== 'expense' || m.debtId || e.recurrence) return false;
-  return moneyFlowOf(m) === 'normal';
+  const flow = moneyFlowOf(m);
+  return flow === 'normal' || (flow === 'cardSpend' && !!m.cardId);
+}
+
+/**
+ * 카드 미결제가 지키는 주머니 지출인가 — 등록한 카드의 **실제** 카드 사용(P1-D).
+ *
+ * 현금은 아직 나가지 않았지만, 그 돈은 카드 미결제(`tide.cardHoldOn`)가 결제일까지 한도에서 빼 두고, 대금을 내면
+ * 현금 흐름 · 잔고가 뺀다. 주머니 예약에서는 잔고에 반영된 현금 지출처럼 **이미 다른 곳에서 빠진 몫**으로 덜어 낸다.
+ * 덜어 내지 않으면 주머니 예약과 카드 미결제가 같은 돈을 두 번 지킨다. 예정 카드 사용은 아직 빚이 아니라 주머니에 남는다.
+ */
+function coveredByCard(e: Entry): boolean {
+  return isActual(e) && moneyFlowOf(e.money) === 'cardSpend' && !!e.money?.cardId;
 }
 
 /** 사용처 — 주머니에 걸렸는가, 생활비 밖으로 명시했는가, 아직 정하지 않았는가. */
@@ -230,8 +243,9 @@ function sortByDate(es: Entry[]): Entry[] {
  *
  *   actualMinor     실제로 쓴 돈. "남은 생활비" 는 이것만 뺀다
  *   plannedMinor    아직 확정하지 않은 예정. 쓴 돈이 아니다
- *   settledMinor    실제 지출 가운데 이미 잔고에 반영된 것 — 통장에서 이미 빠졌다
- *   unsettledMinor  실제 지출 가운데 아직 잔고 밖인 것 — 예상 잔고가 이만큼 더 줄어든다
+ *   settledMinor    실제 현금 지출 가운데 이미 잔고에 반영된 것 — 통장에서 이미 빠졌다
+ *   unsettledMinor  실제 현금 지출 가운데 아직 잔고 밖인 것 — 예상 잔고가 이만큼 더 줄어든다
+ *   cardMinor       실제 카드 사용(P1-D) — 현금은 결제일에 대금으로 나가고, 그때까지 카드 미결제가 지킨다
  *   reservedMinor   생활비 외 가용 한도에서 지금 빠져 있는 몫 (`pocketReserve`)
  *
  * 생활비를 만드는 것만으로는 잔고도 예상 잔고도 줄지 않는다. 줄어드는 것은 가용 한도뿐이다.
@@ -244,8 +258,10 @@ export interface BudgetState {
   plannedMinor: number;
   /** 실제 지출 중 잔고에 반영된 것. */
   settledMinor: number;
-  /** 실제 지출 중 아직 잔고 밖인 것. */
+  /** 실제 현금 지출 중 아직 잔고 밖인 것. 카드 사용은 들어가지 않는다(`cardMinor`). */
   unsettledMinor: number;
+  /** 실제 카드 사용(등록 카드). 현금은 결제일에 나간다. */
+  cardMinor: number;
   /** 남은 생활비 = 총 예산 − 실제로 쓴 돈. 넘겼으면 0. */
   remainingMinor: number;
   /** 실제로 넘긴 금액. 넘지 않았으면 0. */
@@ -265,10 +281,12 @@ const amt = (e: Entry) => Math.abs(e.money?.amountMinor ?? 0);
 /**
  * 주머니 하나가 가용 한도에서 차지하는 몫. **양수**.
  *
- *   진행 중 · 앞으로   max(총 예산, 실제 + 예정) − 잔고에 반영된 지출
- *   끝남              (실제 + 예정) − 잔고에 반영된 지출
+ *   진행 중 · 앞으로   max(총 예산, 실제 + 예정) − 다른 곳에서 이미 빠진 지출
+ *   끝남              (실제 + 예정) − 다른 곳에서 이미 빠진 지출
  *
- * 잔고에 반영된 지출을 빼는 것이 이중 차감을 막는 자리다 — 그 돈은 이미 잔고에서 빠졌다.
+ * 다른 곳에서 이미 빠진 지출 = 잔고에 반영된 현금 지출 + 카드 미결제가 지키는 실제 카드 사용(`coveredByCard`).
+ * 이것을 빼는 것이 이중 차감을 막는 자리다 — 앞의 것은 이미 잔고에서, 뒤의 것은 카드 미결제(대금을 내면 현금
+ * 흐름 · 잔고)에서 빠진다.
  * 반영되지 않은 실제 지출은 이 몫 안에 남아 있고, 예상 잔고 쪽에서는 현금으로 빠진다.
  * 두 숫자는 다른 질문에 답하므로 둘 다에 있는 것이 맞다(가용 한도는 예상 잔고가 아니라
  * 확인 잔고에서 출발해 연결 지출을 일반 흐름에서 빼고 센다 — `tide.limitOn`).
@@ -277,7 +295,7 @@ export function pocketReserve(
   budget: Budget, linked: readonly Entry[], inBalance: (e: Entry) => boolean, ended: boolean,
 ): number {
   const spent = linked.reduce((t, e) => t + amt(e), 0);
-  const settled = linked.filter(inBalance).reduce((t, e) => t + amt(e), 0);
+  const settled = linked.filter((e) => coveredByCard(e) || inBalance(e)).reduce((t, e) => t + amt(e), 0);
   return (ended ? spent : Math.max(budget.amountMinor, spent)) - settled;
 }
 
@@ -299,8 +317,11 @@ export function budgetState(
   const actualMinor = actual.reduce((t, e) => t + amt(e), 0);
   const plannedMinor = linked.filter((e) => !isActual(e)).reduce((t, e) => t + amt(e), 0);
   const inBalance = inBalanceOf(opts.accounts, opts.unsettledAfter);
+  const cash = actual.filter((e) => !coveredByCard(e));
+  const cardMinor = actual.length === cash.length ? 0 : actual.filter(coveredByCard).reduce((t, e) => t + amt(e), 0);
+  const cashMinor = actualMinor - cardMinor;
   const settledMinor = opts.accounts
-    ? actual.filter((e) => balanceInclusion(e, opts.accounts!) === 'in').reduce((t, e) => t + amt(e), 0)
+    ? cash.filter((e) => balanceInclusion(e, opts.accounts!) === 'in').reduce((t, e) => t + amt(e), 0)
     : 0;
   const ended = opts.today !== undefined && budgetEnded(budget, opts.today);
   return {
@@ -309,7 +330,8 @@ export function budgetState(
     plannedMinor,
     settledMinor,
     // 계좌를 모르면 반영 여부도 모른다. 둘 다 0 으로 두고 화면은 적지 않는다.
-    unsettledMinor: opts.accounts ? actualMinor - settledMinor : 0,
+    unsettledMinor: opts.accounts ? cashMinor - settledMinor : 0,
+    cardMinor,
     remainingMinor: Math.max(0, budget.amountMinor - actualMinor),
     overspentMinor: Math.max(0, actualMinor - budget.amountMinor),
     remainingWithPlannedMinor: Math.max(0, budget.amountMinor - actualMinor - plannedMinor),

@@ -74,8 +74,9 @@ export function LedgerFields({
   /** 이미 걸려 있지만 지금 고르는 자리에는 없는 카테고리(보관 · 흐름으로 옮긴 '대출'). */
   const pickedHidden = picked !== null && !pickable.some((c) => c.id === picked.id);
   const isOutflow = type === 'expense';
-  // 주머니는 일반 지출에만 건다(`pocketEligible`). 대출 · 이체 · 카드 대금 · 카드 사용은 아니다.
-  const canPocket = isOutflow && flow === 'normal' && !money.debtId && pockets.length > 0;
+  // 주머니는 일반 지출 · 등록 카드의 카드 사용에 건다(`pocketEligible`). 대출 · 이체 · 카드 대금은 아니다.
+  const canPocket = isOutflow && (flow === 'normal' || (flow === 'cardSpend' && !!money.cardId))
+    && !money.debtId && pockets.length > 0;
   const use = money.budgetId ? 'linked' : money.outsidePocket ? 'outside' : 'undecided';
   const ambiguous = accounts.length > 1
     && balanceInclusion({ id: entryId, startDate: date, money }, accounts) === 'ambiguous';
@@ -123,7 +124,7 @@ export function LedgerFields({
                 key={c.id} type="button" role="radio"
                 className={'chip' + (flow === 'cardSpend' && money.cardId === c.id ? ' on' : '')}
                 aria-checked={flow === 'cardSpend' && money.cardId === c.id}
-                onClick={() => onMoney({ flow: 'cardSpend', cardId: c.id, cardCycle: null, budgetId: null, debtId: null })}
+                onClick={() => onMoney({ flow: 'cardSpend', cardId: c.id, cardCycle: null, debtId: null })}
               >
                 {c.name}
               </button>
@@ -361,10 +362,13 @@ export function LedgerFields({
           </div>
         </div>
       )}
-      {/* 카드 사용은 생활비에 걸지 않는다. 카드 대금과 이어 줄 연결 정보가 없어서, 걸면 주머니와
-          대금에서 같은 돈이 두 번 빠진다. 고를 자리를 감추는 것에서 그치지 않고 이유를 적는다. */}
-      {isOutflow && flow === 'cardSpend' && pockets.length > 0 && (
-        <p className="mod-hint">카드 사용은 생활비에 연결하지 않습니다 — 현금은 결제일에 대금으로 나가고, 생활비에 걸면 같은 돈이 두 번 빠집니다.</p>
+      {/* 카드를 정하지 않은 카드 사용은 생활비에 걸지 않는다 — 미결제로 지켜지지 않아, 걸면 대금이 나갈 때
+          같은 돈이 두 번 빠진다. 고를 자리를 감추는 것에서 그치지 않고 이유를 적는다. */}
+      {isOutflow && flow === 'cardSpend' && !money.cardId && pockets.length > 0 && (
+        <p className="mod-hint">카드를 정하지 않은 카드 사용은 생활비에 연결하지 않습니다 — 카드를 고르면 연결할 수 있습니다.</p>
+      )}
+      {canPocket && flow === 'cardSpend' && money.budgetId && (
+        <p className="mod-hint">생활비 사용으로는 오늘 세고, 현금은 결제일에 대금으로 나갑니다. 같은 돈을 생활비와 카드 미결제가 두 번 빼지 않습니다.</p>
       )}
       {canPocket && use === 'undecided' && (
         <p className="mod-hint">

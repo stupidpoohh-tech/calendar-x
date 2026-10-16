@@ -56,7 +56,7 @@ function openModal(props: Partial<Parameters<typeof EntryModal>[0]> & { initial:
 const saved = (fn: ReturnType<typeof vi.fn>) => fn.mock.calls[0]![0] as Entry;
 
 describe('결제수단 — 현금 · 계좌 / 카드', () => {
-  it('카드를 고르면 카드 사용으로 저장된다 — 생활비는 풀리고, 결제일을 적는다', () => {
+  it('카드를 고르면 카드 사용으로 저장된다 — 생활비 연결은 그대로, 결제일을 적는다 (P1-D)', () => {
     const { onSave } = openModal({ initial: newEntry('money', { id: 'n', startDate: TODAY, money: newMoney({ status: 'actual' }) }), budgets: [pocket] });
     const method = screen.getByRole('radiogroup', { name: '결제수단' });
     expect(within(method).getAllByRole('radio').map((r) => r.textContent)).toEqual(['현금 · 계좌', '생활 카드']);
@@ -64,15 +64,22 @@ describe('결제수단 — 현금 · 계좌 / 카드', () => {
 
     fireEvent.change(screen.getByLabelText('금액'), { target: { value: '45,000' } });
     fireEvent.click(within(method).getByRole('radio', { name: '생활 카드' }));
-    // 흐름은 그대로 '지출' 이다. 생활비 줄은 사라지고 이유를 적는다.
+    // 흐름은 그대로 '지출' 이다. 생활비 연결은 남고, 현금이 결제일에 나간다고 적는다.
     expect(screen.getByRole('radio', { name: '지출' })).toHaveAttribute('aria-checked', 'true');
-    expect(screen.queryByRole('radiogroup', { name: '사용처' })).toBeNull();
+    expect(screen.getByRole('radio', { name: '10월 생활비' })).toHaveAttribute('aria-checked', 'true');
     expect(screen.getByRole('dialog').textContent).toContain('11월 25일');
+    expect(screen.getByRole('dialog').textContent).toContain('두 번 빼지 않습니다');
     fireEvent.click(screen.getByRole('button', { name: '식비' }));
     fireEvent.click(screen.getByRole('button', { name: '저장' }));
     expect(saved(onSave).money).toMatchObject({
-      status: 'actual', type: 'expense', flow: 'cardSpend', cardId: 'life', amountMinor: 45_000, budgetId: null, categoryId: 'default-food',
+      status: 'actual', type: 'expense', flow: 'cardSpend', cardId: 'life', amountMinor: 45_000, budgetId: 'b1', categoryId: 'default-food',
     });
+  });
+
+  it('카드를 정하지 않은 예전 카드 사용에는 생활비 칸이 없고 이유를 적는다', () => {
+    openModal({ initial: tx('old', TODAY, 10_000, { flow: 'cardSpend' }), mode: 'edit', budgets: [pocket] });
+    expect(screen.queryByRole('radiogroup', { name: '사용처' })).toBeNull();
+    expect(screen.getByRole('dialog').textContent).toContain('카드를 정하지 않은 카드 사용은 생활비에 연결하지 않습니다');
   });
 
   it('카드 사용도 세이브에 걸 수 있다 — 현금으로 되돌리면 일반 지출이다', () => {
@@ -223,5 +230,28 @@ describe('현금흐름 카드', () => {
     expect(est.textContent).toContain('−300,000');
     fireEvent.click(est);
     expect(onOpenCards).toHaveBeenCalled();
+  });
+});
+
+describe('기존 예정 카드대금 확인 (P4 마감)', () => {
+  const legacy = newEntry('money', {
+    id: 'm', title: '카드값', startDate: '2026-08-25', recurrence: { freq: 'monthly', interval: 1, until: null, count: null },
+    money: newMoney({ type: 'expense', amountMinor: 300_000 }),
+  });
+
+  it('카드에 연결되지 않은 예정을 알리고, 사용자가 고른 카드에 잇는다 — 저절로 바꾸지 않는다', () => {
+    const props = {
+      onClose: vi.fn(), onSaveCard: vi.fn(), onDeleteCard: vi.fn(), onEntryClick: vi.fn(), onRecordPayment: vi.fn(), onLinkPlanned: vi.fn(),
+    };
+    render(<CardSheet cards={[life]} cardEntries={[sep]} plans={[legacy, sep]} accounts={[account()]} todayISO={TODAY} {...props} />);
+    const box = screen.getByRole('group', { name: '카드에 연결되지 않은 예정 카드대금' });
+    expect(box.textContent).toContain('1건');
+    expect(box.textContent).toContain('매월 25일카드값300,000');
+    expect(props.onLinkPlanned).not.toHaveBeenCalled();
+    fireEvent.click(within(box).getByRole('button', { name: '카드값을(를) 생활 카드 대금으로 잇기' }));
+    expect(props.onLinkPlanned).toHaveBeenCalledWith(legacy, life);
+    cleanup();
+    render(<CardLine cards={[life]} cardEntries={[sep]} plans={[legacy]} todayISO={TODAY} onOpen={vi.fn()} />);
+    expect(screen.getByRole('button', { name: '카드대금 열기' }).textContent).toContain('확인 1건');
   });
 });
