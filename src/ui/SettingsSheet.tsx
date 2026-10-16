@@ -46,6 +46,7 @@ interface Props {
   onMigrate: () => void | Promise<void>;
   onSignOut: () => void;
   onClose: () => void;
+  onShowOnboarding?: () => void;
 }
 
 const FONT_SCALES: Array<[FontScale, string]> = [
@@ -58,7 +59,7 @@ const FONT_SCALES: Array<[FontScale, string]> = [
 export function SettingsSheet({
   user, theme, fontScale, weekStart, entryCount, legacyCount, migratedAt,
   recoveryRule, onRecoveryRule, onRecoveryPause, onRecoveryResume, layout, ledger,
-  onTheme, onFontScale, onWeekStart, onExport, onImport, onImportLedger, onCleanPastPlans, onCleanLoanCategory, onMigrate, onSignOut, onClose,
+  onTheme, onFontScale, onWeekStart, onExport, onImport, onImportLedger, onCleanPastPlans, onCleanLoanCategory, onMigrate, onSignOut, onClose, onShowOnboarding,
 }: Props) {
   const [showRedo, setShowRedo] = useState(false);
   const [busy, setBusy] = useState<string | null>(null);
@@ -121,6 +122,17 @@ export function SettingsSheet({
           )}
 
           <LayoutSettings {...layout} />
+
+          {onShowOnboarding && <div className="set-grp">
+            <h3 className="set-gt">사용 안내</h3>
+            <button className="set-row" onClick={onShowOnboarding}>
+              <span className="set-ico"><Icon.Calendar size={16} /></span>
+              <span className="set-row-b">
+                <span className="set-row-t">튜토리얼 다시 보기</span>
+                <span className="set-row-s">내 공간 · 같이 보기 · 기록 · 현금흐름 · 세이브를 안내합니다.</span>
+              </span>
+            </button>
+          </div>}
 
           <div className="set-grp">
             <h3 className="set-gt">표시</h3>
