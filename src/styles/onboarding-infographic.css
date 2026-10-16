@@ -34,3 +34,9 @@
   .ob-overview { grid-template-columns: 1fr 1fr; gap: 8px; }.ob-overview-center { grid-column: 1 / -1; grid-row: 1; padding: 12px; display: flex; align-items: center; justify-content: center; gap: 12px; }.ob-overview-center .ob-mini-calendar { display: none; }.ob-overview .ob-info-card:nth-child(n) { grid-column: auto; grid-row: auto; padding: 12px; }.ob-overview .ob-info-card { gap: 6px; }
   .ob-finance-map { grid-template-columns: 1fr 1fr; gap: 10px; }.ob-flow-center { grid-column: 1 / -1; grid-row: 2; padding: 12px; }.ob-flow-center svg { height: 65px; margin: 10px 0; }.ob-finance-foot { gap: 5px; margin: 0; }.ob-finance-foot span { padding: 6px; font-size: .6rem; }.ob-example-amount { font-size: .95rem; }
 }
+
+.ob-recovery-choices { display: flex; flex-wrap: wrap; justify-content: center; gap: 10px; }
+.ob-recovery-choices > span { border-radius: 10px; background: var(--bg); padding: 10px 16px; color: var(--ink-2); font-size: .8125rem; }
+.ob-recovery-choices b { margin-right: 8px; color: var(--accent); }
+.ob-recovery-choices > span:last-child { background: color-mix(in srgb, #40a887 12%, var(--bg)); }
+.ob-recovery-choices > span:last-child b { color: var(--ink); }

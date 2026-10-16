@@ -9,7 +9,7 @@ import { useEffect, useState } from 'react';
 import {
   addRecoveryOption, describeRecoveryRule, horizonLabel, isFirstActivation,
   RECOVERY_HORIZON_CHOICES, RECOVERY_INTERVAL_CHOICES, RECOVERY_WINDOWS,
-  setRecoveryInterval, toggleDefaultOption,
+  setRecoveryInterval, toggleDefaultOption, recoveryOptionKind,
 } from '../domain/recovery';
 import type { RecoveryRule, RecoveryWindowId } from '../domain/types';
 import { Icon } from './Icon';
@@ -59,7 +59,7 @@ export function RecoverySettings({ rule, onChange, onPause, onResume }: Props) {
               ? describeRecoveryRule(rule)
               : first
                 ? '켜면 간격마다 회복 일정 한 건을 잡습니다.'
-                : '일시중지 중 — 규칙 · 메모 · OFF 항목 · 지난 기록 · 밀린 회복은 그대로 있습니다.'}
+                : '일시중지 중 — 규칙 · 메모 · 회복 항목 · 지난 기록 · 밀린 회복은 그대로 있습니다.'}
           </span>
         </span>
         <div className="seg" role="group" aria-label="Recovery 활성화">
@@ -140,10 +140,12 @@ export function RecoverySettings({ rule, onChange, onPause, onResume }: Props) {
             />
           </div>
 
-          <div className="rec-field">
-            <span className="set-gt">이번 Recovery에서 끌 것</span>
+          <p className="set-row-s">다음 회복에 기본으로 포함할 항목을 선택하세요. 이미 잡힌 회차는 해당 일정을 열어 바꿀 수 있습니다.</p>
+          {(['off', 'do'] as const).map((kind) => <div className="rec-field rec-option-group" data-kind={kind} key={kind} role="group" aria-label={kind === 'off' ? '끌 것' : '할 것'}>
+            <span className="set-gt">{kind === 'off' ? '끌 것' : '할 것'}</span>
+            <p className="rec-group-desc">{kind === 'off' ? '잠시 내려놓을 일과 생각' : '나를 회복시키는 활동'}</p>
             <div className="mod-chips">
-              {sorted.map((o) => {
+              {sorted.filter((o) => recoveryOptionKind(o) === kind).map((o) => {
                 const on = rule.defaultOptionIds.includes(o.id);
                 return (
                   <button
@@ -157,9 +159,9 @@ export function RecoverySettings({ rule, onChange, onPause, onResume }: Props) {
                   </button>
                 );
               })}
-              {sorted.length === 0 && <span className="rec-none">옵션이 없습니다. 아래에서 추가하세요.</span>}
+              {!sorted.some((o) => recoveryOptionKind(o) === kind) && <span className="rec-none">{kind === 'off' ? '예: 일, 고민' : '예: 사우나, 명상'} · 아래 옵션 관리에서 추가하세요.</span>}
             </div>
-          </div>
+          </div>)}
 
           <button
             type="button"
@@ -174,12 +176,12 @@ export function RecoverySettings({ rule, onChange, onPause, onResume }: Props) {
           {manageOptions && (
             <div className="rec-manage">
               <RecoveryOptionAdd
-                placeholder="새 항목 — 예: 사우나"
-                onAdd={(label) => onChange(addRecoveryOption(rule, label))}
+                placeholder="예: 일, 고민"
+                onAdd={(label, kind) => onChange(addRecoveryOption(rule, label, kind))}
               />
               <RecoveryOptionManager rule={rule} onChange={onChange} />
               <p className="set-row-s">
-                이름을 바꾸거나 지워도 지난 회복은 그대로 남습니다 — 각 회차가 그때의 이름을 함께 들고 있습니다.
+                이름과 구분을 바꾸거나 지워도 지난 회복에는 당시 이름과 구분이 남습니다.
               </p>
             </div>
           )}

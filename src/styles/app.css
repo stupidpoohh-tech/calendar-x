@@ -1793,3 +1793,23 @@
 .sheet-li.pend { flex-wrap: wrap; }
 .sheet-pend-a { display: flex; gap: 6px; padding: 0 0 8px 14px; width: 100%; }
 .sheet-pend-a .chip { font-size: 0.75rem; padding: 3px 10px; }
+
+/* Recovery choices carry meaning as well as color. */
+.rec-option-group { padding: 12px; border: 1px solid var(--line); border-radius: 12px; background: var(--bg-soft); }
+.rec-option-group[data-kind="do"] { background: color-mix(in srgb, #40a887 8%, var(--bg)); }
+.rec-group-desc, .rec-manage-hint { margin: 4px 0 10px; font-size: .75rem; color: var(--ink-3); }
+.rec-option-group .set-gt { font-size: .8125rem; color: var(--ink); }
+.rec-option-group[data-kind="do"] .chip.on { background: #226c55; color: white; }
+.rec-option-group .mod-chips { flex: 1; min-width: 0; }
+.rec-add { flex-wrap: wrap; }
+.rec-add .rec-kind, .rec-opts li .rec-kind { flex: 0 0 78px; width: 78px; padding: 8px 5px; }
+.rec-add .mod-input:not(.rec-kind) { min-width: 100px; }
+.rec-opts li { display: grid; grid-template-columns: 78px minmax(0, 1fr) repeat(3, 28px); }
+.rec-opts li .ico-btn { min-width: 28px; }
+.rec-manage { min-width: 0; }
+.rec-edit-row .rec-manage { width: 100%; }
+@media (max-width: 420px) {
+  .rec-opts li { grid-template-columns: minmax(0, 1fr) repeat(3, 32px); padding: 8px 0; border-bottom: 1px solid var(--line); }
+  .rec-opts li .rec-kind { grid-column: 1 / -1; width: 100%; }
+  .rec-opts li .ico-btn { width: 32px; height: 44px; }
+}

@@ -6,9 +6,9 @@
  */
 import { useState } from 'react';
 import {
-  moveRecoveryOption, removeRecoveryOption, renameRecoveryOption,
+  moveRecoveryOption, removeRecoveryOption, renameRecoveryOption, recoveryOptionKind, setRecoveryOptionKind,
 } from '../domain/recovery';
-import type { RecoveryRule } from '../domain/types';
+import type { RecoveryRule, RecoveryOptionKind } from '../domain/types';
 import { Icon } from './Icon';
 
 interface Props {
@@ -23,6 +23,7 @@ export function RecoveryOptionManager({ rule, onChange }: Props) {
     이름 입력은 초안으로 들고 있다가 포커스가 빠질 때 한 번만 저장한다.
     onChange 를 그대로 물리면 한 글자에 쓰기가 한 번씩 나간다.
   */
+  const [error, setError] = useState('');
   const [drafts, setDrafts] = useState<Record<string, string>>({});
 
   const commit = (id: string, current: string) => {
@@ -37,9 +38,14 @@ export function RecoveryOptionManager({ rule, onChange }: Props) {
   }
 
   return (
-    <ul className="rec-opts">
+    <><p className="rec-manage-hint">이름과 구분을 바꿀 수 있습니다. 선택한 항목은 다음 회복에 적용됩니다.</p>{error && <p role="alert">{error}</p>}<ul className="rec-opts">
       {sorted.map((o, i) => (
         <li key={o.id}>
+          <select className="mod-input rec-kind" aria-label={`${o.label} 구분`} value={recoveryOptionKind(o)} onChange={(e) => {
+            const next = setRecoveryOptionKind(rule, o.id, e.target.value as RecoveryOptionKind);
+            setError(next === rule ? '해당 구분에 같은 이름이 있습니다. 이름을 먼저 바꿔 주세요.' : '');
+            if (next !== rule) onChange(next);
+          }}><option value="off">끌 것</option><option value="do">할 것</option></select>
           <input
             className="mod-input"
             value={drafts[o.id] ?? o.label}
@@ -72,7 +78,7 @@ export function RecoveryOptionManager({ rule, onChange }: Props) {
           </button>
         </li>
       ))}
-    </ul>
+    </ul></>
   );
 }
 
@@ -84,22 +90,25 @@ export function RecoveryOptionManager({ rule, onChange }: Props) {
  */
 export function RecoveryOptionAdd({
   placeholder, onAdd,
-}: { placeholder: string; onAdd: (label: string) => void }) {
+}: { placeholder: string; onAdd: (label: string, kind: RecoveryOptionKind) => void }) {
+  const [kind, setKind] = useState<RecoveryOptionKind>('off');
   const [text, setText] = useState('');
 
   const submit = () => {
     const value = text.trim();
     if (!value) return;
-    onAdd(value);
+    onAdd(value, kind);
     setText('');
   };
 
   return (
     <div className="rec-add">
+      <select className="mod-input rec-kind" aria-label="새 항목 구분" value={kind} onChange={(e) => setKind(e.target.value as RecoveryOptionKind)}><option value="off">끌 것</option><option value="do">할 것</option></select>
       <input
         className="mod-input"
         value={text}
-        placeholder={placeholder}
+        aria-label="새 회복 항목"
+        placeholder={kind === 'do' ? '예: 사우나, 명상' : placeholder}
         onChange={(e) => setText(e.target.value)}
         onKeyDown={(e) => {
           if (e.nativeEvent.isComposing) return;

@@ -12,9 +12,9 @@ import { useEffect, useState } from 'react';
 import { fmtDayFull } from '../domain/date';
 import {
   addOptionFromEntry, describeRecoveryTime, recoveryOptionChoices,
-  setEntryMemo, toggleEntryOption,
+  setEntryMemo, toggleEntryOption, recoveryOptionKind,
 } from '../domain/recovery';
-import type { Entry, RecoveryRule, TimeHM } from '../domain/types';
+import type { Entry, RecoveryRule, RecoveryOptionKind, TimeHM } from '../domain/types';
 import { Icon } from './Icon';
 import { PICKER } from './pickerField';
 import { RecoveryOptionAdd, RecoveryOptionManager } from './RecoveryOptionManager';
@@ -74,8 +74,8 @@ export function RecoverySheet({
     새 항목은 목록에 더하고 이 회차에서도 켠다. 문서가 둘이라 쓰기도 둘이지만,
     사용자에게는 한 동작이다 — 적으면 지금 켜지고 다음 회차부터 기본으로 붙는다.
   */
-  const addOption = (label: string) => {
-    const next = addOptionFromEntry(rule, entry, label);
+  const addOption = (label: string, kind: RecoveryOptionKind) => {
+    const next = addOptionFromEntry(rule, entry, label, kind);
     if (!next) return;
     onChangeRule(next.rule);
     if (next.entry !== entry) onSaveEntry(next.entry);
@@ -103,10 +103,10 @@ export function RecoverySheet({
         </header>
 
         <div className="mod-body">
-          <div className="mod-row">
-            <span className="mod-lbl">OFF</span>
+          {(['off', 'do'] as const).map((kind) => <div className="mod-row rec-option-group" data-kind={kind} key={kind} role="group" aria-label={kind === 'off' ? '끌 것' : '할 것'}>
+            <span className="mod-lbl">{kind === 'off' ? '끌 것' : '할 것'}</span>
             <div className="mod-chips">
-              {choices.map((c) => (
+              {choices.filter((c) => recoveryOptionKind(c) === kind).map((c) => (
                 <button
                   key={c.id}
                   className={'chip' + (c.on ? ' on' : '') + (c.gone ? ' gone' : '')}
@@ -118,7 +118,10 @@ export function RecoverySheet({
                   {c.label}
                 </button>
               ))}
-              <button
+              {!choices.some((c) => recoveryOptionKind(c) === kind) && <span className="rec-none">{kind === 'off' ? '예: 일, 고민' : '예: 사우나, 명상'}</span>}
+            </div>
+          </div>)}
+          <button
                 type="button"
                 className={'chip ghost' + (managing ? ' on' : '')}
                 aria-expanded={managing}
@@ -127,21 +130,18 @@ export function RecoverySheet({
               >
                 <Icon.Settings size={11} /> 편집
               </button>
-            </div>
-          </div>
 
           {/*
             목록 자체를 여기서 고친다. 사용자가 자기 기준을 쌓아 가는 목록이라,
             새 항목을 적으려고 설정 화면까지 가야 하면 결국 적지 않게 된다.
           */}
           {managing && (
-            <div className="mod-row">
-              <span className="mod-lbl" />
+            <div className="mod-row rec-edit-row">
               <div className="rec-manage">
-                <RecoveryOptionAdd placeholder="새 항목 — 예: 사우나" onAdd={addOption} />
+                <RecoveryOptionAdd placeholder="예: 일, 고민" onAdd={addOption} />
                 <RecoveryOptionManager rule={rule} onChange={onChangeRule} />
                 <p className="set-row-s">
-                  여기서 고친 목록은 다음 회복에도 그대로 쓰입니다. 지난 회복은 그때의 이름을 그대로 둡니다.
+                  여기서 고친 목록은 다음 회복에도 그대로 쓰입니다. 지난 회복은 그때의 이름과 구분을 그대로 둡니다.
                 </p>
               </div>
             </div>

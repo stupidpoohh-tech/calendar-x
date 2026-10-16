@@ -125,7 +125,7 @@ describe('Recovery — 활성화 / 일시중지', () => {
 
   it('일시중지 중이면 다시 활성화 — 규칙 · 기록 · 빚이 남아 있다고 적고 설정은 그대로 보인다', () => {
     const { onResume } = mount({ ...defaultRecoveryRule(), enabled: false, lastCompletedAt: '2026-10-01', debtCount: 2 });
-    expect(screen.getByText(/일시중지 중 — 규칙 · 메모 · OFF 항목 · 지난 기록 · 밀린 회복은 그대로/)).toBeInTheDocument();
+    expect(screen.getByText(/일시중지 중 — 규칙 · 메모 · 회복 항목 · 지난 기록 · 밀린 회복은 그대로/)).toBeInTheDocument();
     expect(screen.getByText(/밀린 회복 2회 — 일시중지 중에도 그대로 남고/)).toBeInTheDocument();
     expect(screen.getByLabelText('회복 간격')).toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: '다시 활성화' }));

@@ -807,6 +807,14 @@ describe('가계부 결산 — 카테고리 · 카테고리 예산 · 정산 시
   "저장은 되는데 사라지는" 예전 문제로 돌아가므로 여기에 못 박아 둔다.
 */
 describe('회복', () => {
+  it('끌 것과 할 것 분류를 규칙과 회차에 저장한다', async () => {
+    const options = [{ id: 'work', label: '일', kind: 'off', order: 0 }, { id: 'rest', label: '명상', kind: 'do', order: 1 }];
+    await assertSucceeds(setDoc(doc(db(ME), `users/${ME}`), { recovery: { ...recoveryRule, options } }, { merge: true }));
+    await assertSucceeds(setDoc(doc(db(ME), `users/${ME}/entries/grouped`), validEntry({ recovery: { ...recoveryFields, options: options.map(({ id, label, kind }) => ({ id, label, kind })) } })));
+    expect((await getDoc(doc(db(ME), `users/${ME}`))).data()?.recovery?.options[1].kind).toBe('do');
+    expect((await getDoc(doc(db(ME), `users/${ME}/entries/grouped`))).data()?.recovery?.options[0].kind).toBe('off');
+  });
+
   it('회복 표식이 붙은 항목을 받는다', async () => {
     await assertSucceeds(setDoc(
       doc(db(ME), `users/${ME}/entries/e1`),
