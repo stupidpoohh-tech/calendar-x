@@ -1882,21 +1882,24 @@ function Workspace({ uid, user, onSignOut }: WorkspaceProps) {
 
   return (
     <div className="app" data-lens={lens} style={{ ['--lens' as string]: `var(${lensDef.accentVar})` }}>
-      <header className="topbar" data-space={sharedOpen ? 'shared' : 'me'}>
-        <div className="header-left">
-        <div className="brand">
+      <div className="app-masthead">
+        <div className="app-logo" aria-label="캘린더 X">
           {/*
             글리프 'X' 대신 획을 직접 긋는다. 글꼴의 X 는 굵기를 font-weight 로만
             건드릴 수 있어 로고로 쓰기에는 획이 가늘다.
           */}
-          <span className="brand-mark" aria-hidden="true">
+          <span className="app-logo-mark" aria-hidden="true">
             <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor"
                  strokeWidth="4.2" strokeLinecap="round">
               <path d="M5.5 5.5 19 19M19 5.5 5.5 19" />
             </svg>
           </span>
-          <span className="brand-name">캘린더X</span>
+          <span className="app-logo-name">캘린더 X</span>
         </div>
+      </div>
+      <header className="topbar" data-space={sharedOpen ? 'shared' : 'me'}>
+        <div className="header-left">
+
 
         {/*
           공간 전환. 탭보다 **위**이지만 자리는 작다 — 머리가 한 줄 더 늘면 모바일에서
