@@ -47,7 +47,7 @@ export interface LensDef {
   (`task` · `idea`) — 자료의 이름과 화면의 이름은 다를 수 있다.
 */
 export const LENSES: readonly LensDef[] = [
-  { id: 'all',   label: '전체',   title: '전체',      accentVar: '--lens-all',   kind: null },
+  { id: 'all',   label: '대시보드', title: '대시보드',      accentVar: '--lens-all',   kind: null },
   { id: 'task',  label: '캘린더', title: '캘린더',    accentVar: '--lens-task',  kind: 'task' },
   { id: 'idea',  label: '노트',   title: '노트',      accentVar: '--lens-idea',  kind: 'idea' },
   { id: 'money', label: '가계부', title: '가계부',    accentVar: '--lens-money', kind: 'money' },

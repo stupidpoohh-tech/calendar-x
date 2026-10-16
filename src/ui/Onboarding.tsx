@@ -2,54 +2,30 @@ import { useEffect, useId, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import type { OnboardingOutcome } from '../app/useOnboarding';
 import { Icon } from './Icon';
+import { OnboardingIllustration } from './OnboardingIllustration';
 import '../styles/onboarding.css';
+import '../styles/onboarding-infographic.css';
 
 const STEPS = [
-  {
-    label: '공간', title: '내 기록과 함께할 일을 구분합니다',
-    body: '내 공간에서는 개인 일정과 노트, 가계부를 관리합니다. 같이 보기에서는 연결한 상대와 공유할 내용을 확인합니다.',
-    tip: '로그인 후 상단의 사람 아이콘으로 전환합니다. 연결이 없다면 같이 보기 만들기부터 시작합니다.',
-  },
-  {
-    label: '기록', title: '일정은 한눈에, 기록은 필요한 방식으로',
-    body: '캘린더에서 날짜별 일정을 보고, 리스트 보기로 할 일을 차례로 확인하세요. 떠오른 생각은 노트에 남길 수 있습니다.',
-    tip: '내 공간에는 캘린더·노트·가계부가, 같이 보기에는 캘린더·리스트·노트가 있습니다. 숨긴 기능은 설정에서 다시 표시할 수 있습니다.',
-  },
-  {
-    label: '현금흐름', title: '앞으로 쓸 수 있는 금액을 확인합니다',
-    body: '가계부의 현금흐름에서 잔고와 직접 기록한 입출금 일정을 함께 살펴보세요. 날짜별 흐름과 쓸 수 있는 한도를 확인할 수 있습니다.',
-    tip: '금융사 거래를 자동으로 불러오지 않습니다. 표시 금액은 입력한 잔고와 거래, 생활비·세이브를 기준으로 계산합니다.',
-  },
-  {
-    label: '세이브', title: '남겨 둘 돈에 목적을 정합니다',
-    body: '세이브(Save)는 목적을 위해 따로 확보해 둘 금액입니다. 현금흐름에서 생활비와 세이브를 구분해 관리하세요.',
-    tip: '확보한 금액은 쓸 수 있는 한도에서 구분됩니다. 설정의 튜토리얼 다시 보기에서 이 안내를 언제든 열 수 있습니다.',
-  },
+  { label: '대시보드', title: '일정도, 생각도, 돈도. 오늘을 한눈에.',
+    body: '대시보드에서 오늘 남은 할 일과 앞으로 7일의 일정을 확인하세요. 이번 달 노트와 생활비 외 가용 금액도 한곳에서 살펴볼 수 있습니다.',
+    tip: '날짜를 누르면 그날 일정으로, 카드의 바로가기를 누르면 캘린더·노트·현금흐름으로 이동합니다.' },
+  { label: '공간', title: '내 기록과 함께할 일을 구분합니다',
+    body: '내 공간에서는 나의 일정·노트·가계부를 관리합니다. 같이 보기에서는 연결한 상대와 공유할 일정·리스트·노트를 함께 확인합니다.',
+    tip: '로그인 후 로고 오른쪽의 내 공간·같이 보기로 전환합니다. 연결이 없다면 같이 보기 만들기부터 시작합니다. 개인 가계부는 공유 화면에 합쳐지지 않습니다.' },
+  { label: '기록', title: '일정은 한눈에, 기록은 필요한 방식으로',
+    body: '캘린더는 언제 할 일인지, 리스트는 무엇을 해야 하는지 보여 줍니다. 날짜에 남길 메모와 아이디어는 노트로 정리하세요.',
+    tip: '내 공간의 캘린더에서 월간·리스트 보기를 바꿀 수 있습니다. 같이 보기에는 캘린더·리스트·노트 탭이 있습니다. 숨긴 기능은 설정에서 다시 표시합니다.' },
+  { label: '현금흐름', title: '잔고 너머, 앞으로 쓸 수 있는 돈까지',
+    body: '가계부 → 현금흐름에서 잔고와 직접 기록한 입출금 일정을 확인하세요. 생활비·세이브·카드 미결제를 반영한 생활비 외 가용 한도를 보여 줍니다.',
+    tip: '다음 예정 입금 전날까지를 기준으로 계산합니다. 예정 입금이 없으면 앞으로 30일을 봅니다. 금융사 거래를 자동으로 가져오지 않습니다.' },
+  { label: '세이브', title: '남겨 둘 돈에 목적을 정합니다',
+    body: '생활비는 기간 동안 사용할 예산, 세이브(Save)는 목적을 위해 따로 확보할 돈입니다. 현금흐름에서 두 금액을 구분해 관리하세요.',
+    tip: '세이브는 별도 계좌로 돈을 옮기는 기능이 아닙니다. 실제 지출을 연결하면 사용한 금액과 남은 몫을 확인할 수 있습니다.' },
+  { label: '리커버리', title: '해야 할 일 사이에, 쉴 시간도 남겨 두세요',
+    body: '설정 → 회복에서 Recovery를 활성화하고 간격과 회복 단위를 정하세요. 예정일이 가까워지면 캘린더에 회복 일정 한 건이 만들어집니다.',
+    tip: '실제로 쉰 뒤 완료하면 그날부터 다음 간격을 잡습니다. 놓친 회복은 다시 잡기로 옮길 수 있고, 일시중지해도 지난 기록과 설정은 남습니다.' },
 ] as const;
-
-/** Illustrative UI using the service's labels and icons, with no live user data. */
-function Preview({ step }: { step: number }) {
-  return (
-    <div className="ob-preview" aria-hidden="true">
-      <div className="ob-preview-head"><span>캘린더X</span><span>기능 안내 · 예시</span></div>
-      {step === 0 ? (
-        <div className="ob-spaces">
-          <div className="ob-card"><Icon.User size={24} /><strong>내 공간</strong><span>나의 일정 · 노트 · 가계부</span><div className="ob-lines"><i /><i /><i /></div></div>
-          <div className="ob-card"><Icon.Users size={24} /><strong>같이 보기</strong><span>함께 보는 일정과 기록</span><div className="ob-tags"><span>캘린더</span><span>리스트</span><span>노트</span></div></div>
-        </div>
-      ) : step === 1 ? (
-        <div className="ob-records">
-          <div className="ob-card"><Icon.Calendar size={22} /><strong>캘린더</strong><div className="ob-calendar">{Array.from({ length: 21 }, (_, i) => <i key={i} className={i === 9 || i === 17 ? 'marked' : ''}>{i + 1}</i>)}</div></div>
-          <div className="ob-card"><Icon.List size={22} /><strong>리스트 · 노트</strong><span className="ob-task">○ 이번 주 일정 확인</span><span className="ob-task">○ 준비할 내용 정리</span><span className="ob-note">떠오른 아이디어를 기록하세요.</span></div>
-        </div>
-      ) : step === 2 ? (
-        <div className="ob-flow"><div className="ob-tags"><span>가계부</span><span className="selected">현금흐름</span></div><div className="ob-flow-row"><span>현재 잔고</span><strong>입출금 일정</strong><span>앞날의 한도</span></div><div className="ob-chart"><i /><i /><i /><i /><i /><i /><i /></div><div className="ob-flow-caption"><span>오늘</span><span>날짜별 흐름 확인</span></div></div>
-      ) : (
-        <div className="ob-reserve"><div className="ob-card"><strong>생활비</strong><span>기간 동안 사용할 돈</span><div className="ob-meter"><i /></div></div><div className="ob-card ob-save"><strong>세이브 <small>Save</small></strong><span>목적을 위해 남겨 둘 돈</span><div className="ob-tags"><span>비상금</span><span>여행 준비</span></div></div></div>
-      )}
-    </div>
-  );
-}
 
 export function Onboarding({ onFinish }: { onFinish: (outcome: OnboardingOutcome) => void }) {
   const [step, setStep] = useState(0);
@@ -112,21 +88,21 @@ export function Onboarding({ onFinish }: { onFinish: (outcome: OnboardingOutcome
     <div className="ob-backdrop">
       <div className="ob-dialog" role="dialog" aria-modal="true" aria-labelledby={titleId} aria-describedby={bodyId} ref={dialog}>
         <header className="ob-header"><span className="ob-brand">캘린더X 시작 안내</span><button className="ob-text-button" onClick={() => onFinish(neverAgain ? 'dismiss' : 'skip')}>건너뛰기 <Icon.X size={16} /></button></header>
-        <ol className="ob-progress" aria-label="튜토리얼 진행">
-          {STEPS.map((item, index) => <li key={item.label} aria-current={step === index ? 'step' : undefined}><span>{String(index + 1).padStart(2, '0')}</span>{item.label}</li>)}
-        </ol>
+        <nav aria-label="튜토리얼 단계"><ol className="ob-progress">
+          {STEPS.map((item, index) => <li key={item.label}><button type="button" aria-current={step === index ? 'step' : undefined} aria-label={`${index + 1}단계 ${item.label}`} onClick={() => setStep(index)}><span>{String(index + 1).padStart(2, '0')}</span>{item.label}</button></li>)}
+        </ol></nav>
         <div className="ob-content">
-          <Preview step={step} />
           <div className="ob-copy">
-            <p className="ob-eyebrow">{step + 1} / 4 · {current.label}</p>
+            <p className="ob-eyebrow">{step + 1} / {STEPS.length} · {current.label}</p>
             <h2 id={titleId} ref={heading} tabIndex={-1}>{current.title}</h2>
             <p id={bodyId}>{current.body}</p>
             <p className="ob-tip">{current.tip}</p>
           </div>
+          <OnboardingIllustration step={step} />
         </div>
         <footer className="ob-footer">
           <div className="ob-preference"><label><input type="checkbox" checked={neverAgain} onChange={(event) => setNeverAgain(event.target.checked)} />다시 보지 않기</label><span>이 브라우저에 저장됩니다.</span></div>
-          <div className="ob-actions"><button className="ob-button" disabled={step === 0} onClick={() => setStep((value) => value - 1)}>이전</button><button className="ob-button ob-primary" onClick={() => step === 3 ? onFinish('complete') : setStep((value) => value + 1)}>{step === 3 ? '시작하기' : '다음'}<Icon.Chevron size={16} /></button></div>
+          <div className="ob-actions"><button className="ob-button" disabled={step === 0} onClick={() => setStep((value) => value - 1)}>이전</button><button className="ob-button ob-primary" onClick={() => step === STEPS.length - 1 ? onFinish('complete') : setStep((value) => value + 1)}>{step === STEPS.length - 1 ? '시작하기' : '다음'}<Icon.Chevron size={16} /></button></div>
         </footer>
       </div>
     </div>, document.body,

@@ -339,7 +339,7 @@ export function SettingsSheet({
               <h3 className="set-gt">처음 시작하기</h3>
               <button className="set-row" onClick={onShowOnboarding}>
                 <span className="set-ico"><Icon.Calendar size={18} /></span>
-                <span className="set-row-b"><span className="set-row-t">튜토리얼 다시 보기</span><span className="set-row-s">내 공간 · 같이 보기 · 기록 · 현금흐름 · 세이브를 4단계로 안내합니다.</span></span>
+                <span className="set-row-b"><span className="set-row-t">튜토리얼 다시 보기</span><span className="set-row-s">대시보드부터 리커버리까지 6단계로 안내합니다. 상단에서 원하는 단계를 바로 열 수 있습니다.</span></span>
                 <Icon.Chevron size={16} />
               </button>
             </div>

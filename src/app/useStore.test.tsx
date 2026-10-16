@@ -354,6 +354,15 @@ describe('계산 상태는 다섯 구독을 종합한다', () => {
     expect(result.current.calc.ready).toBe(false);
   });
 
+  it('대시보드는 화면용 월과 반복 구독을 함께 기다리며 금융 구독과 독립적이다', () => {
+    const { result } = mountBare();
+    act(() => { displaySubs()[0]!.push([entryAt('today', TODAY)], LIVE); });
+    expect(result.current.dashboardFeed?.ready).toBe(false);
+    deliver({ recurring: true });
+    expect(result.current.dashboardFeed?.status).toBe('live');
+    expect(result.current.calc.ready).toBe(false);
+  });
+
   it('반복 구독만 실패해도 계산은 error 다', () => {
     const boom = vi.spyOn(console, 'error').mockImplementation(() => {});
     const { result } = mount();
