@@ -20,8 +20,8 @@ import {
 } from '../data/restore';
 import { LENSES, LENS_BY_ID, SHARED_TABS } from '../domain/constants';
 import { calendarAmountCaption, lensVisible } from '../domain/layout';
-import { endOfMonth, fmtMonthTitle, parseDate, startOfMonth, toISO } from '../domain/date';
-import { convertKind, displayTitle, effectiveEndDate, newEntry, newMoney, uid as newId, withDerived } from '../domain/entry';
+import { endOfMonth, fmtMonthTitle, startOfMonth, toISO } from '../domain/date';
+import { displayTitle, effectiveEndDate, newEntry, newMoney, uid as newId, withDerived } from '../domain/entry';
 import {
   INVITE_PARAM, isShareableTask, newNote, repinNotes, sharedChange, sharedTitle,
 } from '../domain/shared';
@@ -132,6 +132,7 @@ function Workspace({ uid, user, onSignOut }: WorkspaceProps) {
   const dialog = useDialog();
   const { prefs, set } = usePrefs();
   const [cursor, setCursor] = useState(() => new Date());
+  const [dashboardQuery, setDashboardQuery] = useState('');
   const [filters, setFilters] = useState<Filters>(emptyFilters);
   const [showFilters, setShowFilters] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
@@ -199,7 +200,7 @@ function Workspace({ uid, user, onSignOut }: WorkspaceProps) {
   const cursorISO = toISO(cursor);
   const isAnon = uid === null;
   // 훅은 조건부 호출이 안 된다. 둘 다 부르고 로그인 상태에 따라 결과를 고른다.
-  const liveStore = useStore(uid, prefs.lens === 'all' ? today : cursorISO, today);
+  const liveStore = useStore(uid, cursorISO, today);
   const demoStore = useDemoStore();
   const store = isAnon ? demoStore : liveStore;
   const { db } = getFirebase();
@@ -1266,13 +1267,6 @@ function Workspace({ uid, user, onSignOut }: WorkspaceProps) {
     persist(withDerived({ ...base, task: { ...base.task, status } }));
   }, [store.entries, persist, recovery, today, dialog]);
 
-  /** 아이디어를 할 일로 승격. 축 간 이동이 필드 하나 변경으로 끝난다. */
-  const handlePromote = useCallback((e: Entry) => {
-    const base = store.entries.find((x) => x.id === baseIdOf(e.id)) ?? e;
-    persist(convertKind(base, 'task'));
-    dialog.toast('할 일로 옮겼습니다.');
-  }, [store.entries, persist, dialog]);
-
   /**
    * 정렬 순서 저장. (F-02)
    * 이전에는 로컬 상태만 바꿔서 다음 스냅샷이 오면 원위치했다.
@@ -1882,7 +1876,7 @@ function Workspace({ uid, user, onSignOut }: WorkspaceProps) {
   );
 
   return (
-    <div className="app" data-lens={lens} style={{ ['--lens' as string]: `var(${lensDef.accentVar})` }}>
+    <div className="app" data-lens={lens} data-dashboard={dashboardOn} style={{ ['--lens' as string]: `var(${lensDef.accentVar})` }}>
       <div className="app-masthead">
         <div className="app-logo" aria-label="캘린더 X">
           {/* Calendar mark shared with the browser favicon. */}
@@ -1891,6 +1885,7 @@ function Workspace({ uid, user, onSignOut }: WorkspaceProps) {
           </span>
           <span className="app-logo-name">Calendar <b>X</b></span>
         </div>
+        {dashboardOn && <label className="ref-header-search"><Icon.Search size={18} /><input aria-label="이번 달 일정·노트 검색" placeholder="일정, 노트, 할 일 검색..." value={dashboardQuery} onChange={e => setDashboardQuery(e.target.value)} /></label>}
         {!isAnon && (layout.sharedSwitcher || !shared.board) && (
           <div className="space-context"><SpaceSwitch
             space={sharedOpen ? 'shared' : 'me'}
@@ -1900,8 +1895,9 @@ function Workspace({ uid, user, onSignOut }: WorkspaceProps) {
             onStart={() => setSharedSheet('start')}
           /></div>
         )}
+        {dashboardOn && <button className="ico-btn" aria-label={isAnon ? '로그인 · 가입' : '설정'} onClick={() => isAnon ? setShowAuth(true) : setShowSettings(true)}>{isAnon ? <Icon.User size={20} /> : <Icon.Settings size={20} />}</button>}
       </div>
-      <header className="topbar" data-space={sharedOpen ? 'shared' : 'me'}>
+      {!dashboardOn && <header className="topbar" data-space={sharedOpen ? 'shared' : 'me'}>
         <div className="header-left">
           {/* 가계부는 보기마다 자기 기간 도구를 가진다 — 위에 달력 월을 하나 더 두면 무엇이 무엇을 바꾸는지 흐려진다. */}
           {!sharedOpen && !ledgerOn && !dashboardOn && (
@@ -2001,7 +1997,7 @@ function Workspace({ uid, user, onSignOut }: WorkspaceProps) {
           </button>
         )}
         </div>
-      </header>
+      </header>}
 
       {/*
         저장하지 못한 것은 **어느 화면에서도** 보여야 한다. 그래서 같이 보기 화면으로
@@ -2141,8 +2137,9 @@ function Workspace({ uid, user, onSignOut }: WorkspaceProps) {
         {dashboardOn ? (
           <>
           <Dashboard today={today} store={store} showMoney={layout.ledger} showNotes={layout.notes} demo={isAnon}
-            onNavigate={(next) => { setCursor(parseDate(today)!); set('lens', next); setFilters(emptyFilters()); if (next === 'money') setLedgerTab('cashflow'); }}
-            onEntry={openEdit} onStatus={handleStatus} onPromote={handlePromote}
+            cursor={cursor} onCursorChange={setCursor} weekStart={prefs.weekStart} query={dashboardQuery}
+            onNavigate={(next, list) => { set('lens', next); if (list) set('view', 'list'); setFilters(emptyFilters()); if (next === 'money') { setLedgerTab('history'); setLedgerPeriod(cursorISO.slice(0, 7)); } }}
+            onEntry={openEdit} onStatus={handleStatus}
             onCreate={(kind, date) => openCreate({ ...newEntry(kind, { startDate: date }), startDate: date })} />
           <div className="utility-strip">{pinnedSection}</div>
           </>

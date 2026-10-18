@@ -67,17 +67,17 @@ describe('온보딩 표시 규칙', () => {
 });
 
 describe('온보딩 모달', () => {
-  it('6단계 이동·이전·완료와 단계별 제목 포커스를 제공한다', () => {
+  it('5단계 이동·이전·완료와 단계별 제목 포커스를 제공한다', () => {
     const finish = vi.fn();
     render(<Onboarding onFinish={finish} />);
     expect(screen.getByRole('button', { name: '이전' })).toBeDisabled();
-    expect(screen.getByRole('heading', { name: '일정도, 생각도, 돈도. 오늘을 한눈에.' })).toHaveFocus();
+    expect(screen.getByRole('heading', { name: '일정도, 회복도. 캘린더 안에서.' })).toHaveFocus();
     fireEvent.click(screen.getByRole('button', { name: '다음' }));
-    expect(screen.getByRole('heading', { name: '일정은 한눈에, 기록은 필요한 방식으로' })).toHaveFocus();
+    expect(screen.getByRole('heading', { name: '생각과 기록을, 다시 찾기 쉽게.' })).toHaveFocus();
     fireEvent.click(screen.getByRole('button', { name: '이전' }));
-    expect(screen.getByText('1 / 6 · 대시보드')).toBeInTheDocument();
-    for (let i = 0; i < 5; i++) fireEvent.click(screen.getByRole('button', { name: '다음' }));
-    expect(screen.getByRole('heading', { name: '내 기록과 함께할 일을 구분합니다' })).toHaveFocus();
+    expect(screen.getByText('1 / 5')).toBeInTheDocument();
+    for (let i = 0; i < 4; i++) fireEvent.click(screen.getByRole('button', { name: '다음' }));
+    expect(screen.getByRole('heading', { name: '이번 주에 더 집중하는 방식, Clear Week.' })).toHaveFocus();
     fireEvent.click(screen.getByRole('button', { name: '시작하기' }));
     expect(finish).toHaveBeenCalledWith('complete');
   });
@@ -85,11 +85,11 @@ describe('온보딩 모달', () => {
   it('상단 내비게이터에서 원하는 단계로 바로 이동하고 완료 전에는 저장하지 않는다', () => {
     const finish = vi.fn();
     render(<Onboarding onFinish={finish} />);
-    fireEvent.click(screen.getByRole('button', { name: '5단계 리커버리' }));
-    expect(screen.getByRole('button', { name: '5단계 리커버리' })).toHaveAttribute('aria-current', 'step');
-    expect(screen.getByRole('heading', { name: '해야 할 일 사이에, 쉴 시간도 남겨 두세요' })).toHaveFocus();
-    fireEvent.click(screen.getByRole('button', { name: '6단계 같이 보기' }));
-    expect(screen.getByRole('heading', { name: '내 기록과 함께할 일을 구분합니다' })).toHaveFocus();
+    fireEvent.click(screen.getByRole('button', { name: '4단계 리커버리' }));
+    expect(screen.getByRole('button', { name: '4단계 리커버리' })).toHaveAttribute('aria-current', 'step');
+    expect(screen.getByRole('heading', { name: '일정도, 회복도. 캘린더 안에서.' })).toHaveFocus();
+    fireEvent.click(screen.getByRole('button', { name: '5단계 Clear Week' }));
+    expect(screen.getByRole('heading', { name: '이번 주에 더 집중하는 방식, Clear Week.' })).toHaveFocus();
     expect(finish).not.toHaveBeenCalled();
   });
 
