@@ -1,79 +1,101 @@
-import { cleanup, fireEvent, render, renderHook, screen } from '@testing-library/react';
+import { cleanup, fireEvent, render, renderHook, screen, within } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { useDemoStore } from '../app/useDemoStore';
 import { FEED_ERROR, FEED_LOADING } from '../app/useStore';
 import { newEntry, newMoney, setRecurrence } from '../domain/entry';
-import { materialize } from '../domain/recurrence';
 import { Dashboard } from './Dashboard';
-import { dashboardEntries } from '../domain/dashboard';
+import { dashboardEntries, dashboardSpending } from '../domain/dashboard';
 
 afterEach(cleanup);
 const TODAY = '2026-10-30';
-describe('대시보드 일정 범위', () => {
-  it('월말에서 다음 달 반복과 여러 날 일정을 포함하며 범위 밖 일정을 제외한다', () => {
+const CURSOR = new Date(2026, 9, 30);
+function setup() {
+  const { result } = renderHook(useDemoStore);
+  return { today: TODAY, cursor: CURSOR, weekStart: 'mon' as const, query: '', onCursorChange: vi.fn(),
+    store: result.current, showMoney: true, showNotes: true, demo: false,
+    onNavigate: vi.fn(), onEntry: vi.fn(), onStatus: vi.fn(), onCreate: vi.fn() };
+}
+describe('참고 화면 대시보드', () => {
+  it('월간 42칸의 반복과 여러 날 일정을 포함하며 범위 밖 일정은 제외한다', () => {
     const recurring = setRecurrence(newEntry('task', { id: 'repeat', startDate: '2026-01-01' }), { freq: 'daily', interval: 1, until: null, count: null });
-    const span = newEntry('task', { id: 'span', startDate: '2026-10-28', endDate: '2026-11-02' });
-    const old = newEntry('task', { id: 'old', startDate: '2026-10-29' });
-    const later = newEntry('task', { id: 'later', startDate: '2026-11-06' });
-    const result = dashboardEntries([recurring, span, old, later], TODAY);
-    expect(result.tasks).toHaveLength(8);
-    expect(result.tasks.some(e => e.startDate === '2026-11-05')).toBe(true);
+    const span = newEntry('task', { id: 'span', startDate: '2026-09-27', endDate: '2026-09-29' });
+    const old = newEntry('task', { id: 'old', startDate: '2026-09-27' });
+    const later = newEntry('task', { id: 'later', startDate: '2026-11-09' });
+    const result = dashboardEntries([recurring, span, old, later], CURSOR, 'mon');
+    expect(result.tasks).toHaveLength(43);
+    expect(result.tasks.some(e => e.startDate === '2026-11-08')).toBe(true);
     expect(result.tasks.some(e => e.id === 'old' || e.id === 'later')).toBe(false);
   });
-  it('노트는 이번 달 기록만 최근 수정 순으로 낸다', () => {
+  it('노트는 표시한 달의 기록만 최근 수정 순으로 낸다', () => {
     const a = newEntry('idea', { id: 'a', startDate: '2026-10-01', updatedAt: '2026-10-10T01:00:00Z' });
     const b = newEntry('idea', { id: 'b', startDate: '2026-10-02', updatedAt: '2026-10-11T01:00:00Z' });
     const old = newEntry('idea', { id: 'old', startDate: '2026-09-30' });
-    expect(dashboardEntries([a, b, old], TODAY).notes.map(e => e.id)).toEqual(['b', 'a']);
+    expect(dashboardEntries([a, b, old], CURSOR, 'mon').notes.map(e => e.id)).toEqual(['b', 'a']);
   });
-});
-
-function setup() {
-  const { result } = renderHook(useDemoStore);
-  return { today: TODAY, store: result.current, showMoney: true, showNotes: true, demo: false,
-    onNavigate: vi.fn(), onEntry: vi.fn(), onStatus: vi.fn(), onPromote: vi.fn(), onCreate: vi.fn() };
-}
-describe('대시보드 표시와 연결', () => {
-  it.each([FEED_LOADING, FEED_ERROR, { ...FEED_LOADING, ready: true, empty: true, fromCache: true }])('자료 미확인 상태를 빈 일정이나 0원으로 표시하지 않는다', feed => {
+  it.each([FEED_LOADING, FEED_ERROR, { ...FEED_LOADING, ready: true, empty: true, fromCache: true }])('미확인 자료를 빈 일정이나 0원으로 표시하지 않는다', feed => {
     const props = setup();
-    render(<Dashboard {...props} store={{ ...props.store, display: feed, calc: feed }} />);
-    expect(screen.queryByText('비워 둔 하루입니다')).not.toBeInTheDocument();
-    expect(screen.queryByText('0개 중 0개 완료')).not.toBeInTheDocument();
-    expect(document.querySelector('.dash-amount')).toBeNull();
+    render(<Dashboard {...props} store={{ ...props.store, display: feed, dashboardFeed: feed, ledgerMeta: feed }} />);
+    expect(screen.queryByText('등록된 일정이 없습니다.')).not.toBeInTheDocument();
+    expect(document.querySelector('.ref-expense-amount')).toBeNull();
   });
-  it('숨긴 노트·가계부를 제외하고 날짜 선택·완료·상세·이동 액션을 연결한다', () => {
+  it('날짜 선택·할 일 완료·상세·추가를 연결하고 숨긴 기능은 제외한다', () => {
     const props = setup();
-    const entry = newEntry('task', { id: 't', title: '월말 점검', startDate: '2026-11-01' });
+    const entry = newEntry('task', { id: 't', title: '월말 점검', startDate: '2026-10-31' });
     render(<Dashboard {...props} showMoney={false} showNotes={false} store={{ ...props.store, entries: [entry] }} />);
-    expect(screen.queryByRole('region', { name: '현금흐름 요약' })).not.toBeInTheDocument();
-    expect(screen.queryByRole('region', { name: '이번 달 최근 노트' })).not.toBeInTheDocument();
-    fireEvent.click(screen.getByRole('button', { name: '01일 (일)' }));
-    fireEvent.click(screen.getByRole('button', { name: '월말 점검 완료로 표시' }));
+    expect(screen.queryByRole('region', { name: '월 지출 요약' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('region', { name: '이번 달 노트' })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: '2026-10-31 상세 보기' }));
+    fireEvent.click(screen.getByRole('checkbox', { name: '월말 점검 완료' }));
     expect(props.onStatus).toHaveBeenCalledWith(entry, 'done');
-    fireEvent.click(screen.getByRole('button', { name: '종일 월말 점검' }));
+    fireEvent.click(within(screen.getByRole('region', { name: '선택한 날 할 일' })).getByRole('button', { name: '월말 점검' }));
     expect(props.onEntry).toHaveBeenCalledWith(entry);
     fireEvent.click(screen.getByRole('button', { name: '선택한 날짜에 일정 추가' }));
-    expect(props.onCreate).toHaveBeenCalledWith('task', '2026-11-01');
-    fireEvent.click(screen.getByRole('button', { name: '캘린더' }));
-    expect(props.onNavigate).toHaveBeenCalledWith('task');
+    expect(props.onCreate).toHaveBeenCalledWith('task', '2026-10-31');
+    fireEvent.click(within(screen.getByRole('navigation', { name: '대시보드 메뉴' })).getByRole('button', { name: '할 일' }));
+    expect(props.onNavigate).toHaveBeenCalledWith('task', true);
   });
-  it('자정 이후 선택일이 범위 밖이면 새 오늘로 돌아간다', () => {
-    const props = setup(); const { rerender } = render(<Dashboard {...props} />);
-    rerender(<Dashboard {...props} today="2026-10-31" />);
-    expect(screen.getByRole('button', { name: '31일 (토) 오늘' })).toHaveAttribute('aria-pressed', 'true');
-  });
-  it('반복 구독이 미완료면 월 자료가 있어도 일정 수를 확정하지 않는다', () => {
+  it('시간 있는 일정과 종일 할 일을 구분하고 검색을 두 패널에 적용한다', () => {
     const props = setup();
-    render(<Dashboard {...props} store={{ ...props.store, dashboardFeed: FEED_LOADING }} />);
-    expect(screen.getByRole('status')).toHaveTextContent('일정을 불러오는 중');
-    expect(screen.queryByText('비워 둔 하루입니다')).not.toBeInTheDocument();
+    const entries = [newEntry('task', { id: 'meeting', title: '고객 회의', startDate: TODAY, startTime: '10:00' }),
+      newEntry('task', { id: 'todo', title: '제안서 초안', startDate: TODAY })];
+    const { rerender } = render(<Dashboard {...props} store={{ ...props.store, entries }} />);
+    expect(within(screen.getByRole('region', { name: '선택한 날 일정' })).getByText('고객 회의')).toBeInTheDocument();
+    expect(within(screen.getByRole('region', { name: '선택한 날 할 일' })).queryByText('고객 회의')).toBeNull();
+    rerender(<Dashboard {...props} query="제안서" store={{ ...props.store, entries }} />);
+    expect(screen.queryByText('고객 회의')).toBeNull();
+    expect(screen.getByRole('checkbox', { name: '제안서 초안 완료' })).toBeInTheDocument();
   });
-  it('화면용 반복 발생분 대신 금융 원본으로 한도를 계산한다', () => {
+  it('월 이동은 구독 커서를 바꾸고 일·주·목록 전환이 실제 내용을 바꾼다', () => {
     const props = setup();
-    const account = { ...props.store.accounts[0]!, balanceMinor: 100000, asOf: TODAY, currency: 'KRW' };
-    const plan = setRecurrence(newEntry('money', { startDate: '2026-10-31', money: newMoney({ amountMinor: 1000, type: 'expense', status: 'planned' }) }), { freq: 'daily', interval: 1, until: null, count: 3 });
-    const store = { ...props.store, accounts: [account], tideEntries: [plan], entries: materialize([plan], TODAY, '2026-11-05'), budgets: [], reserves: [], cards: [], cardLinked: [], reserveUsage: new Map<string, number>() };
-    render(<Dashboard {...props} store={store} />);
-    expect(document.querySelector('.dash-amount')).toHaveTextContent('97,000원');
+    render(<Dashboard {...props} />);
+    fireEvent.click(screen.getByRole('button', { name: '다음 기간' }));
+    expect(props.onCursorChange).toHaveBeenCalledWith(new Date(2026, 10, 1));
+    fireEvent.click(screen.getByRole('button', { name: '일' }));
+    expect(document.querySelectorAll('.ref-date-list section')).toHaveLength(1);
+    fireEvent.click(screen.getByRole('button', { name: '주' }));
+    expect(document.querySelectorAll('.ref-date-list section')).toHaveLength(7);
+    fireEvent.click(screen.getByRole('button', { name: '다음 기간' }));
+    expect(props.onCursorChange).toHaveBeenLastCalledWith(new Date(2026, 10, 6));
+    fireEvent.click(screen.getByRole('button', { name: '목록' }));
+    expect(document.querySelector('.ref-view-list')).toBeInTheDocument();
+  });
+  it('지출은 실제 거래만 포함하고 이체·카드대금·원금·예정을 제외한다', () => {
+    const props = setup();
+    const entry = (id: string, amount: number, flow: 'normal' | 'cardSpend' | 'cardPayment' | 'transfer' | 'loanPrincipal' | 'loanInterest', status: 'actual' | 'planned' = 'actual') =>
+      newEntry('money', { id, startDate: '2026-10-10', money: newMoney({ type: 'expense', flow, status, amountMinor: amount }) });
+    const store = { ...props.store, ledger: { ...props.store.ledger, settleDay: 1 },
+      entries: [entry('expense', 1000, 'normal'), entry('card', 2000, 'cardSpend'), entry('interest', 300, 'loanInterest'),
+        entry('payment', 2000, 'cardPayment'), entry('transfer', 5000, 'transfer'), entry('loan', 3000, 'loanPrincipal'), entry('plan', 8000, 'normal', 'planned')] };
+    expect(dashboardSpending(store, '2026-10').spending).toBe(3300);
+  });
+  it('정산 시작일과 통화 제한을 존중한다', () => {
+    const props = setup();
+    const entry = newEntry('money', { startDate: '2026-09-25', money: newMoney({ type: 'expense', status: 'actual', amountMinor: 1000 }) });
+    const store = { ...props.store, ledger: { ...props.store.ledger, settleDay: 25 }, entries: [entry], categoryBudgets: [] };
+    const result = dashboardSpending(store, '2026-10');
+    expect(result.period.start).toBe('2026-09-25');
+    expect(result.period.end).toBe('2026-10-24');
+    expect(result.spending).toBe(1000);
+    expect(dashboardSpending({ ...store, entries: [{ ...entry, money: { ...entry.money!, currency: 'USD' } }] }, '2026-10').supported).toBe(false);
   });
 });
