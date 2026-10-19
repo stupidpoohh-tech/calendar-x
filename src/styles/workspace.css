@@ -99,3 +99,14 @@
  .topbar .header-right { display:none; }
  .topbar .mobile-actions { display:flex; }
 }
+/* Ledger actions remain available after removing its redundant top header. */
+.app[data-lens="money"] .mobile-actions { display:flex; align-items:center; gap:6px; }
+.mobile-more { position:relative; }
+.mobile-more summary { list-style:none; cursor:pointer; width:36px; height:36px; display:flex; align-items:center; justify-content:center; font-size:22px; font-weight:700; color:var(--ink-2); border-radius:6px; }
+.mobile-more summary::-webkit-details-marker { display:none; }
+.mobile-more[open] summary { background:var(--accent-soft); }
+.mobile-more-panel { position:absolute; right:0; top:42px; width:180px; padding:6px; z-index:60; background:var(--bg-elev); border:1px solid var(--line); border-radius:8px; box-shadow:var(--shadow-2); }
+.mobile-more-panel button { display:flex; align-items:center; gap:9px; width:100%; min-height:42px; padding:9px 10px; border:0; border-radius:5px; background:transparent; text-align:left; color:var(--ink); font-size:.8125rem; cursor:pointer; }
+.mobile-more-panel button:hover,.mobile-more-panel button[aria-pressed="true"] { background:var(--accent-soft); color:var(--accent); }
+.mobile-more-panel button:disabled { opacity:.5; }
+@media(max-width:600px) { .quick-add-label { display:none; } }

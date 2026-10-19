@@ -1861,7 +1861,7 @@ function Workspace({ uid, user, onSignOut }: WorkspaceProps) {
   };
   const quickActions = (
         <div className="mobile-actions">
-          {!sharedOpen && <button className="add-btn" aria-label={ledgerOn ? '거래 추가' : '일정 추가'} onClick={() => openCreate()}><Icon.Plus size={16} /></button>}
+          {!sharedOpen && <button className="add-btn" aria-label={ledgerOn ? '거래 추가' : '일정 추가'} onClick={() => openCreate()}><Icon.Plus size={16} /><span className="quick-add-label">{ledgerOn ? '거래 추가' : '추가'}</span></button>}
           <details className="mobile-more" onKeyDown={(e) => {
             if (e.key === 'Escape') { e.currentTarget.open = false; e.currentTarget.querySelector('summary')?.focus(); }
           }}>
