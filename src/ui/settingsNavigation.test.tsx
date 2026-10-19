@@ -92,13 +92,25 @@ describe('설정 화면 위계', () => {
     fireEvent.click(screen.getByRole('button', { name: /사용 안내 튜토리얼/ }));
     fireEvent.click(screen.getByRole('button', { name: /튜토리얼 다시 보기/ }));
     expect(props.onShowOnboarding).toHaveBeenCalledOnce();
-    expect(screen.getByRole('link', { name: /클리어위크 살펴보기/ })).toHaveAttribute('href', 'https://clear-week.pages.dev/');
+    expect(screen.queryByRole('link', { name: /클리어위크 살펴보기/ })).toBeNull();
     fireEvent.keyDown(screen.getByRole('heading', { level: 2, name: '사용 안내' }), { key: 'Escape' });
     expect(screen.getByRole('heading', { level: 2, name: '설정' })).toBeVisible();
     fireEvent.keyDown(screen.getByRole('dialog'), { key: 'Escape' });
     expect(props.onClose).toHaveBeenCalledOnce();
   });
 
+  it('클리어위크는 연결 서비스에서 독립적으로 열고 사진과 서비스 링크를 보여 준다', () => {
+    setup();
+    expect(screen.getByRole('heading', { name: '연결 서비스' })).toBeVisible();
+    const menu = screen.getByRole('button', { name: /클리어위크 이번 주/ });
+    fireEvent.click(menu);
+    expect(screen.getByRole('heading', { level: 2, name: '클리어위크' })).toHaveFocus();
+    expect(screen.getByRole('img', { name: /Clear Week — 이번 주를 한 장에/ })).toHaveAttribute('src', '/clear-week-guide.png');
+    expect(screen.getByRole('link', { name: /클리어위크 살펴보기/ })).toHaveAttribute('href', 'https://clear-week.pages.dev/');
+    expect(screen.queryByRole('button', { name: /튜토리얼 다시 보기/ })).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: '설정 목록으로' }));
+    expect(menu).toHaveFocus();
+  });
   it('백업 작업 실패는 화면에 표시한다', async () => {
     setup({ onExport: () => Promise.reject(new Error('백업 연결 실패')) });
     fireEvent.click(screen.getByRole('button', { name: /데이터 관리 백업/ }));

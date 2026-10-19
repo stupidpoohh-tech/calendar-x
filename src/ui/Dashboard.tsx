@@ -59,34 +59,27 @@ export function Dashboard({ today, cursor, onCursorChange, weekStart, query, sto
   const weekFrom = addDaysISO(selected, -weekdayIndex(parseDate(selected)!, weekStart));
   const listDays = view === 'day' ? [selected] : view === 'week' ? Array.from({ length: 7 }, (_, i) => addDaysISO(weekFrom, i))
     : Array.from({ length: endOfMonth(cursor).getDate() }, (_, i) => month + '-' + String(i + 1).padStart(2, '0'));
-  const nav = (mobile = false) => <nav className={mobile ? 'ref-bottom-nav' : 'ref-nav'} aria-label={mobile ? '모바일 주요 메뉴' : '대시보드 메뉴'}>
-    <button aria-current="page" onClick={() => { setView('month'); onNavigate('all'); }}><Icon.Home size={21} /><span>대시보드</span></button>
-    <button onClick={() => onNavigate('task')}><Icon.Calendar size={21} /><span>캘린더</span></button>
-    {showNotes && <button onClick={() => onNavigate('idea')}><Icon.List size={21} /><span>노트</span></button>}
-    {showMoney && <button onClick={() => onNavigate('money')}><Icon.Wallet size={21} /><span>가계부</span></button>}
-  </nav>;
   const entryButton = (e: Entry) => <button className="ref-event" key={e.id} onClick={() => onEntry(e)} style={{ borderColor: colorHex(e.color) }}>
     <time>{e.kind === 'idea' ? '노트' : e.startTime ?? '종일'}</time><span><strong>{displayTitle(e)}</strong>{e.location && <small>{e.location}</small>}</span>
   </button>;
   return <div className="reference-dashboard">
-    <aside className="ref-sidebar">
-      {nav()}
-      <div className="ref-calendars"><h2>내 캘린더 <small>색상</small></h2>
-        {colors.map(c => <label key={c.id}><span className="ref-swatch" style={{ background: c.hex }} />{c.label}<input type="checkbox" checked={!hiddenColors.includes(c.id)} onChange={() => setHiddenColors(values => values.includes(c.id) ? values.filter(id => id !== c.id) : [...values, c.id])} /></label>)}
-        {!colors.length && <p className="ref-muted">일정을 추가하면 사용한 색상이 표시됩니다.</p>}
-        <button className="ref-add-calendar" onClick={() => onCreate('task', selected)}><Icon.Plus size={20} />일정 추가</button>
-      </div>
-      {demo && <p className="ref-demo">미리보기 데이터</p>}
-    </aside>
     <section className="ref-center" aria-label="캘린더 대시보드">
       <header className="ref-toolbar">
         <div className="ref-month-tools"><button aria-label="이전 기간" onClick={() => move(-1)}><Icon.Chevron dir="left" /></button><button aria-label="다음 기간" onClick={() => move(1)}><Icon.Chevron /></button><button className="ref-today" onClick={goToday}>오늘</button><h1>{cursor.getFullYear()}년 {cursor.getMonth() + 1}월</h1></div>
-        <div className="ref-views" role="group" aria-label="캘린더 보기">{VIEWS.map(v => <button key={v.id} aria-pressed={v.id === view} onClick={() => setView(v.id)}>{v.label}</button>)}</div>
+        <div className="ref-toolbar-options">
+        <details className="ref-color-filter"><summary><Icon.Filter size={16} /><span>색상</span></summary>
+          <div className="ref-calendars">
+            <h2>표시할 색상</h2>
+            {colors.map(c => <label key={c.id}><span className="ref-swatch" style={{ background: c.hex }} />{c.label}<input type="checkbox" checked={!hiddenColors.includes(c.id)} onChange={() => setHiddenColors(values => values.includes(c.id) ? values.filter(id => id !== c.id) : [...values, c.id])} /></label>)}
+            {!colors.length && <p className="ref-muted">일정을 추가하면 사용한 색상이 표시됩니다.</p>}
+          </div>
+        </details>
+        <div className="ref-views" role="group" aria-label="캘린더 보기">{VIEWS.map(v => <button key={v.id} aria-pressed={v.id === view} onClick={() => setView(v.id)}>{v.label}</button>)}</div></div>
       </header>
       {!ready && <p className="ref-notice" role="status">{notice}</p>}
       {ready && calcCaveat(state) && <p className="ref-notice" role="status">{calcCaveat(state)}</p>}
       {query && <p className="ref-search-result">“{query}” 검색 결과 · 현재 표시 기간</p>}
-      <p className="ref-calendar-key"><span>● 일정</span>{showNotes && <span>◇ 노트</span>}{showMoney && <span>입금·출금 합계 (원)</span>}<small>많은 항목은 날짜 안에서 스크롤</small></p>
+      <p className="ref-calendar-key">{demo && <span>미리보기</span>}<span>● 일정</span>{showNotes && <span>◇ 노트</span>}{showMoney && <span>입금·출금 합계 (원)</span>}<small>많은 항목은 날짜 안에서 스크롤</small></p>
       <div className="ref-calendar">
         {view === 'month' ? <DashboardCalendar cursor={cursor} entries={ready ? shown : []}
           cashDays={ready ? cashDays : {}} weekStart={weekStart} today={today} selected={selected}
@@ -122,6 +115,6 @@ export function Dashboard({ today, cursor, onCursorChange, weekStart, query, sto
         <button className="ref-text-link" onClick={() => onNavigate('money')}>가계부 보기 <Icon.Chevron size={13} /></button>
       </section>}
     </aside>
-    {nav(true)}
+
   </div>;
 }
