@@ -31,6 +31,7 @@ export default defineConfig({
       'src/test/pastPlanned.emulator.test.ts',
       'src/test/reserve.emulator.test.ts',
       'src/test/card.emulator.test.ts',
+      'src/test/deviceBackup.emulator.test.ts',
     ],
     testTimeout: 20_000,
     hookTimeout: 30_000,

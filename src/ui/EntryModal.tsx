@@ -127,6 +127,7 @@ export function EntryModal({
   const [reflected, setReflected] = useState<boolean | undefined>(undefined);
   const [tagInput, setTagInput] = useState('');
   const [error, setError] = useState('');
+  const [extraOpen, setExtraOpen] = useState(false);
   /** 사용자가 생활비 칸을 직접 건드렸는가. 건드렸으면 날짜를 바꿔도 기본값으로 되돌리지 않는다. */
   const [pocketTouched, setPocketTouched] = useState(false);
   /**
@@ -146,10 +147,11 @@ export function EntryModal({
     setForm(mode === 'create' ? withDefaultPocket(base, budgets) : base);
     setAmountText(base.money ? (base.money.amountMinor ? minorToInput(base.money.amountMinor, base.money.currency) : '') : '');
     setTagInput('');
+    setExtraOpen(!!(base.recurrence || base.money?.linkedEntryId || base.tags.length || base.note));
     setError('');
     setCardDraft(null);
     setAddedCards(NO_CARDS);
-    const t = setTimeout(() => firstFieldRef.current?.focus(), 60);
+    const t = setTimeout(() => { if (window.matchMedia?.('(pointer: fine)').matches) firstFieldRef.current?.focus({ preventScroll: true }); }, 180);
     return () => clearTimeout(t);
     // 열 때 한 번만 채운다. 생활비 목록이 바뀔 때마다 다시 채우면 적던 내용이 날아간다.
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -333,6 +335,29 @@ export function EntryModal({
     onSave(withDerived({ ...form, title: form.title.trim() }));
   };
 
+  const dateField = (
+<div className="mod-row">
+            <label className="mod-lbl" htmlFor="start">
+              {isMoney && moneyDef?.ranged ? '시작일' : '날짜'}
+            </label>
+            <div className="mod-dt">
+              <input
+                id="start" type="date" className="mod-input" {...PICKER}
+                value={form.startDate}
+                onChange={(e) => setDate(e.target.value || computeToday())}
+              />
+              {!isMoney && (
+                <input
+                  type="time" className="mod-input time" {...PICKER} value={form.startTime ?? ''}
+                  onChange={(e) => patch({ startTime: e.target.value || null })}
+                  aria-label="시작 시각"
+                />
+              )}
+            </div>
+          </div>
+  );
+  const formTitle = isMoney ? (flowPick === 'income' ? '수입' : flowPick === 'loan' ? '대출' : '지출') + (isActual ? ' 거래' : ' 예정') + (mode === 'edit' ? ' 수정' : ' 추가') : (mode === 'edit' ? '항목 편집' : '새 항목');
+
   if (cardDraft) {
     return (
       <div className="mod-back" onClick={() => setCardDraft(null)}>
@@ -352,7 +377,7 @@ export function EntryModal({
 
   return (
     <div className="mod-back" onClick={onClose}>
-      <div className="mod" role="dialog" aria-modal="true" aria-label={mode === 'edit' ? '항목 편집' : '새 항목'} onClick={(e) => e.stopPropagation()}>
+      <div className={'mod' + (isMoney ? ' money-entry' : '')} role="dialog" aria-modal="true" aria-label={formTitle} onClick={(e) => e.stopPropagation()}>
         <header className="mod-head">
           <div className="mod-kinds" role="tablist" aria-label="항목 종류">
             {(['task', 'idea', 'money'] as EntryKind[])
@@ -381,6 +406,7 @@ export function EntryModal({
         )}
 
         <div className="mod-body">
+          {isMoney && <h2 className="money-entry-title">{formTitle}</h2>}
           {isMoney ? (
             <>
               {/*
@@ -436,19 +462,21 @@ export function EntryModal({
                 />
               )}
 
-              {moneyDef && !isActual && <p className="mod-hint">{moneyDef.hint}</p>}
+              {legacyDef && !isActual && <p className="mod-hint">{legacyDef.hint}</p>}
 
-              {isActual && form.money && (
-                <>
                   <div className="mod-row">
-                    <label className="mod-lbl" htmlFor="mtitle">내역</label>
+                    <label className="mod-lbl" htmlFor="mtitle">내용</label>
                     <input
                       id="mtitle" className="mod-input" placeholder="예: 점심 (없어도 됩니다)"
                       value={form.title} onChange={(e) => patch({ title: e.target.value })}
                       onKeyDown={(e) => { if (e.key === 'Enter' && !isComposingEnter(e)) save(); }}
                     />
                   </div>
+              {dateField}
+              {isActual && form.money && (
+                <>
                   <LedgerFields
+                    compactCategory
                     entryId={form.id}
                     type={form.money.type === 'income' ? 'income' : 'expense'}
                     date={form.startDate}
@@ -472,10 +500,35 @@ export function EntryModal({
                 </>
               )}
 
+              {/* 예정에도 카테고리를 붙여 둘 수 있다 — 확정할 때 그대로 따라간다. */}
+              {!isActual && form.money && !legacyDef && (
+                <LedgerFields
+                    compactCategory
+                  only="category"
+                  entryId={form.id}
+                  type={form.money.type === 'income' ? 'income' : 'expense'}
+                  date={form.startDate}
+                  money={form.money}
+                  onMoney={setLedger}
+                  categories={categories}
+                  categoriesReady={categoriesReady}
+                  onSeedCategories={onSeedCategories}
+                  accounts={accounts}
+                  pockets={pockets}
+                  debts={debts}
+                  reserves={reserves}
+                  recurring={!!form.recurrence}
+                  cards={fieldCards}
+                  cardEntries={cardEntries}
+                  todayISO={computeToday()}
+                  onRegisterCard={openCardForm}
+                />
+              )}
+
               {/* 대출은 흐름이다 — 사용처(생활비)를 묻지 않고 대출 연결만 묻는다. 카드 사용 · 대금(P4)도 생활비에 걸지 않는다. */}
               {!isActual && isOutflow && flowPick !== 'loan' && !isCardFlow && (
                 <div className="mod-row">
-                  <span className="mod-lbl">사용처</span>
+                  <span className="mod-lbl">지출 반영</span>
                   <div className="mod-chips">
                     <button
                       className={'chip' + (moneyUse === 'plain' ? ' on' : '')}
@@ -544,7 +597,7 @@ export function EntryModal({
 
               {!isActual && isOutflow && (
                 <div className="mod-row">
-                  <span className="mod-lbl">속성</span>
+                  <span className="mod-lbl">우선순위</span>
                   <div className="mod-chips">
                     <button
                       className={'chip' + (form.money?.priority ? ' on' : '')}
@@ -558,55 +611,6 @@ export function EntryModal({
               )}
 
 
-              {!isActual && (
-                <div className="mod-row">
-                  <label className="mod-lbl" htmlFor="mtitle">라벨</label>
-                  <input
-                    id="mtitle" className="mod-input" placeholder="예: 전기요금 (없어도 됩니다)"
-                    value={form.title} onChange={(e) => patch({ title: e.target.value })}
-                    onKeyDown={(e) => { if (e.key === 'Enter' && !isComposingEnter(e)) save(); }}
-                  />
-                </div>
-              )}
-              {/* 예정에도 카테고리를 붙여 둘 수 있다 — 확정할 때 그대로 따라간다. */}
-              {!isActual && form.money && !legacyDef && (
-                <LedgerFields
-                  only="category"
-                  entryId={form.id}
-                  type={form.money.type === 'income' ? 'income' : 'expense'}
-                  date={form.startDate}
-                  money={form.money}
-                  onMoney={setLedger}
-                  categories={categories}
-                  categoriesReady={categoriesReady}
-                  onSeedCategories={onSeedCategories}
-                  accounts={accounts}
-                  pockets={pockets}
-                  debts={debts}
-                  reserves={reserves}
-                  recurring={!!form.recurrence}
-                  cards={fieldCards}
-                  cardEntries={cardEntries}
-                  todayISO={computeToday()}
-                  onRegisterCard={openCardForm}
-                />
-              )}
-
-              {linkableTasks.length > 0 && (
-                <div className="mod-row">
-                  <label className="mod-lbl" htmlFor="link">연결</label>
-                  <select
-                    id="link" className="mod-input"
-                    value={form.money?.linkedEntryId ?? ''}
-                    onChange={(e) => setMoney({ linkedEntryId: e.target.value || null })}
-                  >
-                    <option value="">연결한 할 일 없음</option>
-                    {linkableTasks.map((t) => (
-                      <option key={t.id} value={t.id}>{t.title || '(제목 없음)'}</option>
-                    ))}
-                  </select>
-                </div>
-              )}
             </>
           ) : (
             <>
@@ -639,26 +643,7 @@ export function EntryModal({
             </>
           )}
 
-          {/* 날짜 */}
-          <div className="mod-row">
-            <label className="mod-lbl" htmlFor="start">
-              {isMoney && moneyDef?.ranged ? '시작일' : '날짜'}
-            </label>
-            <div className="mod-dt">
-              <input
-                id="start" type="date" className="mod-input" {...PICKER}
-                value={form.startDate}
-                onChange={(e) => setDate(e.target.value || computeToday())}
-              />
-              {!isMoney && (
-                <input
-                  type="time" className="mod-input time" {...PICKER} value={form.startTime ?? ''}
-                  onChange={(e) => patch({ startTime: e.target.value || null })}
-                  aria-label="시작 시각"
-                />
-              )}
-            </div>
-          </div>
+          {!isMoney && dateField}
 
           {(isTask || (isMoney && moneyDef?.ranged)) && (
             <div className="mod-row">
@@ -680,6 +665,26 @@ export function EntryModal({
             </div>
           )}
 
+          {isMoney && <button className="money-extra-toggle" aria-expanded={extraOpen} aria-controls="money-extra" onClick={() => setExtraOpen(!extraOpen)}>
+            <span>추가 옵션 <small>반복 · 일정 연결 · 태그 · 메모</small></span><span aria-hidden="true">{extraOpen ? '−' : '+'}</span>
+          </button>}
+          <div id="money-extra" className="entry-extra-fields" hidden={isMoney && !extraOpen}>
+          {isMoney && <>              {linkableTasks.length > 0 && (
+                <div className="mod-row">
+                  <label className="mod-lbl" htmlFor="link">연결할 일정</label>
+                  <select
+                    id="link" className="mod-input"
+                    value={form.money?.linkedEntryId ?? ''}
+                    onChange={(e) => setMoney({ linkedEntryId: e.target.value || null })}
+                  >
+                    <option value="">연결한 할 일 없음</option>
+                    {linkableTasks.map((t) => (
+                      <option key={t.id} value={t.id}>{t.title || '(제목 없음)'}</option>
+                    ))}
+                  </select>
+                </div>
+              )}
+</>}
           {/* 반복 — 할 일과 가계부 모두 */}
           {/* 실제 거래는 한 날짜의 사실이라 반복하지 않는다. */}
           {form.kind !== 'idea' && !isActual && (
@@ -818,6 +823,7 @@ export function EntryModal({
             />
           </div>
 
+          </div>
           {error && <p className="mod-err" role="alert">{error}</p>}
         </div>
 
@@ -851,3 +857,4 @@ export function EntryModal({
     </div>
   );
 }
+

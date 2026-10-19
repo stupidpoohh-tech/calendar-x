@@ -54,7 +54,7 @@ describe('실제 거래 빠른 입력', () => {
     expect(screen.queryByRole('radiogroup', { name: '거래 유형' })).toBeNull();
 
     fireEvent.change(screen.getByLabelText('금액'), { target: { value: '12,000' } });
-    fireEvent.click(screen.getByRole('button', { name: '식비' }));
+    fireEvent.change(screen.getByRole('combobox', { name: '카테고리' }), { target: { value: 'default-food' } });
     fireEvent.click(screen.getByRole('button', { name: '저장' }));
 
     const saved = onSave.mock.calls[0]![0] as Entry;
@@ -67,8 +67,8 @@ describe('실제 거래 빠른 입력', () => {
   it('수입으로 바꾸면 수입 카테고리만 보인다', () => {
     openModal({ initial: actualDraft() });
     fireEvent.click(screen.getByRole('radio', { name: '수입' }));
-    expect(screen.getByRole('button', { name: '급여' })).toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: '식비' })).toBeNull();
+    expect(screen.getByRole('option', { name: '급여' })).toBeInTheDocument();
+    expect(screen.queryByRole('option', { name: '식비' })).toBeNull();
   });
 
   it('흐름은 수입 · 지출 · 대출 셋 — 거래 유형 칸은 없고, 결제수단은 현금 · 계좌가 기본이다', () => {
@@ -85,11 +85,11 @@ describe('실제 거래 빠른 입력', () => {
   it('대출을 고르면 대출 원금으로 저장한다 — 생활비 · 카테고리를 풀고 대출 연결만 묻는다', () => {
     const debt = { id: 'd1', name: '전세대출' } as never;
     const { onSave } = openModal({ initial: actualDraft(), budgets: [budget()], debts: [debt] });
-    fireEvent.click(screen.getByRole('button', { name: '식비' }));
+    fireEvent.change(screen.getByRole('combobox', { name: '카테고리' }), { target: { value: 'default-food' } });
     expect(screen.getByRole('radio', { name: '10월 생활비' })).toHaveAttribute('aria-checked', 'true');
     fireEvent.click(screen.getByRole('radio', { name: '대출' }));
     expect(screen.queryByRole('radiogroup', { name: '사용처' })).toBeNull();
-    expect(screen.queryByRole('button', { name: '식비' })).toBeNull();
+    expect(screen.queryByRole('option', { name: '식비' })).toBeNull();
     fireEvent.change(screen.getByLabelText('대출 연결'), { target: { value: 'd1' } });
     fireEvent.change(screen.getByLabelText('금액'), { target: { value: '1200000' } });
     fireEvent.click(screen.getByRole('button', { name: '저장' }));
@@ -107,7 +107,7 @@ describe('실제 거래 빠른 입력', () => {
       initial: actualDraft({ money: newMoney({ status: 'actual', amountMinor: 500_000, categoryId: 'imp-loan' }) }),
       categories: withLoan, mode: 'edit',
     });
-    expect(screen.getByText('대출', { selector: '.chip.on' })).toBeInTheDocument();
+    expect((screen.getByRole('option', { name: '대출' }) as HTMLOptionElement).selected).toBe(true);
     expect(screen.getByText(/예전에 '대출' 카테고리로 적은 거래입니다/)).toBeInTheDocument();
   });
 
@@ -340,3 +340,4 @@ describe('생활비 — 연결되지 않은 실제 지출', () => {
     expect(onOutside).toHaveBeenCalledWith(undecided);
   });
 });
+

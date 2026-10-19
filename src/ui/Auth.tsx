@@ -136,8 +136,8 @@ export function Auth({ onBack }: AuthProps = {}) {
   );
 
   const copy = {
-    signin: { title: '로그인', sub: '저장된 데이터에 접근하려면 로그인하세요.', cta: '로그인' },
-    signup: { title: '계정 만들기', sub: '이메일과 비밀번호를 한 번만 정하면 다음부터 자동으로 로그인됩니다.', cta: '계정 만들고 시작하기' },
+    signin: { title: '로그인', sub: '계정 기록을 불러오거나 이 기기의 기록을 백업하세요.', cta: '로그인' },
+    signup: { title: '계정 만들기', sub: '가입 후 기기에 저장한 기록을 계정에 백업할 수 있습니다.', cta: '계정 만들기' },
     reset: { title: '비밀번호 재설정', sub: '가입한 이메일로 재설정 링크를 보냅니다.', cta: '재설정 메일 보내기' },
   }[mode];
 
@@ -210,7 +210,7 @@ export function Auth({ onBack }: AuthProps = {}) {
         </div>
 
         <div className="lock-note">
-          <Icon.Lock size={10} /> 데이터는 계정에 묶여 저장되고, 이 기기에서는 자동으로 로그인됩니다.
+          <Icon.Lock size={10} /> 가입 없이도 사용할 수 있습니다. 기기 기록은 백업을 완료할 때까지 보관됩니다.
         </div>
       </form>
     </div>

@@ -33,6 +33,7 @@
     "eslint": "^9.17.0",
     "eslint-plugin-react-hooks": "^5.1.0",
     "eslint-plugin-react-refresh": "^0.4.16",
+    "fake-indexeddb": "^6.2.4",
     "firebase-tools": "^15.28.1",
     "globals": "^15.13.0",
     "jsdom": "^25.0.1",

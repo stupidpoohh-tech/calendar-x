@@ -8,7 +8,8 @@ import { RecoverySettings } from './RecoverySettings';
 import '../styles/settings.css';
 
 interface Props {
-  user: User;
+  user: User | null;
+  onSignIn?: () => void;
   theme: ThemePref;
   fontScale: FontScale;
   weekStart: WeekStart;
@@ -75,7 +76,7 @@ const DESCRIPTIONS: Record<Exclude<Page, 'home'>, string> = {
 };
 
 export function SettingsSheet({
-  user, theme, fontScale, weekStart, entryCount, legacyCount, migratedAt,
+  user, onSignIn, theme, fontScale, weekStart, entryCount, legacyCount, migratedAt,
   recoveryRule, onRecoveryRule, onRecoveryPause, onRecoveryResume, layout, ledger,
   onTheme, onFontScale, onWeekStart, onExport, onImport, onImportLedger, onCleanPastPlans, onCleanLoanCategory, onMigrate, onSignOut, onClose, onShowOnboarding,
 }: Props) {
@@ -154,7 +155,7 @@ export function SettingsSheet({
             <h3 className="settings-group-title">관리 및 도움말</h3>
             <div className="settings-menu">
               {menu('data', Icon.Download, '백업 · 가져오기 · 데이터 정리', legacyCount && !migratedAt ? '이관 가능' : undefined)}
-              {menu('account', Icon.User, user.email ?? '로그인 계정')}
+              {menu('account', Icon.User, user?.email ?? '기기에 저장 · 가입하고 백업')}
               {menu('help', Icon.Bulb, '튜토리얼 다시 보기')}
             </div>
             <h3 className="settings-group-title">연결 서비스</h3>
@@ -239,7 +240,7 @@ export function SettingsSheet({
               <span className="set-ico"><Icon.Download size={16} /></span>
               <span className="set-row-b">
                 <span className="set-row-t">{busy === 'export' ? '내보내는 중…' : 'JSON으로 백업 내려받기'}</span>
-                <span className="set-row-s">계정에 저장된 전체 데이터를 한 파일로 받습니다.</span>
+                <span className="set-row-s">현재 공간의 전체 기록을 한 파일로 받습니다.</span>
               </span>
             </button>
             <button className="set-row" disabled={busy != null} onClick={() => run('import', onImport)}>
@@ -319,21 +320,21 @@ export function SettingsSheet({
           <section className="settings-page" hidden={page !== 'account'} aria-label="계정 설정">
           <div className="set-acct">
             <div>
-              <div className="set-acct-e">{user.email}</div>
+              <div className="set-acct-e">{user?.email ?? '이 기기에 저장 중'}</div>
               <div className="set-acct-s num">
                 {entryCount.toLocaleString('ko-KR')}개 항목
-                {!user.emailVerified && <span className="set-unverified">이메일 미인증</span>}
+                {user && !user.emailVerified && <span className="set-unverified">이메일 미인증</span>}
               </div>
             </div>
           </div>
 
           <div className="set-grp">
             <h3 className="set-gt">계정</h3>
-            <button className="set-row" onClick={onSignOut}>
+            <button className="set-row" onClick={user ? onSignOut : onSignIn}>
               <span className="set-ico"><Icon.Lock size={16} /></span>
               <span className="set-row-b">
-                <span className="set-row-t">로그아웃</span>
-                <span className="set-row-s">이 기기의 자동 로그인을 해제합니다.</span>
+                <span className="set-row-t">{user ? '로그아웃' : '가입하고 계정에 백업'}</span>
+                <span className="set-row-s">{user ? '이 기기의 자동 로그인을 해제합니다.' : '가입 없이 사용한 기록을 계정에 옮겨 다른 기기에서도 이어서 사용하세요.'}</span>
               </span>
             </button>
           </div>

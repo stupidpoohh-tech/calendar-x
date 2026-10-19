@@ -1,3 +1,4 @@
+import { DEVICE_UID, commitDevice } from './deviceStore';
 /**
  * 서버가 거절한 쓰기를 붙잡아 둔다.
  *
@@ -200,6 +201,7 @@ const asId = (p: PendingPayload) => (p as { id: string }).id;
  * 같은 쓰기를 재현할 수 있다 — 클로저는 새로고침을 넘기지 못한다.
  */
 export function sendPending(db: Firestore, uid: string, op: CommitInput): Promise<void> {
+  if (uid === DEVICE_UID) return commitDevice(op);
   switch (op.kind) {
     case 'entry':
       return setDoc(docIn(db, uid, COL.entries, asEntry(op.payload).id), entryToDoc(asEntry(op.payload)));

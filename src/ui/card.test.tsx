@@ -69,7 +69,7 @@ describe('결제수단 — 현금 · 계좌 / 카드', () => {
     expect(screen.getByRole('radio', { name: '10월 생활비' })).toHaveAttribute('aria-checked', 'true');
     expect(screen.getByRole('dialog').textContent).toContain('11월 25일');
     expect(screen.getByRole('dialog').textContent).toContain('두 번 빼지 않습니다');
-    fireEvent.click(screen.getByRole('button', { name: '식비' }));
+    fireEvent.change(screen.getByRole('combobox', { name: '카테고리' }), { target: { value: 'default-food' } });
     fireEvent.click(screen.getByRole('button', { name: '저장' }));
     expect(saved(onSave).money).toMatchObject({
       status: 'actual', type: 'expense', flow: 'cardSpend', cardId: 'life', amountMinor: 45_000, budgetId: 'b1', categoryId: 'default-food',
@@ -112,7 +112,7 @@ describe('카드 대금 — 어느 카드의 어느 회차', () => {
   it('흐름 줄은 "카드 대금 · 생활 카드" 로 보이고, 카테고리 칸 없이 회차를 고른다', () => {
     const { onSave } = openModal({ initial: payment });
     expect(screen.getByText('카드 대금 · 생활 카드')).toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: '식비' })).toBeNull();
+    expect(screen.queryByRole('option', { name: '식비' })).toBeNull();
     const cycle = screen.getByLabelText('청구 회차') as HTMLSelectElement;
     expect([...cycle.options].map((o) => o.textContent)).toEqual([
       '10/25 결제 (9/1~9/30) · 남음 300,000', '11/25 결제 (10/1~10/31) · 남음 100,000',

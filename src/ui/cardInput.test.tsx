@@ -56,7 +56,7 @@ describe('결제수단은 늘 보인다', () => {
     expect(methods().getByRole('radio', { name: '현금 · 계좌' })).toHaveAttribute('aria-checked', 'true');
     expect(methods().getByRole('button', { name: '신용카드 · 카드 등록' })).toBeInTheDocument();
     fireEvent.change(screen.getByLabelText('금액'), { target: { value: '9,000' } });
-    fireEvent.click(screen.getByRole('button', { name: '식비' }));
+    fireEvent.change(screen.getByRole('combobox', { name: '카테고리' }), { target: { value: 'default-food' } });
     fireEvent.click(screen.getByRole('button', { name: '저장' }));
     expect(saved(onSave).money).toMatchObject({ type: 'expense', flow: 'normal', amountMinor: 9_000 });
     expect(saved(onSave).money!.cardId ?? null).toBeNull();
@@ -95,15 +95,15 @@ describe('지출을 적다가 카드 등록', () => {
   }
   const fill = () => {
     fireEvent.change(screen.getByLabelText('금액'), { target: { value: '45,000' } });
-    fireEvent.change(screen.getByLabelText('내역'), { target: { value: '셔츠' } });
+    fireEvent.change(screen.getByLabelText('내용'), { target: { value: '셔츠' } });
     fireEvent.change(screen.getByLabelText('날짜'), { target: { value: '2026-10-14' } });
-    fireEvent.click(screen.getByRole('button', { name: '쇼핑' }));
+    fireEvent.change(screen.getByRole('combobox', { name: '카테고리' }), { target: { value: 'default-shopping' } });
   };
   const kept = () => {
     expect((screen.getByLabelText('금액') as HTMLInputElement).value).toBe('45,000');
-    expect((screen.getByLabelText('내역') as HTMLInputElement).value).toBe('셔츠');
+    expect((screen.getByLabelText('내용') as HTMLInputElement).value).toBe('셔츠');
     expect((screen.getByLabelText('날짜') as HTMLInputElement).value).toBe('2026-10-14');
-    expect(screen.getByRole('button', { name: '쇼핑' })).toHaveAttribute('aria-pressed', 'true');
+    expect(screen.getByRole('combobox', { name: '카테고리' })).toHaveValue('default-shopping');
   };
 
   it('등록하면 적던 거래로 돌아와 새 카드가 골라져 있고, 카드 사용으로 저장된다', () => {
@@ -117,7 +117,7 @@ describe('지출을 적다가 카드 등록', () => {
     fireEvent.change(screen.getByLabelText('카드 이름'), { target: { value: '새 카드' } });
     fireEvent.click(screen.getByRole('button', { name: '저장' }));
 
-    expect(screen.getByRole('dialog', { name: '새 항목' })).toBeInTheDocument();
+    expect(screen.getByRole('dialog', { name: '지출 거래 추가' })).toBeInTheDocument();
     kept();
     expect(methods().getByRole('radio', { name: '새 카드' })).toHaveAttribute('aria-checked', 'true');
     expect(screen.queryByText('지워진 카드')).toBeNull();
@@ -262,3 +262,4 @@ describe('입력 리스트의 카드 지출', () => {
     expect(e!.money).toMatchObject({ type: 'income', flow: 'normal', cardId: null });
   });
 });
+

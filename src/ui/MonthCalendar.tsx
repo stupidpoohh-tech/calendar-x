@@ -223,6 +223,9 @@ export function MonthCalendar({
     ...(pockets ?? []).map((budget) => ({ kind: 'pocket' as const, budget })),
     ...barEntries.map((entry) => ({ kind: 'entry' as const, entry })),
   ], [pockets, barEntries]);
+  const placedWeeks = useMemo(() => weeks.map(week =>
+    placeWeek(barItems, week.map(toISO), summaryMode ? todayISO : undefined)),
+  [weeks, barItems, summaryMode, todayISO]);
   const summaries = useMemo(() => {
     if (!ledgerSummary?.ready) return null;
     const map = new Map<string, DaySummary>();
@@ -268,7 +271,7 @@ export function MonthCalendar({
 
       {weeks.map((week, wi) => {
         const weekISO = week.map(toISO);
-        const { placed, laneCount } = placeWeek(barItems, weekISO, summaryMode ? todayISO : undefined);
+        const { placed, laneCount } = placedWeeks[wi]!;
         const { height, gap, showText } = barMetrics(laneCount);
         // Recovery remains readable even when ordinary events compress to strips.
         const laneHeights = Array.from({ length: laneCount }, (_, lane) =>

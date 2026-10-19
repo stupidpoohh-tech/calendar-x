@@ -1,3 +1,5 @@
+import { DEVICE_UID } from '../data/deviceStore';
+import { DeviceBackup } from '../ui/DeviceBackup';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   backupFilename, buildBackup, countBackup, downloadJSON, type BackupData,
@@ -107,12 +109,13 @@ export function App() {
     );
   }
 
-  // 로그인 여부와 무관하게 홈 화면을 보여 준다. 로그아웃 상태는 데모 데이터로
-  // 채워지고, 저장·편집 시도가 나오는 순간 로그인 팝업이 뜬다.
+  // 비회원도 빈 개인 공간에서 시작한다. 기기 자료와 계정 자료는 별도 저장소이며,
+  // 로그인 시 작업 공간을 다시 만들어 앞 계정의 임시 상태를 남기지 않는다.
   const signedIn = state.status === 'signed-in';
   return (
     <Workspace
-      uid={signedIn ? state.user.uid : null}
+      key={signedIn ? state.user.uid : DEVICE_UID}
+      uid={signedIn ? state.user.uid : DEVICE_UID}
       user={signedIn ? state.user : null}
       onSignOut={logout}
     />
@@ -201,6 +204,7 @@ function Workspace({ uid, user, onSignOut }: WorkspaceProps) {
   const setLayout = layoutApi.set;
   const cursorISO = toISO(cursor);
   const isAnon = uid === null;
+  const isDevice = uid === DEVICE_UID;
   // 훅은 조건부 호출이 안 된다. 둘 다 부르고 로그인 상태에 따라 결과를 고른다.
   const liveStore = useStore(uid, cursorISO, today);
   const demoStore = useDemoStore();
@@ -242,7 +246,7 @@ function Workspace({ uid, user, onSignOut }: WorkspaceProps) {
   */
   const accountName = user?.displayName || user?.email || '';
   const shared = useSharedBoard({
-    uid,
+    uid: isDevice ? null : uid,
     todayISO: today,
     accountName,
     // 스위처를 숨기면 공유 화면도 열지 않는다 — 보드 문서 구독(저장을 공유에도 보낼지)은 그대로다.
@@ -276,13 +280,12 @@ function Workspace({ uid, user, onSignOut }: WorkspaceProps) {
     if (wantsShared && layoutApi.ready && !layout.sharedSwitcher) set('space', 'me');
   }, [wantsShared, layoutApi.ready, layout.sharedSwitcher, set]);
 
-  // 저장·편집 시도 시 로그인 유도 팝업. 사용자가 실제 앱을 만져 보다가
-  // 남기려는 순간에만 계정이 필요하다는 것을 자연스럽게 전달한다.
+  // 계정 백업과 같이 보기에만 로그인 안내를 사용한다.
   const [showAuth, setShowAuth] = useState(false);
   const promptLogin = useCallback(async () => {
     const ok = await dialog.confirm({
-      title: '계정을 만들어 저장하세요',
-      body: '지금 보이는 것은 미리보기 데이터입니다. 계정을 만들면 이 화면 그대로 시작해 이어서 쓸 수 있습니다.',
+      title: '계정으로 연결하기',
+      body: '혼자 쓰는 기록은 이 기기에 저장됩니다. 계정 백업과 같이 보기를 이용하려면 로그인해 주세요.',
       confirmLabel: '로그인 · 가입',
       cancelLabel: '계속 둘러보기',
     });
@@ -291,7 +294,7 @@ function Workspace({ uid, user, onSignOut }: WorkspaceProps) {
   }, [dialog]);
   // 로그인 · 가입에 성공하면 그 창을 닫는다. 남겨 두면 로그인된 화면 위에 로그인 양식이 그대로 떠 있고,
   // 로그아웃하는 순간 옛 창이 다시 나타난다. 렌더에서도 막아 한 번도 겹쳐 그리지 않는다(아래 `showAuth && isAnon`).
-  useEffect(() => { if (!isAnon) setShowAuth(false); }, [isAnon]);
+  useEffect(() => { if (!isDevice) setShowAuth(false); }, [isDevice]);
 
   /*
     숨긴 렌즈(가계부 · 노트)를 기억하고 있으면 캘린더로 연다 — 직접 · 낡은 링크도 같다. 기억 자체는
@@ -378,7 +381,7 @@ function Workspace({ uid, user, onSignOut }: WorkspaceProps) {
   // 초대장은 로그인해야 읽을 수 있다. 로그아웃 상태면 먼저 로그인 창을 띄운다.
   useEffect(() => {
     if (!join || join.state !== 'loading') return;
-    if (isAnon) { setShowAuth(true); return; }
+    if (isDevice) { setShowAuth(true); return; }
     let alive = true;
     const code = join.code;
     void sharedRef.current.peek(code).then((found) => {
@@ -388,7 +391,7 @@ function Workspace({ uid, user, onSignOut }: WorkspaceProps) {
         : j));
     });
     return () => { alive = false; };
-  }, [join, isAnon]);
+  }, [join, isDevice]);
 
   /*
     초대 링크는 문서 id 가 코드라, 목록 조회 없이는 되찾을 수 없다. 설정 창을 열 때
@@ -437,12 +440,12 @@ function Workspace({ uid, user, onSignOut }: WorkspaceProps) {
   // 이관 전 컬렉션이 남아 있는지, 이미 옮겼는지 한 번만 확인한다.
   const checkedLegacy = useRef(false);
   useEffect(() => {
-    if (checkedLegacy.current || isAnon || !uid) return;
+    if (checkedLegacy.current || isDevice || isAnon || !uid) return;
     checkedLegacy.current = true;
     Promise.all([readLegacyItems(db, uid), readMigrationMark(db, uid)])
       .then(([items, migratedAt]) => setLegacy({ count: items.length, migratedAt }))
       .catch(() => setLegacy(null));
-  }, [db, uid, isAnon]);
+  }, [db, uid, isAnon, isDevice]);
 
   // ---------- 액션 ----------
 
@@ -1903,17 +1906,18 @@ function Workspace({ uid, user, onSignOut }: WorkspaceProps) {
           <div className="space-context"><SpaceSwitch
             space={sharedOpen ? 'shared' : 'me'}
             hasBoard={!!shared.board}
-            ready={shared.ready}
+            ready={isDevice || shared.ready}
             onChange={(next) => setSharedOpen(next === 'shared')}
-            onStart={() => setSharedSheet('start')}
+            onStart={() => { if (isDevice) { void promptLogin(); return; } setSharedSheet('start'); }}
           /></div>
         )}
-        <button className="ico-btn masthead-settings" aria-label={isAnon ? '로그인 · 가입' : '설정'} onClick={() => isAnon ? setShowAuth(true) : setShowSettings(true)}>{isAnon ? <Icon.User size={20} /> : <Icon.Settings size={20} />}</button>
+        <button className="ico-btn masthead-settings" aria-label="설정" onClick={() => setShowSettings(true)}><Icon.Settings size={20} /></button>
       </div>
       <div className="workspace-shell">
         <AppNavigation shared={sharedOpen} lens={lens} sharedTab={prefs.sharedTab} showNotes={layout.notes} showMoney={layout.ledger} demo={isAnon}
           contextRef={setSharedContextTarget} onNavigate={navigateLens} onSharedNavigate={(tab) => set('sharedTab', tab)} onManageSharing={() => setSharedSheet('settings')} />
         <div className="workspace-content">
+        <DeviceBackup user={user} onSignIn={() => setShowAuth(true)} />
       {!dashboardOn && !sharedOpen && !ledgerOn && <header className="topbar" data-space={sharedOpen ? 'shared' : 'me'}>
         <div className="header-left">
           {/* 가계부는 보기마다 자기 기간 도구를 가진다 — 위에 달력 월을 하나 더 두면 무엇이 무엇을 바꾸는지 흐려진다. */}
@@ -2110,7 +2114,7 @@ function Workspace({ uid, user, onSignOut }: WorkspaceProps) {
           <>
           <Dashboard today={today} store={store} showMoney={layout.ledger} showNotes={layout.notes} demo={isAnon}
             cursor={cursor} onCursorChange={setCursor} weekStart={prefs.weekStart} query={dashboardQuery}
-            onNavigate={navigateLens}
+            onNavigate={(next) => { navigateLens(next); if (next === 'money') setLedgerTab('cashflow'); }}
             onEntry={openEdit} onStatus={handleStatus}
             onCreate={(kind, date) => openCreate({ ...newEntry(kind, { startDate: date }), startDate: date })} />
           <div className="utility-strip">{pinnedSection}</div>
@@ -2490,7 +2494,7 @@ function Workspace({ uid, user, onSignOut }: WorkspaceProps) {
         />
       )}
 
-      {join && !isAnon && (
+      {join && !isDevice && (
         <SharedJoinSheet
           invite={join.invite}
           state={join.state}
@@ -2499,7 +2503,7 @@ function Workspace({ uid, user, onSignOut }: WorkspaceProps) {
         />
       )}
 
-      {showAuth && isAnon && (
+      {showAuth && isDevice && (
         <div className="mod-back" onClick={() => setShowAuth(false)}>
           <div className="mod auth-mod" role="dialog" aria-modal="true" onClick={(e) => e.stopPropagation()}>
             <Auth onBack={() => setShowAuth(false)} />
@@ -2520,10 +2524,11 @@ function Workspace({ uid, user, onSignOut }: WorkspaceProps) {
         }} />
       )}
 
-      {showSettings && user && (
+      {showSettings && (
         <SettingsSheet
           onShowOnboarding={() => { setShowSettings(false); onboarding.reopen(); }}
           user={user}
+          onSignIn={() => { setShowSettings(false); setShowAuth(true); }}
           theme={prefs.theme}
           fontScale={prefs.fontScale}
           weekStart={prefs.weekStart}
@@ -2544,8 +2549,8 @@ function Workspace({ uid, user, onSignOut }: WorkspaceProps) {
             onLayout: setLayout,
             shared: {
               connected: !!shared.board,
-              ready: shared.ready,
-              onStart: () => { setShowSettings(false); setSharedSheet('start'); },
+              ready: isDevice || shared.ready,
+              onStart: () => { setShowSettings(false); if (isDevice) { void promptLogin(); return; } setSharedSheet('start'); },
               onManage: () => { setShowSettings(false); setSharedSheet('settings'); },
             },
           }}
@@ -2607,3 +2612,4 @@ function pickFile(accept: string): Promise<File | null> {
 }
 
 export type { LensId };
+
