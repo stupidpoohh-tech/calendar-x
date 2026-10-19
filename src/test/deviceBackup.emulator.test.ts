@@ -7,6 +7,7 @@ import { backupDevice } from '../data/deviceBackup';
 import { changeDevice, emptyDevice, readDevice } from '../data/deviceStore';
 import { fetchAll, fetchLedgerSettings } from '../data/repo';
 import { newEntry, newMoney } from '../domain/entry';
+import { entryToDoc, recoveryRuleToDoc } from '../data/converters';
 
 let env: RulesTestEnvironment;
 beforeAll(async () => {
@@ -24,10 +25,14 @@ it('비회원 일정·금융·설정을 실제 계정에 옮기고 서버 확인
   const source = await readDevice();
   const db = env.authenticatedContext('new-account').firestore() as unknown as Firestore;
   await backupDevice(db, 'new-account');
-  expect((await fetchAll(db,'new-account')).entries).toEqual([entry]);
+  const uploaded = (await fetchAll(db,'new-account')).entries;
+  expect(uploaded).toHaveLength(1);
+  // The cloud reader fills optional fields with false/null; compare the stored representation.
+  expect(entryToDoc(uploaded[0]!)).toEqual(entryToDoc(entry));
   expect(await fetchLedgerSettings(db,'new-account')).toEqual(source.ledger);
   const user = (await getDoc(doc(db,'users','new-account'))).data()!;
   expect(user.layout).toEqual(source.layout);
+  expect(user.recovery).toEqual(recoveryRuleToDoc(source.recovery));
   expect((await readDevice()).entries).toEqual([]);
 });
 
