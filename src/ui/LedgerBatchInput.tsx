@@ -6,23 +6,27 @@
  * 않는다 — `ime.ts`).
  *
  * 저장하는 것은 거래 창과 같은 모양이다 — 오늘까지는 실제 거래, 앞날은 예정. 흐름은 수입 · 지출 · 대출
- * (`ledgerFlows.ts`). 생활비 연결 · 잔고 반영은 여기서 고르지 않는다(미결정 · 미반영으로 남는다) — 줄마다
+ * (`ledgerFlows.ts`). 등록한 카드가 있으면 지출 줄에 결제수단(현금 · 계좌 / 카드)이 붙는다 — 카드를 고른 줄은
+ * 카드 사용으로 저장된다(`batchRows.ts`). 생활비 연결 · 잔고 반영은 여기서 고르지 않는다(미결정 · 미반영으로 남는다) — 줄마다
  * 고르게 하면 다시 창 하나와 같아진다. 저장 뒤 생활비 창 · 각 거래에서 고른다.
  *
  * 쓰기는 기존 쓰기 큐의 묶음(`ledgerBatch`)이다. 거절된 묶음은 '저장하지 못한 것' 목록에 남는다.
  * 한 줄이라도 금액이 잘못됐으면 아무것도 저장하지 않고 그 줄을 짚는다.
  */
 import { useEffect, useRef, useState, type KeyboardEvent } from 'react';
+import { activeCards } from '../domain/card';
 import { pickableCategories } from '../domain/category';
 import { formatAmount } from '../domain/money';
-import type { Category, Entry } from '../domain/types';
-import { amountOf, blankRow, filled, problemOf, rowsToEntries, type BatchRow } from './batchRows';
+import type { Card, Category, Entry } from '../domain/types';
+import { amountOf, blankRow, filled, problemOf, rowsToEntries, withPick, type BatchRow } from './batchRows';
 import { Icon } from './Icon';
 import { isComposingEnter } from './ime';
 import { FLOW_PICKS, type FlowPick } from './ledgerFlows';
 import { PICKER } from './pickerField';
 
-export function LedgerBatchInput({ rows, onRows, todayISO, defaultDate, categories, categoriesReady, onSave }: {
+const NO_CARDS: readonly Card[] = [];
+
+export function LedgerBatchInput({ rows, onRows, todayISO, defaultDate, categories, categoriesReady, cards = NO_CARDS, onSave }: {
   rows: readonly BatchRow[];
   onRows: (rows: BatchRow[]) => void;
   todayISO: string;
@@ -30,6 +34,8 @@ export function LedgerBatchInput({ rows, onRows, todayISO, defaultDate, categori
   defaultDate: string;
   categories: readonly Category[];
   categoriesReady: boolean;
+  /** 신용카드(P4). 고르는 자리에는 보관하지 않은 카드만 나온다. */
+  cards?: readonly Card[];
   onSave: (entries: Entry[], label: string) => Promise<{ ok: number; failed: number }>;
 }) {
   const [notice, setNotice] = useState('');
@@ -38,14 +44,16 @@ export function LedgerBatchInput({ rows, onRows, todayISO, defaultDate, categori
 
   const patch = (key: string, p: Partial<BatchRow>) => onRows(rows.map((r) => {
     if (r.key !== key) return r;
-    const next = { ...r, ...p };
-    // 카테고리는 흐름마다 따로다. 지출 카테고리를 단 채 수입으로 바꾸면 결산이 엉뚱한 쪽에 선다.
-    if (p.pick && p.pick !== r.pick) next.categoryId = null;
-    return next;
+    const { pick, ...rest } = p;
+    // 흐름을 바꾸면 카테고리와 (지출이 아니게 되면) 카드를 뗀다 — `withPick`.
+    return { ...(pick ? withPick(r, pick) : r), ...rest };
   }));
+  const payCards = activeCards(cards);
   const addRow = (after?: BatchRow) => {
     const last = after ?? rows[rows.length - 1];
     const row = blankRow(last?.date ?? defaultDate, last?.pick ?? 'expense');
+    // 카드로 이어 쓰는 영수증이 많다 — 앞 줄의 결제수단도 이어받는다(지출 줄일 때만).
+    if (last?.pick === 'expense' && last.cardId && payCards.some((c) => c.id === last.cardId)) row.cardId = last.cardId;
     onRows([...rows, row]);
     return row;
   };
@@ -94,10 +102,11 @@ export function LedgerBatchInput({ rows, onRows, todayISO, defaultDate, categori
   };
 
   return (
-    <div className="bi" role="region" aria-label="입력 리스트">
+    <div className={'bi' + (payCards.length > 0 ? ' pay' : '')} role="region" aria-label="입력 리스트">
       <p className="led-note">
         줄마다 적고 한 번에 저장합니다. Enter 로 다음 칸 · 다음 줄로 갑니다. 오늘까지는 실제 거래, 앞날은 예정으로
         저장하고, 생활비 연결 · 잔고 반영은 저장한 뒤 각 거래에서 고릅니다.
+        {payCards.length > 0 && ' 카드로 쓴 지출은 결제수단에서 카드를 고릅니다.'}
       </p>
       <ol className="bi-rows">
         {rows.map((r, i) => {
@@ -128,6 +137,16 @@ export function LedgerBatchInput({ rows, onRows, todayISO, defaultDate, categori
                 aria-label={`${i + 1}번째 줄 내역`}
                 value={r.title} onChange={(e) => patch(r.key, { title: e.target.value })} onKeyDown={onEnter(r, 'title')}
               />
+              {payCards.length > 0 && (
+                <select
+                  className="mod-input bi-pay" aria-label={`${i + 1}번째 줄 결제수단`}
+                  value={r.pick === 'expense' ? r.cardId ?? '' : ''} disabled={r.pick !== 'expense'}
+                  onChange={(e) => patch(r.key, { cardId: e.target.value || null })}
+                >
+                  <option value="">{r.pick === 'expense' ? '현금 · 계좌' : '—'}</option>
+                  {r.pick === 'expense' && payCards.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+                </select>
+              )}
               <select
                 className="mod-input bi-cat" aria-label={`${i + 1}번째 줄 카테고리`}
                 value={r.categoryId ?? ''} disabled={r.pick === 'loan'}

@@ -45,7 +45,7 @@ import {
   shiftPeriodKey, type Period,
 } from '../domain/period';
 import type {
-  AnnualBudget, Category, CategoryBudget, Entry, LedgerNote, LedgerTabId, PeriodKey,
+  AnnualBudget, Card, Category, CategoryBudget, Entry, LedgerNote, LedgerTabId, PeriodKey,
 } from '../domain/types';
 import { AnnualBudgetForm, AnnualBudgetSection } from './AnnualBudgetSection';
 import { LEDGER_NOTE_MAX } from '../data/converters';
@@ -87,6 +87,8 @@ export interface LedgerScreenProps {
   onEntryClick: (e: Entry) => void;
   /** 입력 리스트의 저장 — 여러 거래를 묶음으로 쓴다. 없으면 입력 리스트를 띄우지 않는다. */
   onSaveMany?: (entries: Entry[], label: string) => Promise<{ ok: number; failed: number }>;
+  /** 신용카드(P4). 입력 리스트의 지출 줄 결제수단에 쓴다. */
+  cards?: readonly Card[];
   /** 좁은 화면의 추가(+) · 더보기(···). 기간 도구 옆에 둔다 — 머리에 한 줄을 따로 쓰지 않게. */
   actions?: ReactNode;
   onSaveCategoryBudget: (b: CategoryBudget) => void;
@@ -161,7 +163,7 @@ export function LedgerScreen(props: LedgerScreenProps) {
           {historyView === 'input' && props.onSaveMany ? (
             <LedgerBatchInput
               rows={draft} onRows={setDraft} todayISO={todayISO} defaultDate={addDate}
-              categories={props.categories} categoriesReady={props.categoriesReady} onSave={props.onSaveMany}
+              categories={props.categories} categoriesReady={props.categoriesReady} cards={props.cards} onSave={props.onSaveMany}
             />
           ) : gated(<LedgerHistory {...props} period={period} />)}
         </>

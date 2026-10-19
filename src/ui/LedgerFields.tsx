@@ -6,9 +6,9 @@
  *
  * ── 자주 쓰는 입력은 짧게 ─────────────────────────────────────
  *
- * 흐름(수입 · 지출 · 대출)은 부르는 쪽이 `FlowChips` 로 고른다. 여기에는 결제수단 칸도 거래
- * 유형 칸도 없다 — 일반 소비는 금액 · 카테고리만 고르면 저장된다. 이미 저장된 결제수단 · 유형은
- * 지우지 않고 그대로 둔다(`ledgerFlows.ts`).
+ * 흐름(수입 · 지출 · 대출)은 부르는 쪽이 `FlowChips` 로 고른다. 일반 소비는 금액 · 카테고리만 고르면
+ * 저장된다 — 결제수단은 '현금 · 계좌' 가 기본이다. 이미 저장된 예전 결제수단 · 유형은 지우지 않고
+ * 그대로 둔다(`ledgerFlows.ts`).
  */
 import { isLoanCategory, pickableCategories } from '../domain/category';
 import { balanceInclusion, moneyFlowOf, reflectChoiceFor } from '../domain/ledger';
@@ -52,6 +52,11 @@ interface Props {
    */
   cards?: readonly Card[];
   cardEntries?: readonly Entry[];
+  /**
+   * 결제수단 줄의 '카드 등록'. 주면 지출을 적던 창에서 카드를 등록하고 돌아온다(`EntryModal`). 없으면
+   * 등록한 카드가 없을 때 어디서 등록하는지만 적는다.
+   */
+  onRegisterCard?: () => void;
   /** 오늘. 회차가 마감됐는지 · 지났는지 적는다. */
   todayISO?: DateISO;
 }
@@ -65,7 +70,7 @@ const NO_RESERVES: readonly Reserve[] = [];
 export function LedgerFields({
   entryId, type, date, money, onMoney, categories, categoriesReady, onSeedCategories,
   accounts, pockets, debts, only, reflected, onReflected, reserves = NO_RESERVES, recurring = false,
-  cards = NO_CARDS, cardEntries = NO_ENTRIES, todayISO = date,
+  cards = NO_CARDS, cardEntries = NO_ENTRIES, todayISO = date, onRegisterCard,
 }: Props) {
   const flow = moneyFlowOf(money);
   const isLoan = flow === 'loanPrincipal' || flow === 'loanInterest';
@@ -88,8 +93,9 @@ export function LedgerFields({
   // 결제수단(P4) — 현금 · 계좌로 낸 지출인가, 어느 카드로 쓴 지출인가.
   const pickableCards = activeCards(cards);
   const linkedCard = money.cardId ? cards.find((c) => c.id === money.cardId) ?? null : null;
-  const showMethod = isOutflow && (flow === 'normal' || flow === 'cardSpend')
-    && (pickableCards.length > 0 || !!money.cardId || flow === 'cardSpend');
+  // 일반 지출 · 카드 사용에는 카드 등록 여부와 무관하게 늘 보인다 — 카드가 없으면 '현금 · 계좌' 와 등록 길만.
+  // 카드 대금 · 대출 · 이체는 소비의 결제수단을 묻지 않는다.
+  const showMethod = isOutflow && (flow === 'normal' || flow === 'cardSpend') && !money.debtId;
   const cardUse = flow === 'cardSpend' && linkedCard ? cycleOfUse(linkedCard, date) : null;
   const isCardPay = isOutflow && flow === 'cardPayment';
   const payState = isCardPay && linkedCard ? cardState(linkedCard, cardEntries, todayISO) : null;
@@ -104,8 +110,8 @@ export function LedgerFields({
     <>
       {/* 대출은 카테고리가 아니라 흐름이다. 대출에는 카테고리 칸이 없다 — 이미 붙은 값은 그대로 둔다. */}
       {/*
-        결제수단 (P4). 카드로 쓴 돈은 오늘 소비로 세고(현금 0) 결제일에 대금으로 나간다. 카드를 고르면 생활비에서
-        빠진다 — 카드 사용은 생활비에 걸지 않는다(P1-D). 세이브에는 걸 수 있다.
+        결제수단 (P4). 카드로 쓴 돈은 오늘 소비로 세고(현금 0) 결제일에 대금으로 나간다. 등록한 카드의 카드 사용은
+        생활비 · 세이브에 걸 수 있다(P1-D). 기본은 현금 · 계좌이고, 카드가 없으면 그 자리에서 등록하러 간다.
       */}
       {showMethod && (
         <div className="mod-row">
@@ -137,8 +143,17 @@ export function LedgerFields({
             {flow === 'cardSpend' && !money.cardId && (
               <span className="chip on legacy" title="카드를 정하지 않은 예전 카드 사용입니다. 미결제로 세지 않습니다.">카드 (정하지 않음)</span>
             )}
+            {onRegisterCard && (
+              <button type="button" className="chip ghost" onClick={onRegisterCard}>
+                {pickableCards.length > 0 ? '+ 카드 등록' : '신용카드 · 카드 등록'}
+              </button>
+            )}
           </div>
         </div>
+      )}
+      {/* 등록 길이 없는 자리(확정 창)에서는 어디서 등록하는지 적는다. 거래 창은 칩이 그 길이다. */}
+      {showMethod && pickableCards.length === 0 && !onRegisterCard && (
+        <p className="mod-hint">등록한 카드가 없습니다. 카드는 현금흐름 &gt; 카드대금에서 등록합니다.</p>
       )}
       {cardUse && (
         <p className="mod-hint">

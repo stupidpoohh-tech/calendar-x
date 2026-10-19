@@ -13,11 +13,13 @@ import { fmtDayShort } from '../domain/date';
 import { budgetCovers } from '../domain/budget';
 import { pocketChoiceFor } from '../domain/confirm';
 import { pocketEligible } from '../domain/budget';
+import { newCard } from '../domain/card';
 import type {
   Account, Budget, Card, Category, Debt, Entry, Reserve, EntryKind, MoneyFields, NewMoneyType, RepeatFreq, TaskStatus,
 } from '../domain/types';
 import { Icon } from './Icon';
 import { FlowChips } from './FlowChips';
+import { CardForm } from './CardSheet';
 import { LedgerFields } from './LedgerFields';
 import { cardPaymentLabel, flowLabel, flowPickOf, flowPickPatch, type FlowPick } from './ledgerFlows';
 import { moneyFlowOf } from '../domain/ledger';
@@ -67,6 +69,11 @@ interface Props {
    * 남는다 — 그 항목이 무엇인지 보여야 하고, 숨김이 저장 동작을 바꾸지 않는다.
    */
   ledgerVisible?: boolean;
+  /**
+   * 카드 저장(P4). 주면 지출의 결제수단 줄에 '카드 등록' 이 붙고, 이 창 안에서 카드를 등록한 뒤 적던 거래로
+   * 돌아온다. 저장을 맡았으면 true(로그인 전이면 false — 그때는 카드를 고르지 않는다).
+   */
+  onSaveCard?: (c: Card) => boolean;
 }
 
 export interface SaveOptions {
@@ -113,7 +120,7 @@ export function EntryModal({
   open, mode, initial, allTags, linkableTasks, budgets, reserves = NO_RESERVES, cards = NO_CARDS, cardEntries = NO_ENTRIES, debts, sharedActive = false,
   categories = NO_CATEGORIES, categoriesReady = true, onSeedCategories,
   accounts = NO_ACCOUNTS, occurrenceDate = null, onConfirm, onUnconfirm,
-  onSave, onDelete, onClose, ledgerVisible = true,
+  onSave, onDelete, onClose, ledgerVisible = true, onSaveCard,
 }: Props) {
   const [form, setForm] = useState<Entry>(() => initial ?? newEntry('task'));
   const [amountText, setAmountText] = useState('');
@@ -122,6 +129,14 @@ export function EntryModal({
   const [error, setError] = useState('');
   /** 사용자가 생활비 칸을 직접 건드렸는가. 건드렸으면 날짜를 바꿔도 기본값으로 되돌리지 않는다. */
   const [pocketTouched, setPocketTouched] = useState(false);
+  /**
+   * 지출을 적다가 여는 카드 등록(P4). 이 창을 닫지 않고 그 자리를 잠시 카드 양식으로 바꾼다 — 적던 금액 ·
+   * 날짜 · 카테고리 · 내역은 `form` 에 그대로 남는다. 저장한 카드는 구독이 돌려줄 때까지 여기서 들고 있는다.
+   */
+  const [cardDraft, setCardDraft] = useState<Card | null>(null);
+  const [addedCards, setAddedCards] = useState<readonly Card[]>(NO_CARDS);
+  const cardDraftOpen = useRef(false);
+  cardDraftOpen.current = cardDraft !== null;
   const firstFieldRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
@@ -132,6 +147,8 @@ export function EntryModal({
     setAmountText(base.money ? (base.money.amountMinor ? minorToInput(base.money.amountMinor, base.money.currency) : '') : '');
     setTagInput('');
     setError('');
+    setCardDraft(null);
+    setAddedCards(NO_CARDS);
     const t = setTimeout(() => firstFieldRef.current?.focus(), 60);
     return () => clearTimeout(t);
     // 열 때 한 번만 채운다. 생활비 목록이 바뀔 때마다 다시 채우면 적던 내용이 날아간다.
@@ -140,7 +157,11 @@ export function EntryModal({
 
   useEffect(() => {
     if (!open) return;
-    const onKey = (e: globalThis.KeyboardEvent) => { if (e.key === 'Escape') onClose(); };
+    const onKey = (e: globalThis.KeyboardEvent) => {
+      if (e.key !== 'Escape') return;
+      // 카드 양식이 열려 있으면 그것만 닫는다 — 적던 거래는 남는다.
+      if (cardDraftOpen.current) setCardDraft(null); else onClose();
+    };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
   }, [open, onClose]);
@@ -172,6 +193,22 @@ export function EntryModal({
     && (form.startDate < pickedBudget.startDate || form.startDate > pickedBudget.endDate);
 
   const patch = (p: Partial<Entry>) => setForm((f) => ({ ...f, ...p }));
+
+  /** 방금 등록한 카드를 구독이 아직 돌려주지 않았으면 덧붙인다 — 고른 카드가 '지워진 카드' 로 보이지 않게. */
+  const fieldCards = addedCards.some((c) => !cards.some((x) => x.id === c.id))
+    ? [...cards, ...addedCards.filter((c) => !cards.some((x) => x.id === c.id))]
+    : cards;
+  const openCardForm = onSaveCard
+    ? () => setCardDraft(newCard({ name: '', accountId: form.money?.accountId ?? accounts[0]?.id ?? null }))
+    : undefined;
+  const saveNewCard = (c: Card) => {
+    const card: Card = { ...c, name: c.name.trim(), order: cards.length, updatedAt: new Date().toISOString() };
+    if (!onSaveCard?.(card)) return;
+    setAddedCards((xs) => [...xs, card]);
+    setCardDraft(null);
+    // 등록한 카드로 쓴 지출로 고른다. 생활비 · 세이브 연결은 그대로다 — 등록 카드의 카드 사용은 걸 수 있다.
+    setLedger({ flow: 'cardSpend', cardId: card.id, cardCycle: null, debtId: null });
+  };
 
   const switchKind = (kind: EntryKind) => {
     setForm((f) => {
@@ -296,6 +333,23 @@ export function EntryModal({
     onSave(withDerived({ ...form, title: form.title.trim() }));
   };
 
+  if (cardDraft) {
+    return (
+      <div className="mod-back" onClick={() => setCardDraft(null)}>
+        <div className="mod" role="dialog" aria-modal="true" aria-label="카드 등록" onClick={(e) => e.stopPropagation()}>
+          <header className="mod-head">
+            <h2 className="mod-h">카드 등록</h2>
+            <button className="ico-btn" onClick={() => setCardDraft(null)} aria-label="거래로 돌아가기"><Icon.X size={18} /></button>
+          </header>
+          <div className="mod-body mod-card">
+            <p className="bp-note">등록하면 적던 거래로 돌아가 이 카드로 쓴 지출로 고릅니다. 취소해도 적던 내용은 그대로입니다.</p>
+            <CardForm draft={cardDraft} accounts={accounts} onDraft={setCardDraft} onCancel={() => setCardDraft(null)} onSave={saveNewCard} />
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="mod-back" onClick={onClose}>
       <div className="mod" role="dialog" aria-modal="true" aria-label={mode === 'edit' ? '항목 편집' : '새 항목'} onClick={(e) => e.stopPropagation()}>
@@ -408,9 +462,10 @@ export function EntryModal({
                     debts={debts}
                     reserves={reserves}
                     recurring={!!form.recurrence}
-                    cards={cards}
+                    cards={fieldCards}
                     cardEntries={cardEntries}
                     todayISO={computeToday()}
+                    onRegisterCard={openCardForm}
                     reflected={reflected}
                     onReflected={setReflected}
                   />
@@ -530,9 +585,10 @@ export function EntryModal({
                   debts={debts}
                   reserves={reserves}
                   recurring={!!form.recurrence}
-                  cards={cards}
+                  cards={fieldCards}
                   cardEntries={cardEntries}
                   todayISO={computeToday()}
+                  onRegisterCard={openCardForm}
                 />
               )}
 

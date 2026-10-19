@@ -308,7 +308,7 @@ function CycleDetail({ card, cycle, onEntryClick }: { card: Card; cycle: CycleSt
 
 const DAY_OPTIONS = Array.from({ length: 31 }, (_, i) => i + 1);
 
-function CardForm({ draft, accounts, onDraft, onCancel, onSave, onArchive }: {
+export function CardForm({ draft, accounts, onDraft, onCancel, onSave, onArchive }: {
   draft: Card;
   accounts: readonly Account[];
   onDraft: (c: Card) => void;

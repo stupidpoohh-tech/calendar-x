@@ -953,9 +953,10 @@ function Workspace({ uid, user, onSignOut }: WorkspaceProps) {
   }, [isAnon, uid, promptLogin, store.reserveLinked, dialog, commit]);
 
   /** 카드 저장(P4). 문서 전체를 쓴다. */
-  const saveCard = useCallback((c: Card) => {
-    if (isAnon || !uid) { void promptLogin(); return; }
+  const saveCard = useCallback((c: Card): boolean => {
+    if (isAnon || !uid) { void promptLogin(); return false; }
     commit({ kind: 'card', label: '카드', summary: c.name, payload: c });
+    return true;
   }, [isAnon, uid, promptLogin, commit]);
 
   /**
@@ -2128,6 +2129,7 @@ function Workspace({ uid, user, onSignOut }: WorkspaceProps) {
             onEntryClick={openLedgerEntry}
             actions={quickActions}
             onSaveMany={writeLedgerEntries}
+            cards={store.cards}
             onSaveCategoryBudget={saveCategoryBudget}
             annualBudgets={store.annualBudgets}
             onSaveAnnualBudget={saveAnnualBudget}
@@ -2403,6 +2405,7 @@ function Workspace({ uid, user, onSignOut }: WorkspaceProps) {
         onDelete={(e) => void handleDelete(e)}
         onClose={closeModal}
         ledgerVisible={layout.ledger}
+        onSaveCard={saveCard}
       />
 
       {confirming && (

@@ -792,6 +792,9 @@
 .mod-lbl { flex: 0 0 52px; font-size: 0.71875rem; font-weight: 600; color: var(--ink-3); padding-top: 9px; }
 .mod-row:has(.mod-input:only-child) .mod-lbl, .mod-row:has(.mod-dt) .mod-lbl { padding-top: 0; }
 
+/* 거래 창 안의 카드 등록(P4) — 카드대금 창의 양식을 그대로 쓴다. 이 창의 칸 이름은 옆에 서는 52px 기준이라 위에 둘 때는 풀어 준다 */
+.mod-card .debt-f .mod-lbl { flex: none; padding-top: 0; }
+
 .mod-title {
   border: none; border-bottom: 2px solid var(--line); background: transparent;
   font-size: 1.1875rem; font-weight: 600; padding: 6px 2px; outline: none; color: var(--ink);

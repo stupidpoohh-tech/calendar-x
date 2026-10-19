@@ -529,11 +529,17 @@ button.led-cat-n:hover svg { color: var(--accent); }
 .bi-foot { display: flex; align-items: center; justify-content: space-between; gap: 8px; flex-wrap: wrap; font-size: 0.8125rem; color: var(--ink-2); }
 .bi-foot b.plus { color: var(--good); }
 .bi-foot b.minus { color: var(--bad); }
+/* 결제수단 칸(등록한 카드가 있을 때) — 내역과 카테고리 사이 */
+.bi.pay .bi-row { grid-template-columns: 9.5rem 5.5rem minmax(7rem, 1fr) minmax(8rem, 2fr) 7.5rem 9rem 32px; }
 /* 좁은 화면 — 한 줄을 두 줄로: 날짜 · 흐름 · 금액 / 내역 · 카테고리 · 지우기 */
 @media (max-width: 720px) {
-  .bi-row { grid-template-columns: minmax(0, 1.25fr) minmax(0, 0.8fr) minmax(0, 1.2fr); }
+  .bi-row, .bi.pay .bi-row { grid-template-columns: minmax(0, 1.25fr) minmax(0, 0.8fr) minmax(0, 1.2fr); }
   .bi-title { grid-column: 1 / span 2; }
   .bi-cat { grid-column: 3; }
+  /* 카드가 있으면 둘째 줄이 내역 · 결제수단 · 카테고리다. 결제수단('현금 · 계좌')이 잘리지 않게 가운데 칸을 넓힌다 */
+  .bi.pay .bi-row { grid-template-columns: minmax(0, 1.2fr) minmax(0, 1fr) minmax(0, 1fr); }
+  .bi.pay .bi-title { grid-column: 1; }
+  .bi.pay .bi-pay { grid-column: 2; }
   .bi-x { position: absolute; right: -6px; top: -6px; background: var(--bg-elev); border: 1px solid var(--line); border-radius: 50%; width: 22px; height: 22px; }
   .bi-row { position: relative; }
 }

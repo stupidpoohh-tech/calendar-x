@@ -71,12 +71,13 @@ describe('실제 거래 빠른 입력', () => {
     expect(screen.queryByRole('button', { name: '식비' })).toBeNull();
   });
 
-  it('흐름은 수입 · 지출 · 대출 셋 — 결제수단 · 거래 유형 칸은 없다', () => {
+  it('흐름은 수입 · 지출 · 대출 셋 — 거래 유형 칸은 없고, 결제수단은 현금 · 계좌가 기본이다', () => {
     openModal({ initial: actualDraft() });
     const flows = within(screen.getByRole('radiogroup', { name: '흐름' })).getAllByRole('radio');
     expect(flows.map((r) => r.textContent)).toEqual(['수입', '지출', '대출']);
     expect(screen.getByRole('radio', { name: '지출' })).toHaveAttribute('aria-checked', 'true');
-    expect(screen.queryByLabelText('결제수단')).toBeNull();
+    // 카드가 없어도 결제수단 줄은 보인다(현금 · 계좌 하나뿐). 고르지 않아도 일반 지출로 저장된다.
+    expect(screen.getByRole('radio', { name: '현금 · 계좌' })).toHaveAttribute('aria-checked', 'true');
     expect(screen.queryByRole('radiogroup', { name: '거래 유형' })).toBeNull();
     expect(screen.queryByRole('button', { name: /상세/ })).toBeNull();
   });
