@@ -11,7 +11,8 @@
  *
  * 입력칸은 표시값(`source ⊕ overrides`)으로 채워지고, 저장할 때 **원본과 같은 값은
  * override 에서 빠진다.** 그래서 제목만 고친 항목의 날짜는 계속 원본을 따라간다.
- * 어느 칸이 지금 공유 화면 값인지 칸마다 '수정됨' 으로 적어 둔다.
+ * 어느 칸이 지금 공유 화면 값인지 칸마다 '수정됨' 으로 적어 둔다. 견줄 원본이 없는 항목(같이 보기에만
+ * 만든 것)은 모든 칸이 공유 화면 값이라 표시가 아무것도 가르지 않으므로 적지 않는다.
  */
 import { useState } from 'react';
 import { COLORS, STATUSES } from '../domain/constants';
@@ -49,6 +50,8 @@ interface Form {
   note: string;
   color: ColorId;
   startDate: string;
+  /** 종료일(선택). 비우면 하루짜리다. */
+  endDate: string;
   startTime: string;
   status: string;
   important: boolean;
@@ -72,17 +75,23 @@ export function SharedItemSheet({
   const patch = (p: Partial<Form>) => setForm((f) => ({ ...f, ...p }));
 
   const overridden = new Set<SharedOverridableField>(view.overridden);
+  // '수정됨' 은 원본과 달라진 칸이라는 뜻이다. 원본이 없는 항목에서는 가를 것이 없다.
   const mark = (k: SharedOverridableField) =>
-    (overridden.has(k) ? <span className="shi-mark">수정됨</span> : null);
+    (!item.localOnly && item.source && overridden.has(k) ? <span className="shi-mark">수정됨</span> : null);
 
   const save = () => {
     const title = form.title.trim();
     if (!title) { setError('제목을 입력해 주세요.'); return; }
+    // 종료일은 선택이다. 시작일과 같으면 하루짜리와 같으므로 비워 둔다.
+    const endDate = form.endDate && form.endDate !== form.startDate ? form.endDate : null;
+    if (endDate && !form.startDate) { setError('종료일을 적으려면 날짜를 먼저 골라 주세요.'); return; }
+    if (endDate && endDate < form.startDate) { setError('종료일은 시작일보다 앞설 수 없습니다.'); return; }
     const patchFields: SharedOverrides = {
       title,
       note: form.note,
       color: form.color,
       startDate: form.startDate,
+      endDate,
       startTime: form.startTime || null,
       status: asStatus(form.status),
       important: form.important,
@@ -159,6 +168,16 @@ export function SharedItemSheet({
                 aria-label="시각"
               />
             </div>
+          </div>
+
+          <div className="mod-row">
+            <label className="mod-lbl" htmlFor="sh-end">종료일{mark('endDate')}</label>
+            <input
+              id="sh-end" type="date" className="mod-input" {...PICKER}
+              value={form.endDate} min={form.startDate || undefined}
+              onChange={(e) => patch({ endDate: e.target.value })}
+              placeholder="선택"
+            />
           </div>
 
           <div className="mod-row">
@@ -261,6 +280,7 @@ function toForm(item: SharedTodoItem): Form {
     note: v.note,
     color: v.color,
     startDate: v.startDate,
+    endDate: v.endDate ?? '',
     startTime: v.startTime ?? '',
     status: v.status,
     important: v.important,

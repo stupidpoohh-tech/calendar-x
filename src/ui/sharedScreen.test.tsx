@@ -398,6 +398,34 @@ describe('항목 편집', () => {
     expect(saved.overrides.startDate ?? '').toBe('');
     expect(saved.overrides.color).toBe('blue');
   });
+
+  it('종료일은 선택이다 — 적으면 기간이 되고, 비우면 하루짜리다', () => {
+    const onSaveItem = vi.fn();
+    mount({ onSaveItem });
+    fireEvent.click(screen.getByRole('button', { name: '추가' }));
+    const dialog = screen.getByRole('dialog', { name: '같이 보기 새 항목' });
+    fireEvent.change(within(dialog).getByPlaceholderText('제목'), { target: { value: '여행' } });
+    fireEvent.change(within(dialog).getByLabelText(/^날짜/), { target: { value: '2026-10-23' } });
+    // 종료일이 시작일보다 앞서면 저장하지 않는다.
+    fireEvent.change(within(dialog).getByLabelText(/^종료일/), { target: { value: '2026-10-20' } });
+    fireEvent.click(within(dialog).getByRole('button', { name: '저장' }));
+    expect(onSaveItem).not.toHaveBeenCalled();
+    expect(within(dialog).getByRole('alert').textContent).toContain('종료일은 시작일보다 앞설 수 없습니다');
+
+    fireEvent.change(within(dialog).getByLabelText(/^종료일/), { target: { value: '2026-10-25' } });
+    fireEvent.click(within(dialog).getByRole('button', { name: '저장' }));
+    const saved = onSaveItem.mock.calls[0]![0] as SharedTodoItem;
+    expect(sharedView(saved)).toMatchObject({ startDate: '2026-10-23', endDate: '2026-10-25' });
+    // 같이 보기에만 만든 항목은 견줄 원본이 없어 '수정됨' 을 적지 않는다.
+    expect(within(dialog).queryByText('수정됨')).toBeNull();
+  });
+
+  it("'수정됨' 은 원본에서 온 항목의 고친 칸에만 붙는다", () => {
+    mount({ items: [applyOverrides(mine(task()), { startDate: '2026-09-27' }, ME)] });
+    const dialog = open('병원 예약');
+    expect(within(dialog).getAllByText('수정됨')).toHaveLength(1);
+    expect(within(dialog).getByLabelText(/^종료일/)).toHaveValue('');
+  });
 });
 
 /*
