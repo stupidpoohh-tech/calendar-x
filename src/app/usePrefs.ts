@@ -14,12 +14,7 @@ const DEFAULTS: Prefs = {
   lens: 'all',
   sharedTab: 'calendar',
   view: 'calendar',
-  /*
-    공유 일정은 리스트가 기본이다. 둘이 보는 목록은 "지금 뭐가 남았나" 가 먼저이고,
-    달력은 날짜가 붙은 항목을 볼 때 켠다. 개인 화면은 그대로 달력이 기본이다 —
-    한쪽을 바꿨다고 다른 쪽까지 바뀌면 고친 적 없는 화면이 바뀐 것으로 보인다.
-  */
-  sharedView: 'list',
+  sharedView: 'calendar',
   weekStart: 'mon',
   pinCollapsed: {},
   debtsCollapsed: true,
@@ -33,10 +28,12 @@ function read(): Prefs {
   try {
     const raw = localStorage.getItem(PREF_KEY);
     if (!raw) return DEFAULTS;
-    const parsed = JSON.parse(raw) as Partial<Prefs> & { summaryLayoutVersion?: number };
+    const parsed = JSON.parse(raw) as Partial<Prefs> & { summaryLayoutVersion?: number; calendarDefaultVersion?: number };
     // Apply the compact summary layout once; subsequent expand/collapse choices persist.
     const compact = parsed.summaryLayoutVersion === 1 ? {} : { todayCollapsed: true, budgetsCollapsed: true, debtsCollapsed: true };
-    return { ...DEFAULTS, ...parsed, ...compact, pinCollapsed: { ...(parsed.pinCollapsed ?? {}) } };
+    // Switch existing devices once; later explicit list/calendar choices remain independent.
+    const calendar = parsed.calendarDefaultVersion === 1 ? {} : { view: 'calendar' as const, sharedView: 'calendar' as const };
+    return { ...DEFAULTS, ...parsed, ...compact, ...calendar, pinCollapsed: { ...(parsed.pinCollapsed ?? {}) } };
   } catch {
     return DEFAULTS;
   }
@@ -51,7 +48,7 @@ export function usePrefs() {
   }, []);
 
   useEffect(() => {
-    try { localStorage.setItem(PREF_KEY, JSON.stringify({ ...prefs, summaryLayoutVersion: 1 })); } catch { /* 저장소 접근 불가 */ }
+    try { localStorage.setItem(PREF_KEY, JSON.stringify({ ...prefs, summaryLayoutVersion: 1, calendarDefaultVersion: 1 })); } catch { /* 저장소 접근 불가 */ }
   }, [prefs]);
 
   // 'system' 이면 data-theme 을 지워 prefers-color-scheme 이 결정하게 둔다.

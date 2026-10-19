@@ -1948,7 +1948,7 @@ function Workspace({ uid, user, onSignOut }: WorkspaceProps) {
                 aria-selected={lens === l.id}
                 className={'lens' + (lens === l.id ? ' on' : '')}
                 style={{ ['--ac' as string]: `var(${l.accentVar})` }}
-                onClick={() => { set('lens', l.id); setFilters(emptyFilters()); }}
+                onClick={() => { set('lens', l.id); if (l.id === 'task') set('view', 'calendar'); setFilters(emptyFilters()); }}
               >
                 <span className="lens-dot" />{l.label}
               </button>
@@ -2138,7 +2138,7 @@ function Workspace({ uid, user, onSignOut }: WorkspaceProps) {
           <>
           <Dashboard today={today} store={store} showMoney={layout.ledger} showNotes={layout.notes} demo={isAnon}
             cursor={cursor} onCursorChange={setCursor} weekStart={prefs.weekStart} query={dashboardQuery}
-            onNavigate={(next, list) => { set('lens', next); if (list) set('view', 'list'); setFilters(emptyFilters()); if (next === 'money') { setLedgerTab('history'); setLedgerPeriod(cursorISO.slice(0, 7)); } }}
+            onNavigate={(next) => { set('lens', next); if (next === 'task') set('view', 'calendar'); setFilters(emptyFilters()); if (next === 'money') { setLedgerTab('history'); setLedgerPeriod(cursorISO.slice(0, 7)); } }}
             onEntry={openEdit} onStatus={handleStatus}
             onCreate={(kind, date) => openCreate({ ...newEntry(kind, { startDate: date }), startDate: date })} />
           <div className="utility-strip">{pinnedSection}</div>

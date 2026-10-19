@@ -93,8 +93,8 @@ export function Onboarding({ onFinish }: { onFinish: (outcome: OnboardingOutcome
         <div className="ob-artwork">
           <h2 className="sr-only" id={titleId} ref={heading} tabIndex={-1}>{current.title}</h2>
           <p className="sr-only" id={bodyId}>{current.body}</p>
-          <svg className="ob-cropped-art" viewBox={step === 4 ? '225 164 998 766' : '225 164 998 740'} aria-hidden="true" focusable="false">
-            <image href={current.image} x="0" y="0" width="1448" height="1086" />
+          <svg className="ob-cropped-art" viewBox={step === 4 ? '62 154 1180 905' : '225 164 998 740'} aria-hidden="true" focusable="false">
+            <image href={current.image} x="0" y="0" width={step === 4 ? 1284 : 1448} height={step === 4 ? 1225 : 1086} />
           </svg>
         </div>
         <footer className="ob-footer">

@@ -4,7 +4,7 @@ import { useDemoStore } from '../app/useDemoStore';
 import { FEED_ERROR, FEED_LOADING } from '../app/useStore';
 import { newEntry, newMoney, setRecurrence } from '../domain/entry';
 import { Dashboard } from './Dashboard';
-import { dashboardEntries, dashboardSpending } from '../domain/dashboard';
+import { dashboardCashDays, dashboardEntries, dashboardSpending } from '../domain/dashboard';
 
 afterEach(cleanup);
 const TODAY = '2026-10-30';
@@ -51,8 +51,8 @@ describe('참고 화면 대시보드', () => {
     expect(props.onEntry).toHaveBeenCalledWith(entry);
     fireEvent.click(screen.getByRole('button', { name: '선택한 날짜에 일정 추가' }));
     expect(props.onCreate).toHaveBeenCalledWith('task', '2026-10-31');
-    fireEvent.click(within(screen.getByRole('navigation', { name: '대시보드 메뉴' })).getByRole('button', { name: '할 일' }));
-    expect(props.onNavigate).toHaveBeenCalledWith('task', true);
+    fireEvent.click(within(screen.getByRole('navigation', { name: '대시보드 메뉴' })).getByRole('button', { name: '캘린더' }));
+    expect(props.onNavigate).toHaveBeenCalledWith('task');
   });
   it('시간 있는 일정과 종일 할 일을 구분하고 검색을 두 패널에 적용한다', () => {
     const props = setup();
@@ -97,5 +97,53 @@ describe('참고 화면 대시보드', () => {
     expect(result.period.end).toBe('2026-10-24');
     expect(result.spending).toBe(1000);
     expect(dashboardSpending({ ...store, entries: [{ ...entry, money: { ...entry.money!, currency: 'USD' } }] }, '2026-10').supported).toBe(false);
+  });
+  it('메뉴 네 개를 각각 연결하고 오늘·할 일 메뉴는 제거한다', () => {
+    const props = setup();
+    render(<Dashboard {...props} />);
+    const nav = within(screen.getByRole('navigation', { name: '대시보드 메뉴' }));
+    expect(nav.getAllByRole('button').map(b => b.textContent)).toEqual(['대시보드', '캘린더', '노트', '가계부']);
+    for (const [name, lens] of [['대시보드', 'all'], ['캘린더', 'task'], ['노트', 'idea'], ['가계부', 'money']]) {
+      fireEvent.click(nav.getByRole('button', { name }));
+      expect(props.onNavigate).toHaveBeenLastCalledWith(lens);
+    }
+  });
+  it('일정과 모든 노트를 달력에 표시하고 금융 상세 대신 날짜별 합계를 낸다', () => {
+    const props = setup();
+    const notes = Array.from({ length: 7 }, (_, i) => newEntry('idea', { id: 'n' + i, title: '기록 ' + i, startDate: TODAY }));
+    const expense = newEntry('money', { id: 'm', title: '숨길 상세 거래명', startDate: TODAY, money: newMoney({ type: 'expense', status: 'actual', amountMinor: 12000 }) });
+    const task = newEntry('task', { id: 't', title: '회의', startDate: TODAY });
+    render(<Dashboard {...props} store={{ ...props.store, entries: [...notes, task, expense] }} />);
+    const day = within(screen.getByRole('region', { name: TODAY }));
+    expect(day.getByText('회의')).toBeInTheDocument();
+    notes.forEach(n => expect(day.getByText(n.title)).toBeInTheDocument());
+    expect(day.getByText('출금 −12,000')).toBeInTheDocument();
+    expect(screen.queryByText('숨길 상세 거래명')).not.toBeInTheDocument();
+    const panel = within(screen.getByRole('region', { name: '이번 달 노트' }));
+    notes.forEach(n => expect(panel.getByText(n.title)).toBeInTheDocument());
+    fireEvent.click(day.getByText('기록 6'));
+    expect(props.onEntry).toHaveBeenCalledWith(notes[6]);
+  });
+  it('현금 합계는 실제·예정을 구분하며 중복과 카드 사용을 제외한다', () => {
+    const actual = newEntry('money', { id: 'a', startDate: TODAY, money: newMoney({ type: 'income', status: 'actual', amountMinor: 30000 }) });
+    const plan = newEntry('money', { id: 'p', startDate: TODAY, money: newMoney({ type: 'expense', status: 'planned', amountMinor: 9000 }) });
+    const card = newEntry('money', { id: 'c', startDate: TODAY, money: newMoney({ type: 'expense', flow: 'cardSpend', status: 'actual', amountMinor: 5000 }) });
+    expect(dashboardCashDays([actual, actual, plan, card], TODAY, TODAY)[TODAY]).toEqual({ income: 30000, outflow: 0, plannedIncome: 0, plannedOutflow: 9000, supported: true });
+    expect(dashboardCashDays([{ ...actual, money: { ...actual.money!, currency: 'USD' } }], TODAY, TODAY)[TODAY]?.supported).toBe(false);
+  });
+  it('기간 예정은 일할 배분하고 실제 기간 거래는 거래일에만 합산한다', () => {
+    const span = newEntry('money', { id: 'span', startDate: '2026-10-01', endDate: '2026-10-03', money: newMoney({ type: 'expense', status: 'planned', amountMinor: 1000 }) });
+    const actual = { ...span, id: 'actual', money: { ...span.money!, status: 'actual' as const } };
+    const days = dashboardCashDays([span, actual], '2026-10-01', '2026-10-03');
+    expect(Object.values(days).reduce((n, d) => n + d.plannedOutflow, 0)).toBe(1000);
+    expect(days['2026-10-01']?.outflow).toBe(1000);
+    expect(days['2026-10-02']?.outflow).toBe(0);
+  });
+  it('확정된 반복 회차를 예정 합계에 중복 표시하지 않는다', () => {
+    const plan = setRecurrence(newEntry('money', { id: 'plan', startDate: '2026-10-01', money: newMoney({ type: 'expense', status: 'planned', amountMinor: 1000 }) }), { freq: 'daily', interval: 1, until: null, count: null });
+    const actual = newEntry('money', { id: 'actual', startDate: '2026-10-02', money: newMoney({ type: 'expense', status: 'actual', amountMinor: 900, plannedRef: { entryId: 'plan', date: '2026-10-02' } }) });
+    const days = dashboardCashDays([plan, actual], '2026-10-01', '2026-10-03');
+    expect(days['2026-10-02']).toMatchObject({ outflow: 900, plannedOutflow: 0 });
+    expect(days['2026-10-03']?.plannedOutflow).toBe(1000);
   });
 });
