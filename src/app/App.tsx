@@ -289,6 +289,9 @@ function Workspace({ uid, user, onSignOut }: WorkspaceProps) {
     if (ok) setShowAuth(true);
     return ok;
   }, [dialog]);
+  // 로그인 · 가입에 성공하면 그 창을 닫는다. 남겨 두면 로그인된 화면 위에 로그인 양식이 그대로 떠 있고,
+  // 로그아웃하는 순간 옛 창이 다시 나타난다. 렌더에서도 막아 한 번도 겹쳐 그리지 않는다(아래 `showAuth && isAnon`).
+  useEffect(() => { if (!isAnon) setShowAuth(false); }, [isAnon]);
 
   /*
     숨긴 렌즈(가계부 · 노트)를 기억하고 있으면 캘린더로 연다 — 직접 · 낡은 링크도 같다. 기억 자체는
@@ -2496,7 +2499,7 @@ function Workspace({ uid, user, onSignOut }: WorkspaceProps) {
         />
       )}
 
-      {showAuth && (
+      {showAuth && isAnon && (
         <div className="mod-back" onClick={() => setShowAuth(false)}>
           <div className="mod auth-mod" role="dialog" aria-modal="true" onClick={(e) => e.stopPropagation()}>
             <Auth onBack={() => setShowAuth(false)} />
