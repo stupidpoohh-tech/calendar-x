@@ -1,3 +1,4 @@
+import { DEVICE_UID } from '../data/deviceStore';
 /**
  * 서버 쓰기 한 건을 보내고, 거절당하면 **값을 붙잡아 둔다.**
  *
@@ -141,7 +142,7 @@ export function useWriteQueue(uid: string | null): WriteQueue {
     // 화면에 없는 목록을 가리키는 안내가 된다. 값은 그 계정 자리에 남아 있다.
     if (shownUid.current !== owner) return;
     dialog.toast(
-      `${input.label}${objectParticle(input.label)} 서버에 저장하지 못했습니다. `
+      `${input.label}${objectParticle(input.label)} ${owner === DEVICE_UID ? '기기에' : '서버에'} 저장하지 못했습니다. `
       + '적은 내용은 아래 "저장하지 못한 것" 에 남겨 두었습니다.',
       'bad',
     );
@@ -182,7 +183,7 @@ export function useWriteQueue(uid: string | null): WriteQueue {
    * 있거나 판정할 수 없는 종류면 사용자에게 묻는다.
    */
   const retryOne = useCallback(async (op: PendingOp, owner: string): Promise<boolean> => {
-    const fresh = await freshnessOf(db, owner, op);
+    const fresh = owner === DEVICE_UID ? 'unknown' : await freshnessOf(db, owner, op);
     if (fresh !== 'fresh') {
       const ok = await dialog.confirm({
         title: fresh === 'stale' ? '더 새로운 내용이 서버에 있습니다' : '최신 여부를 가릴 수 없습니다',

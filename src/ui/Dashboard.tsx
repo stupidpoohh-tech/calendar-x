@@ -1,12 +1,14 @@
+import { balanceViewOn, headlineDate, horizonOf, calcScopeOf } from '../domain/tide';
+import { daysBetween } from '../domain/date';
 import { useMemo, useState } from 'react';
 import type { StoreState } from '../app/useStore';
 import { addDaysISO, endOfMonth, fmtDayShort, monthGrid, parseDate, toISO, weekdayIndex } from '../domain/date';
 import { displayTitle, effectiveEndDate, isDone } from '../domain/entry';
-import { dashboardCashDays, dashboardEntries, dashboardSpending } from '../domain/dashboard';
+import { dashboardCashDays, dashboardEntries } from '../domain/dashboard';
 import { COLORS, colorHex } from '../domain/constants';
 import { formatAmount } from '../domain/money';
 import type { ColorId, Entry, LensId, TaskStatus, WeekStart } from '../domain/types';
-import { calcCaveat, calcStateOf } from './calcState';
+import { calcCaveat, calcNotice, calcStateOf } from './calcState';
 import { Icon } from './Icon';
 import { DashboardCalendar, DashboardCashSummary } from './DashboardCalendar';
 import '../styles/dashboard.css';
@@ -41,9 +43,17 @@ export function Dashboard({ today, cursor, onCursorChange, weekStart, query, sto
   const todos = dayTasks.filter(e => !e.startTime && effectiveEndDate(e) === e.startDate);
   const recentNotes = notes.filter(matches);
   const colors = COLORS.filter(c => tasks.some(e => e.color === c.id) || notes.some(e => e.color === c.id));
-  const money = dashboardSpending(store, month);
-  const moneyReady = calcStateOf(store.display).kind === 'ready' && calcStateOf(store.ledgerMeta).kind === 'ready';
-  const percentage = money.budget.budgeted > 0 ? Math.round(money.budget.actualInBudgeted / money.budget.budgeted * 100) : null;
+  const runway = useMemo(() => {
+    const res = { budgets: store.budgets, reserves: store.reserves, reserveUsage: store.reserveUsage,
+      cards: store.cards, cardEntries: store.cardLinked };
+    const horizon = horizonOf(store.tideEntries, today);
+    const bind = headlineDate(store.accounts, store.tideEntries, today, res);
+    return { view: balanceViewOn(store.accounts, store.tideEntries, bind, today, res),
+      scope: calcScopeOf(store.accounts, store.tideEntries, res), horizon,
+      days: Math.max(1, daysBetween(today, horizon.end) + 1) };
+  }, [store.accounts, store.tideEntries, store.budgets, store.reserves, store.reserveUsage, store.cards, store.cardLinked, today]);
+  const moneyState = calcStateOf(store.calc);
+  const moneyReady = moneyState.kind === 'ready';
   const notice = state.kind === 'error' ? '일정을 불러오지 못했습니다. 연결 상태를 확인해 주세요.'
     : state.kind === 'unconfirmed' ? '서버 연결 후 일정을 다시 확인합니다.' : '일정을 불러오는 중입니다.';
   const pick = (day: string) => {
@@ -105,13 +115,16 @@ export function Dashboard({ today, cursor, onCursorChange, weekStart, query, sto
       {showNotes && <section className="ref-panel" aria-label="이번 달 노트"><h2>노트 <small>{ready ? recentNotes.length : '—'}</small><button aria-label="노트 추가" onClick={() => onCreate('idea', selected)}><Icon.Plus size={17} /></button></h2>
         <div className="ref-panel-content" tabIndex={0}>{ready && (recentNotes.length ? recentNotes.map(e => <button key={e.id} className="ref-note" onClick={() => onEntry(e)}><span><Icon.List size={20} /></span><div><strong>{displayTitle(e)}</strong><small>{e.note || e.startDate}</small></div></button>) : <p className="ref-muted">이번 달 노트가 없습니다.</p>)}</div>
       </section>}
-      {showMoney && <section className="ref-panel ref-expense" aria-label="월 지출 요약"><h2>{month === today.slice(0, 7) ? '이번 달 지출' : cursor.getMonth() + 1 + '월 지출'}</h2>
-        {!moneyReady ? <p className="ref-muted">가계부 자료를 확인하는 중입니다.</p> : !money.supported ? <p className="ref-muted">통화가 다른 내역은 가계부에서 확인해 주세요.</p> : <>
-          <strong className="ref-expense-amount">{formatAmount(money.spending)}원</strong>
-          {percentage !== null ? <><progress value={Math.min(percentage, 100)} max={100} aria-label="월간 카테고리 예산 사용률" /><div className="ref-budget-caption"><span>월간 예산 {formatAmount(money.budget.budgeted)}원</span><strong>{percentage}%</strong></div>
-            {money.budget.actualInBudgeted !== money.spending && <small>예산 사용률은 월간 예산이 있는 항목만 비교합니다.</small>}</> : <p className="ref-muted">설정된 월간 카테고리 예산이 없습니다.</p>}
-          <small>{money.period.start.replaceAll('-', '.')} – {money.period.end.replaceAll('-', '.')} · 정산 기간</small>
-        </>}
+      {showMoney && <section className="ref-panel ref-expense" aria-label="며칠 버티나"><h2>며칠 버티나</h2>
+        {!moneyReady ? <p className="ref-muted">{calcNotice(moneyState)}</p>
+          : !runway.scope.ok ? <p className="ref-muted">통화와 계좌 연결을 가계부에서 확인해 주세요.</p>
+          : !store.accounts.length ? <p className="ref-muted">잔고를 입력하면 버틸 돈을 확인할 수 있습니다.</p> : <>
+            <p className="ref-muted">{runway.horizon.nextIncome ? '다음 입금(' + fmtDayShort(runway.horizon.nextIncome) + ') 전날까지' : '오늘부터 ' + runway.days + '일'} · 생활비·세이브 빼고 쓸 수 있는 돈</p>
+            <strong className="ref-runway-amount">₩ {formatAmount(runway.view.available)}</strong>
+            <p>이 돈으로 <b>{runway.days}일</b> 버티기 · 하루 <b>{formatAmount(Math.floor(runway.view.available / runway.days))}원</b></p>
+            {runway.view.available < 0 && <small>예정 지출을 감당하기에 부족합니다.</small>}
+            {calcCaveat(moneyState) && <small>{calcCaveat(moneyState)}</small>}
+          </>}
         <button className="ref-text-link" onClick={() => onNavigate('money')}>가계부 보기 <Icon.Chevron size={13} /></button>
       </section>}
     </aside>

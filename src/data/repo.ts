@@ -1,3 +1,4 @@
+import { DEVICE_UID, readDevice, watchDevice, deviceMeta, commitDevice, mergeDevice } from './deviceStore';
 /**
  * Firestore 저장 계층.
  *
@@ -185,6 +186,7 @@ export function subscribeEntriesForMonths(
   db: Firestore, uid: string, months: YearMonth[],
   cb: SnapSink<Entry>, onError: ErrorSink,
 ): Unsubscribe {
+  if (uid === DEVICE_UID) return watchDevice(d => d.entries.filter(e => e.ymSpan.some(m => months.includes(m))), value => cb(value, deviceMeta), error => onError('기기 저장소', error));
   // 달이 하나도 없으면 조회 자체가 성립하지 않는다. 캐시에서 온 빈 목록과 구분되도록
   // fromCache 를 세워 둔다 — 이 상태를 "자료 없음" 으로 읽으면 안 된다.
   if (months.length === 0) { cb([], { fromCache: true, hasPendingWrites: false }); return () => {}; }
@@ -212,6 +214,7 @@ export function subscribeRecurringEntries(
   db: Firestore, uid: string,
   cb: SnapSink<Entry>, onError: ErrorSink,
 ): Unsubscribe {
+  if (uid === DEVICE_UID) return watchDevice(d => d.entries.filter(e => e.isRecurring), value => cb(value, deviceMeta), error => onError('기기 저장소', error));
   const q = query(col(db, uid, COL.entries), where('isRecurring', '==', true));
   return onSnapshot(
     q, WITH_META,
@@ -223,6 +226,7 @@ export function subscribeRecurringEntries(
 export function subscribeAccounts(
   db: Firestore, uid: string, cb: SnapSink<Account>, onError: ErrorSink,
 ): Unsubscribe {
+  if (uid === DEVICE_UID) return watchDevice(d => d.accounts, value => cb(value, deviceMeta), error => onError('기기 저장소', error));
   return onSnapshot(
     col(db, uid, COL.accounts), WITH_META,
     keepingSorted(accountFromDoc, (a, b) => a.order - b.order, cb),
@@ -233,6 +237,7 @@ export function subscribeAccounts(
 export function subscribeDebts(
   db: Firestore, uid: string, cb: (v: Debt[]) => void, onError: ErrorSink,
 ): Unsubscribe {
+  if (uid === DEVICE_UID) return watchDevice(d => d.debts, value => cb(value), error => onError('기기 저장소', error));
   return onSnapshot(
     col(db, uid, COL.debts),
     (snap) => cb(mapSnap(snap, debtFromDoc).sort((a, b) => a.order - b.order)),
@@ -249,6 +254,7 @@ export function subscribeDebts(
 export function subscribeBudgets(
   db: Firestore, uid: string, cb: SnapSink<Budget>, onError: ErrorSink,
 ): Unsubscribe {
+  if (uid === DEVICE_UID) return watchDevice(d => d.budgets, value => cb(value, deviceMeta), error => onError('기기 저장소', error));
   return onSnapshot(
     col(db, uid, COL.budgets), WITH_META,
     keepingSorted(budgetFromDoc, (a, b) => a.startDate.localeCompare(b.startDate), cb),
@@ -259,6 +265,7 @@ export function subscribeBudgets(
 export function subscribeReserves(
   db: Firestore, uid: string, cb: SnapSink<Reserve>, onError: ErrorSink,
 ): Unsubscribe {
+  if (uid === DEVICE_UID) return watchDevice(d => d.reserves, value => cb(value, deviceMeta), error => onError('기기 저장소', error));
   return onSnapshot(
     col(db, uid, COL.reserves), WITH_META,
     keepingSorted(reserveFromDoc, (a, b) => a.name.localeCompare(b.name), cb),
@@ -269,6 +276,7 @@ export function subscribeReserves(
 export function subscribePins(
   db: Firestore, uid: string, cb: (v: Pin[]) => void, onError: ErrorSink,
 ): Unsubscribe {
+  if (uid === DEVICE_UID) return watchDevice(d => d.pins, value => cb(value), error => onError('기기 저장소', error));
   return onSnapshot(
     col(db, uid, COL.pins),
     (snap) => cb(mapSnap(snap, pinFromDoc).sort((a, b) => a.order - b.order)),
@@ -287,6 +295,7 @@ export function subscribePins(
 export function subscribeRecoveryRule(
   db: Firestore, uid: string, cb: (r: RecoveryRule) => void, onError: ErrorSink,
 ): Unsubscribe {
+  if (uid === DEVICE_UID) return watchDevice(d => d.recovery, value => cb(value), error => onError('기기 저장소', error));
   return onSnapshot(
     userDoc(db, uid),
     (snap) => cb(recoveryRuleFromDoc(snap.data()?.recovery)),
@@ -300,6 +309,7 @@ export function subscribeRecoveryRule(
 export function subscribeCategories(
   db: Firestore, uid: string, cb: SnapSink<Category>, onError: ErrorSink,
 ): Unsubscribe {
+  if (uid === DEVICE_UID) return watchDevice(d => d.categories, value => cb(value, deviceMeta), error => onError('기기 저장소', error));
   return onSnapshot(
     col(db, uid, COL.categories), WITH_META,
     keepingSorted(categoryFromDoc, (a, b) => a.order - b.order || a.name.localeCompare(b.name, 'ko'), cb),
@@ -310,6 +320,7 @@ export function subscribeCategories(
 export function subscribeCategoryBudgets(
   db: Firestore, uid: string, cb: SnapSink<CategoryBudget>, onError: ErrorSink,
 ): Unsubscribe {
+  if (uid === DEVICE_UID) return watchDevice(d => d.categoryBudgets, value => cb(value, deviceMeta), error => onError('기기 저장소', error));
   return onSnapshot(
     col(db, uid, COL.categoryBudgets), WITH_META,
     keepingIdentity(categoryBudgetFromDoc, cb),
@@ -321,6 +332,7 @@ export function subscribeCategoryBudgets(
 export function subscribeCards(
   db: Firestore, uid: string, cb: SnapSink<Card>, onError: ErrorSink,
 ): Unsubscribe {
+  if (uid === DEVICE_UID) return watchDevice(d => d.cards, value => cb(value, deviceMeta), error => onError('기기 저장소', error));
   return onSnapshot(
     col(db, uid, COL.cards), WITH_META,
     keepingIdentity(cardFromDoc, cb),
@@ -338,6 +350,7 @@ export function subscribeCards(
 export function subscribeCardLinkedEntries(
   db: Firestore, uid: string, cb: SnapSink<Entry>, onError: ErrorSink,
 ): Unsubscribe {
+  if (uid === DEVICE_UID) return watchDevice(d => d.entries.filter(e => !!e.money?.cardId), value => cb(value, deviceMeta), error => onError('기기 저장소', error));
   return onSnapshot(
     query(col(db, uid, COL.entries), where('money.cardId', '!=', null)), WITH_META,
     keepingIdentity(entryFromDoc, cb),
@@ -349,6 +362,7 @@ export function subscribeCardLinkedEntries(
 export function subscribeAnnualBudgets(
   db: Firestore, uid: string, cb: SnapSink<AnnualBudget>, onError: ErrorSink,
 ): Unsubscribe {
+  if (uid === DEVICE_UID) return watchDevice(d => d.annualBudgets, value => cb(value, deviceMeta), error => onError('기기 저장소', error));
   return onSnapshot(
     col(db, uid, COL.annualBudgets), WITH_META,
     keepingIdentity(annualBudgetFromDoc, cb),
@@ -360,6 +374,7 @@ export function subscribeAnnualBudgets(
 export function subscribeLedgerNotes(
   db: Firestore, uid: string, cb: SnapSink<LedgerNote>, onError: ErrorSink,
 ): Unsubscribe {
+  if (uid === DEVICE_UID) return watchDevice(d => d.ledgerNotes, value => cb(value, deviceMeta), error => onError('기기 저장소', error));
   return onSnapshot(
     col(db, uid, COL.ledgerNotes), WITH_META,
     keepingIdentity(ledgerNoteFromDoc, cb),
@@ -371,6 +386,7 @@ export function subscribeLedgerNotes(
 export function subscribeLedgerSettings(
   db: Firestore, uid: string, cb: (s: LedgerSettings, meta: SnapMeta) => void, onError: ErrorSink,
 ): Unsubscribe {
+  if (uid === DEVICE_UID) return watchDevice(d => d.ledger, value => cb(value, deviceMeta), error => onError('기기 저장소', error));
   return onSnapshot(
     userDoc(db, uid), WITH_META,
     (snap) => cb(ledgerSettingsFromDoc(snap.data()?.ledger), {
@@ -384,6 +400,7 @@ export function subscribeLedgerSettings(
 export function subscribeLayout(
   db: Firestore, uid: string, cb: (l: Layout, meta: SnapMeta) => void, onError: ErrorSink,
 ): Unsubscribe {
+  if (uid === DEVICE_UID) return watchDevice(d => d.layout, value => cb(value, deviceMeta), error => onError('기기 저장소', error));
   return onSnapshot(
     userDoc(db, uid), WITH_META,
     (snap) => cb(layoutFrom(snap.data()?.layout), {
@@ -395,6 +412,7 @@ export function subscribeLayout(
 
 /** 가입하는 순간 새 사용자의 구성을 적는다. 실패해도 지금까지의 구성(예상 잔고)으로 돌 뿐이다. */
 export function saveLayout(db: Firestore, uid: string, layout: Layout): Promise<void> {
+  if (uid === DEVICE_UID) return commitDevice({ kind: 'layout', label: '구성', summary: '', payload: layout });
   return setDoc(userDoc(db, uid), { layout }, { merge: true });
 }
 
@@ -405,6 +423,7 @@ export function saveLayout(db: Firestore, uid: string, layout: Layout): Promise<
  * 없던 시절의 문서는 실제 거래일 수 없으므로 빠져도 된다.
  */
 export async function fetchActualEntries(db: Firestore, uid: string): Promise<Entry[]> {
+  if (uid === DEVICE_UID) return (await readDevice()).entries.filter(e => e.money?.status === 'actual');
   const snap = await getDocs(query(col(db, uid, COL.entries), where('money.status', '==', 'actual')));
   return mapSnap(snap, entryFromDoc);
 }
@@ -419,6 +438,7 @@ export async function fetchActualEntries(db: Firestore, uid: string): Promise<En
 export function subscribeReserveLinkedEntries(
   db: Firestore, uid: string, cb: SnapSink<Entry>, onError: ErrorSink,
 ): Unsubscribe {
+  if (uid === DEVICE_UID) return watchDevice(d => d.entries.filter(e => !!e.money?.reserveId), value => cb(value, deviceMeta), error => onError('기기 저장소', error));
   return onSnapshot(
     query(col(db, uid, COL.entries), where('money.reserveId', '!=', null)), WITH_META,
     keepingIdentity(entryFromDoc, cb),
@@ -435,6 +455,7 @@ export function subscribeReserveLinkedEntries(
 export function subscribeActualEntries(
   db: Firestore, uid: string, cb: SnapSink<Entry>, onError: ErrorSink,
 ): Unsubscribe {
+  if (uid === DEVICE_UID) return watchDevice(d => d.entries.filter(e => e.money?.status === 'actual'), value => cb(value, deviceMeta), error => onError('기기 저장소', error));
   return onSnapshot(
     query(col(db, uid, COL.entries), where('money.status', '==', 'actual')), WITH_META,
     keepingIdentity(entryFromDoc, cb),
@@ -444,6 +465,7 @@ export function subscribeActualEntries(
 
 /** 한 건. 화면 · 계산 · 결산 구독 어디에도 없는 원본을 열 때 쓴다. 없으면 null. */
 export async function fetchEntry(db: Firestore, uid: string, id: string): Promise<Entry | null> {
+  if (uid === DEVICE_UID) return (await readDevice()).entries.find(e => e.id === id) ?? null;
   const snap = await getDoc(docIn(db, uid, COL.entries, id));
   return snap.exists() ? entryFromDoc(snap.id, snap.data() as Record<string, unknown>) : null;
 }
@@ -456,6 +478,7 @@ export async function fetchEntry(db: Firestore, uid: string, id: string): Promis
 export async function fetchConfirmationsOf(
   db: Firestore, uid: string, planId: string,
 ): Promise<{ entries: Entry[]; complete: boolean }> {
+  if (uid === DEVICE_UID) return { entries: (await readDevice()).entries.filter(e => e.money?.plannedRef?.entryId === planId), complete: true };
   const snap = await getDocs(query(col(db, uid, COL.entries), where('money.plannedRef.entryId', '==', planId)));
   return { entries: mapSnap(snap, entryFromDoc), complete: !snap.metadata.fromCache };
 }
@@ -468,6 +491,7 @@ export async function fetchConfirmationsOf(
 export async function fetchPocketEntries(
   db: Firestore, uid: string, budgetId: string,
 ): Promise<{ entries: Entry[]; complete: boolean }> {
+  if (uid === DEVICE_UID) return { entries: (await readDevice()).entries.filter(e => e.money?.budgetId === budgetId), complete: true };
   const snap = await getDocs(query(col(db, uid, COL.entries), where('money.budgetId', '==', budgetId)));
   return { entries: mapSnap(snap, entryFromDoc), complete: !snap.metadata.fromCache };
 }
@@ -480,6 +504,7 @@ export async function fetchPocketEntries(
 export async function fetchLedgerFromServer(db: Firestore, uid: string): Promise<{
   entries: Entry[]; accounts: Account[]; budgets: Budget[]; reserves: Reserve[]; cards: Card[];
 }> {
+  if (uid === DEVICE_UID) return readDevice();
   const [e, a, b, r, c] = await Promise.all([
     getDocsFromServer(col(db, uid, COL.entries)),
     getDocsFromServer(col(db, uid, COL.accounts)),
@@ -609,6 +634,7 @@ export async function fetchAll(db: Firestore, uid: string): Promise<{
   categories: Category[]; categoryBudgets: CategoryBudget[]; ledgerNotes: LedgerNote[];
   annualBudgets: AnnualBudget[]; cards: Card[];
 }> {
+  if (uid === DEVICE_UID) return readDevice();
   const [e, a, d, p, b, r, c, cb, ln, ab, cd] = await Promise.all([
     getDocs(col(db, uid, COL.entries)),
     getDocs(col(db, uid, COL.accounts)),
@@ -639,12 +665,14 @@ export async function fetchAll(db: Firestore, uid: string): Promise<{
 
 /** 가계부 설정을 읽는다. 백업에 싣는다. */
 export async function fetchLedgerSettings(db: Firestore, uid: string): Promise<LedgerSettings> {
+  if (uid === DEVICE_UID) return (await readDevice()).ledger;
   const snap = await getDoc(userDoc(db, uid));
   return ledgerSettingsFromDoc(snap.data()?.ledger);
 }
 
 /** 이웃 필드(recovery · migratedAt)를 지우지 않도록 merge 로 쓴다. */
 export function saveLedgerSettings(db: Firestore, uid: string, settings: LedgerSettings): Promise<void> {
+  if (uid === DEVICE_UID) return commitDevice({ kind: 'ledgerSettings', label: '가계부 설정', summary: '', payload: settings });
   return setDoc(userDoc(db, uid), { ledger: ledgerSettingsToDoc(settings) }, { merge: true });
 }
 
@@ -673,6 +701,7 @@ export async function writeMany(
   },
   onProgress?: (done: number, total: number) => void,
 ): Promise<WriteManyResult> {
+  if (uid === DEVICE_UID) return mergeDevice(payload);
   type Job = { name: string; id: string; data: Record<string, unknown> };
   const jobs: Job[] = [
     ...(payload.entries ?? []).map((x) => ({ name: COL.entries, id: x.id, data: entryToDoc(x) })),
@@ -750,6 +779,7 @@ export async function createManyIfAbsent(
   },
   onProgress?: (done: number, total: number) => void,
 ): Promise<CreateManyResult> {
+  if (uid === DEVICE_UID) return mergeDevice(payload, true);
   type Job = { name: string; id: string; data: Record<string, unknown> };
   const jobs: Job[] = [
     ...(payload.entries ?? []).map((x) => ({ name: COL.entries, id: x.id, data: entryToDoc(x) })),
@@ -902,6 +932,7 @@ export function earliestAsOfOf(accounts: readonly Pick<Account, 'asOf'>[]): stri
  * 사용자가 한 번 더 누르면 대출이 두 건으로 늘어나는 식의 사고가 난다.
  */
 export async function readMigrationMark(db: Firestore, uid: string): Promise<string | null> {
+  if (uid === DEVICE_UID) return null;
   try {
     const snap = await getDoc(userDoc(db, uid));
     const value = snap.data()?.migratedAt;
@@ -912,5 +943,6 @@ export async function readMigrationMark(db: Firestore, uid: string): Promise<str
 }
 
 export function markMigrated(db: Firestore, uid: string, at = new Date().toISOString()): Promise<void> {
+  if (uid === DEVICE_UID) return Promise.resolve();
   return setDoc(userDoc(db, uid), { migratedAt: at }, { merge: true });
 }

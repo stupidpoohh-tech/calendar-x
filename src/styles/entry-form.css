@@ -1,0 +1,58 @@
+.mod.money-entry { max-width:560px; }
+.money-entry .mod-head { padding:14px 22px; }
+.money-entry .mod-body { padding:20px 22px; gap:12px; }
+.money-entry-title { margin:0; font-size:1.25rem; letter-spacing:-.03em; font-weight:700; }
+.money-entry .mod-status { align-self:flex-start; background:var(--bg-soft); border-radius:8px; padding:3px; }
+.money-entry .mod-status .seg-btn { min-height:34px; padding:6px 15px; }
+.money-entry .mod-row { align-items:center; gap:14px; }
+.money-entry .mod-lbl { width:76px; flex:0 0 76px; font-size:.75rem; line-height:1.45; }
+.money-entry .mod-amt { padding:8px 14px; border-radius:12px; border:1px solid var(--line); background:var(--bg-soft); }
+.money-entry .mod-amt input { border:0; background:transparent; font-size:1.7rem; font-weight:700; min-height:42px; padding:0; }
+.money-entry .mod-input { min-height:40px; border-radius:8px; }
+.money-entry .mod-input.note { min-height:80px; }
+.money-entry .chip { min-height:30px; padding:5px 10px; border-radius:7px; }
+.money-entry .chip.on { background:var(--accent-soft); color:var(--accent); border-color:transparent; }
+.money-entry .mod-kind.on { background:var(--accent); color:white; }
+.money-entry .mod-hint { line-height:1.55; }
+.money-entry .mod-foot { padding:14px 22px; background:var(--bg); border-top:1px solid var(--line); }
+.money-entry .mod-foot .btn { min-height:40px; padding:9px 19px; }
+.category-select { flex:1; min-width:0; }
+.category-select select { width:100%; }
+.money-extra-toggle { display:flex; align-items:center; justify-content:space-between; gap:12px; width:100%; border:0; border-top:1px solid var(--line); background:transparent; color:var(--ink); padding:17px 0 0; text-align:left; cursor:pointer; font:inherit; font-weight:600; }
+.money-extra-toggle small { display:block; margin-top:4px; color:var(--ink-3); font-size:.75rem; font-weight:400; }
+.entry-extra-fields { display:flex; flex-direction:column; gap:16px; }
+.entry-extra-fields[hidden] { display:none; }
+.device-notice { display:flex; flex-shrink:0; align-items:center; justify-content:space-between; gap:12px; padding:10px 20px; background:var(--bg-soft); border-bottom:1px solid var(--line); font-size:.75rem; }
+.device-notice strong,.device-notice small { display:block; }
+.device-notice small { margin-top:3px; color:var(--ink-3); line-height:1.5; }
+.device-notice p { color:var(--expense,#b34545); max-width:650px; }
+.device-notice .btn { flex-shrink:0; font-size:.75rem; }
+.device-backup-progress { max-width:min(420px,calc(100vw - 40px)); padding:24px; border:1px solid var(--line); border-radius:16px; background:var(--bg); color:var(--ink); }
+.device-backup-progress::backdrop { background:rgb(15 23 42 / .35); }
+.device-backup-progress h2 { font-size:1.1rem; }
+.device-backup-progress p { color:var(--ink-2); line-height:1.6; }
+.ref-runway-amount { display:block; margin:12px 0; font-size:1.7rem; font-weight:750; letter-spacing:-.035em; }
+@media(max-width:600px) {
+  .money-entry .mod-head { padding:12px 16px; }
+  .money-entry .mod-body { padding:16px; gap:12px; }
+  .money-entry .mod-row { gap:10px; }
+  .money-entry .mod-lbl { width:60px; flex-basis:60px; }
+  .money-entry .mod-foot { padding:12px 16px; }
+  .device-notice { padding:8px 12px; gap:8px; flex-wrap:wrap; }
+}
+/* Touch browsers: avoid full-screen backdrop movement plus keyboard focus during opening.
+   Animate only the small dialog surface; controls give immediate, stable tap feedback. */
+@media(hover:none) and (pointer:coarse) {
+  button,a,summary,input,select,textarea { touch-action:manipulation; }
+  .mod-back { animation:none; }
+  .mod,.sheet { animation:touch-dialog-in 160ms ease-out both; }
+  .ob-backdrop { backdrop-filter:none; }
+  .workspace-menu button:hover { background:transparent; color:#dce4f2; }
+  .workspace-menu button[aria-current="page"]:hover { color:#233857; }
+  .workspace-menu button:active { opacity:.8; }
+}
+@keyframes touch-dialog-in {
+  from { opacity:0; transform:translate3d(0,6px,0); }
+  to { opacity:1; transform:translate3d(0,0,0); }
+}
+@media(prefers-reduced-motion:reduce) { .mod,.sheet { animation:none; } }

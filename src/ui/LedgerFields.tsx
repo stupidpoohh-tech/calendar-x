@@ -19,6 +19,7 @@ import type { Account, Budget, Card, Category, DateISO, Debt, Entry, MoneyFields
 interface Props {
   /** 문서 id. 잔고 반영 판정(같은 날 고른 목록)에 쓴다. */
   entryId: string;
+  compactCategory?: boolean;
   type: 'income' | 'expense';
   date: DateISO;
   money: MoneyFields;
@@ -68,7 +69,7 @@ const dayLabel = (iso: string) => `${Number(iso.slice(5, 7))}/${Number(iso.slice
 const NO_RESERVES: readonly Reserve[] = [];
 
 export function LedgerFields({
-  entryId, type, date, money, onMoney, categories, categoriesReady, onSeedCategories,
+  entryId, compactCategory = false, type, date, money, onMoney, categories, categoriesReady, onSeedCategories,
   accounts, pockets, debts, only, reflected, onReflected, reserves = NO_RESERVES, recurring = false,
   cards = NO_CARDS, cardEntries = NO_ENTRIES, todayISO = date, onRegisterCard,
 }: Props) {
@@ -113,6 +114,18 @@ export function LedgerFields({
         결제수단 (P4). 카드로 쓴 돈은 오늘 소비로 세고(현금 0) 결제일에 대금으로 나간다. 등록한 카드의 카드 사용은
         생활비 · 세이브에 걸 수 있다(P1-D). 기본은 현금 · 계좌이고, 카드가 없으면 그 자리에서 등록하러 간다.
       */}
+      {!isLoan && !isCardPay && compactCategory && <div className="mod-row">
+        <label className="mod-lbl" htmlFor={'category-' + entryId}>카테고리</label>
+        <div className="category-select">
+          <select id={'category-' + entryId} className="mod-input" value={money.categoryId ?? ''} onChange={e => onMoney({ categoryId: e.target.value || null })} disabled={!categoriesReady}>
+            <option value="">{categoriesReady ? '카테고리 선택 (선택 사항)' : '불러오는 중…'}</option>
+            {pickedHidden && picked && <option value={picked.id}>{picked.name}{picked.archived ? ' (보관)' : ''}</option>}
+            {!picked && money.categoryId && <option value={money.categoryId}>알 수 없는 카테고리</option>}
+            {pickable.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+          </select>
+          {categoriesReady && !pickable.length && onSeedCategories && <button type="button" className="btn" onClick={onSeedCategories}>기본 카테고리 만들기</button>}
+        </div>
+      </div>}
       {showMethod && (
         <div className="mod-row">
           <span className="mod-lbl">결제수단</span>
@@ -221,7 +234,7 @@ export function LedgerFields({
         </p>
       )}
 
-      {!isLoan && !isCardPay && <div className="mod-row">
+      {!compactCategory && !isLoan && !isCardPay && <div className="mod-row">
         <span className="mod-lbl">카테고리</span>
         <div className="mod-chips">
           {pickable.map((c) => (
@@ -411,3 +424,4 @@ export function LedgerFields({
     </>
   );
 }
+

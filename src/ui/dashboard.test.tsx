@@ -16,6 +16,24 @@ function setup() {
     onNavigate: vi.fn(), onEntry: vi.fn(), onStatus: vi.fn(), onCreate: vi.fn() };
 }
 describe('참고 화면 대시보드', () => {
+  it('지출 합계 대신 오늘부터 다음 입금 전까지 버틸 돈을 표시하고 월 이동으로 바뀌지 않는다', () => {
+    const props = setup();
+    const accounts = [{ id:'cash',name:'현금',balanceMinor:1000000,currency:'KRW',asOf:TODAY,
+      checkedAt:TODAY+'T09:00:00Z',order:0,createdAt:'',updatedAt:'' }];
+    const tideEntries = [
+      newEntry('money',{startDate:'2026-10-31',money:newMoney({type:'expense',status:'planned',amountMinor:200000})}),
+      newEntry('money',{startDate:'2026-11-05',money:newMoney({type:'income',status:'planned',amountMinor:3000000})}),
+    ];
+    const store = {...props.store,accounts,tideEntries,budgets:[],reserves:[],cards:[],cardLinked:[],reserveUsage:new Map<string,number>()};
+    const {rerender} = render(<Dashboard {...props} store={store}/>);
+    const panel = () => within(screen.getByRole('region',{name:'며칠 버티나'}));
+    expect(panel().getByText('₩ 800,000')).toBeInTheDocument();
+    expect(panel().getByText('6일')).toBeInTheDocument();
+    expect(panel().getByText('133,333원')).toBeInTheDocument();
+    expect(screen.queryByText('이번 달 지출')).toBeNull();
+    rerender(<Dashboard {...props} cursor={new Date(2026,10,1)} store={store}/>);
+    expect(panel().getByText('₩ 800,000')).toBeInTheDocument();
+  });
   it('월간 42칸의 반복과 여러 날 일정을 포함하며 범위 밖 일정은 제외한다', () => {
     const recurring = setRecurrence(newEntry('task', { id: 'repeat', startDate: '2026-01-01' }), { freq: 'daily', interval: 1, until: null, count: null });
     const span = newEntry('task', { id: 'span', startDate: '2026-09-27', endDate: '2026-09-29' });
@@ -34,15 +52,15 @@ describe('참고 화면 대시보드', () => {
   });
   it.each([FEED_LOADING, FEED_ERROR, { ...FEED_LOADING, ready: true, empty: true, fromCache: true }])('미확인 자료를 빈 일정이나 0원으로 표시하지 않는다', feed => {
     const props = setup();
-    render(<Dashboard {...props} store={{ ...props.store, display: feed, dashboardFeed: feed, ledgerMeta: feed }} />);
+    render(<Dashboard {...props} store={{ ...props.store, display: feed, dashboardFeed: feed, ledgerMeta: feed, calc: feed }} />);
     expect(screen.queryByText('등록된 일정이 없습니다.')).not.toBeInTheDocument();
-    expect(document.querySelector('.ref-expense-amount')).toBeNull();
+    expect(document.querySelector('.ref-runway-amount')).toBeNull();
   });
   it('날짜 선택·할 일 완료·상세·추가를 연결하고 숨긴 기능은 제외한다', () => {
     const props = setup();
     const entry = newEntry('task', { id: 't', title: '월말 점검', startDate: '2026-10-31' });
     render(<Dashboard {...props} showMoney={false} showNotes={false} store={{ ...props.store, entries: [entry] }} />);
-    expect(screen.queryByRole('region', { name: '월 지출 요약' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('region', { name: '며칠 버티나' })).not.toBeInTheDocument();
     expect(screen.queryByRole('region', { name: '이번 달 노트' })).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: '2026-10-31 상세 보기' }));
     fireEvent.click(screen.getByRole('checkbox', { name: '월말 점검 완료' }));
