@@ -1,20 +1,20 @@
 import { useMemo, useState } from 'react';
 import type { StoreState } from '../app/useStore';
-import { addDaysISO, endOfMonth, fmtDayShort, parseDate, toISO, weekdayIndex } from '../domain/date';
+import { addDaysISO, endOfMonth, fmtDayShort, monthGrid, parseDate, toISO, weekdayIndex } from '../domain/date';
 import { displayTitle, effectiveEndDate, isDone } from '../domain/entry';
-import { dashboardEntries, dashboardSpending } from '../domain/dashboard';
+import { dashboardCashDays, dashboardEntries, dashboardSpending } from '../domain/dashboard';
 import { COLORS, colorHex } from '../domain/constants';
 import { formatAmount } from '../domain/money';
 import type { ColorId, Entry, LensId, TaskStatus, WeekStart } from '../domain/types';
 import { calcCaveat, calcStateOf } from './calcState';
 import { Icon } from './Icon';
-import { MonthCalendar } from './MonthCalendar';
+import { DashboardCalendar, DashboardCashSummary } from './DashboardCalendar';
 import '../styles/dashboard.css';
 
 interface Props {
   today: string; cursor: Date; onCursorChange: (date: Date) => void; weekStart: WeekStart; query: string;
   store: StoreState; showMoney: boolean; showNotes: boolean; demo: boolean;
-  onNavigate: (lens: LensId, list?: boolean) => void;
+  onNavigate: (lens: LensId) => void;
   onEntry: (entry: Entry) => void; onStatus: (entry: Entry, status: TaskStatus) => void;
   onCreate: (kind: 'task' | 'idea', date: string) => void;
 }
@@ -27,12 +27,16 @@ export function Dashboard({ today, cursor, onCursorChange, weekStart, query, sto
   const selected = selection?.month === month ? selection.day : today.startsWith(month) ? today : month + '-01';
   const [view, setView] = useState<View>('month');
   const [hiddenColors, setHiddenColors] = useState<ColorId[]>([]);
-  const { tasks, notes } = useMemo(() => dashboardEntries(store.entries, cursor, weekStart), [store.entries, cursor, weekStart]);
+  const { tasks, notes, calendarEntries } = useMemo(() => dashboardEntries(store.entries, cursor, weekStart), [store.entries, cursor, weekStart]);
+  const cashDays = useMemo(() => {
+    const grid = monthGrid(cursor, weekStart);
+    return showMoney ? dashboardCashDays(store.entries, toISO(grid[0]!), toISO(grid[41]!)) : {};
+  }, [store.entries, cursor, weekStart, showMoney]);
   const state = calcStateOf(store.dashboardFeed ?? store.display);
   const ready = state.kind === 'ready';
   const matches = (e: Entry) => !hiddenColors.includes(e.color) && [displayTitle(e), e.location, e.note, ...e.tags].filter(Boolean).join(' ').toLocaleLowerCase().includes(query.trim().toLocaleLowerCase());
-  const shown = tasks.filter(matches);
-  const dayTasks = shown.filter(e => e.startDate <= selected && effectiveEndDate(e) >= selected);
+  const shown = calendarEntries.filter(e => (showNotes || e.kind !== 'idea') && matches(e));
+  const dayTasks = tasks.filter(matches).filter(e => e.startDate <= selected && effectiveEndDate(e) >= selected);
   const agenda = dayTasks.filter(e => !!e.startTime || effectiveEndDate(e) > e.startDate);
   const todos = dayTasks.filter(e => !e.startTime && effectiveEndDate(e) === e.startDate);
   const recentNotes = notes.filter(matches);
@@ -56,14 +60,13 @@ export function Dashboard({ today, cursor, onCursorChange, weekStart, query, sto
   const listDays = view === 'day' ? [selected] : view === 'week' ? Array.from({ length: 7 }, (_, i) => addDaysISO(weekFrom, i))
     : Array.from({ length: endOfMonth(cursor).getDate() }, (_, i) => month + '-' + String(i + 1).padStart(2, '0'));
   const nav = (mobile = false) => <nav className={mobile ? 'ref-bottom-nav' : 'ref-nav'} aria-label={mobile ? '모바일 주요 메뉴' : '대시보드 메뉴'}>
-    <button aria-current="page" onClick={() => setView('month')}><Icon.Calendar size={21} /><span>캘린더</span></button>
-    {!mobile && <button onClick={goToday}><Icon.Plus size={21} /><span>오늘</span></button>}
-    <button onClick={() => onNavigate('task', true)}><Icon.Check size={21} /><span>할 일</span></button>
+    <button aria-current="page" onClick={() => { setView('month'); onNavigate('all'); }}><Icon.Home size={21} /><span>대시보드</span></button>
+    <button onClick={() => onNavigate('task')}><Icon.Calendar size={21} /><span>캘린더</span></button>
     {showNotes && <button onClick={() => onNavigate('idea')}><Icon.List size={21} /><span>노트</span></button>}
     {showMoney && <button onClick={() => onNavigate('money')}><Icon.Wallet size={21} /><span>가계부</span></button>}
   </nav>;
   const entryButton = (e: Entry) => <button className="ref-event" key={e.id} onClick={() => onEntry(e)} style={{ borderColor: colorHex(e.color) }}>
-    <time>{e.startTime ?? '종일'}</time><span><strong>{displayTitle(e)}</strong>{e.location && <small>{e.location}</small>}</span>
+    <time>{e.kind === 'idea' ? '노트' : e.startTime ?? '종일'}</time><span><strong>{displayTitle(e)}</strong>{e.location && <small>{e.location}</small>}</span>
   </button>;
   return <div className="reference-dashboard">
     <aside className="ref-sidebar">
@@ -83,31 +86,31 @@ export function Dashboard({ today, cursor, onCursorChange, weekStart, query, sto
       {!ready && <p className="ref-notice" role="status">{notice}</p>}
       {ready && calcCaveat(state) && <p className="ref-notice" role="status">{calcCaveat(state)}</p>}
       {query && <p className="ref-search-result">“{query}” 검색 결과 · 현재 표시 기간</p>}
+      <p className="ref-calendar-key"><span>● 일정</span>{showNotes && <span>◇ 노트</span>}{showMoney && <span>입금·출금 합계 (원)</span>}<small>많은 항목은 날짜 안에서 스크롤</small></p>
       <div className="ref-calendar">
-        {view === 'month' ? <MonthCalendar cursor={cursor} onCursorChange={onCursorChange} entries={ready ? shown : []}
-          tideEntries={[]} tideMonths={[]} accounts={[]} hasBalance={false} lens="task" weekStart={weekStart} todayISO={today}
-          onEntryClick={onEntry} onDayOpen={pick} onDayCreate={day => onCreate('task', day)} />
+        {view === 'month' ? <DashboardCalendar cursor={cursor} entries={ready ? shown : []}
+          cashDays={ready ? cashDays : {}} weekStart={weekStart} today={today} selected={selected}
+          onEntry={onEntry} onSelect={pick} />
           : <div className={'ref-date-list ref-view-' + view}>{listDays.map(day => {
             const entries = shown.filter(e => e.startDate <= day && effectiveEndDate(e) >= day);
-            if (view === 'list' && entries.length === 0) return null;
-            return <section key={day}><button className="ref-date-heading" aria-pressed={day === selected} onClick={() => pick(day)}>{Number(day.slice(5, 7))}월 {fmtDayShort(day)}</button>{ready && entries.map(entryButton)}{ready && !entries.length && <p className="ref-muted">일정 없음</p>}</section>;
-          })}{ready && view === 'list' && !shown.some(e => e.startDate <= toISO(endOfMonth(cursor)) && effectiveEndDate(e) >= month + '-01') && <p className="ref-muted">이 달에 표시할 일정이 없습니다.</p>}</div>}
+            if (view === 'list' && entries.length === 0 && !cashDays[day]) return null;
+            return <section key={day}><button className="ref-date-heading" aria-pressed={day === selected} onClick={() => pick(day)}>{Number(day.slice(5, 7))}월 {fmtDayShort(day)}</button>{ready && entries.map(entryButton)}{ready && <DashboardCashSummary cash={cashDays[day]} />}{ready && !entries.length && !cashDays[day] && <p className="ref-muted">등록된 항목 없음</p>}</section>;
+          })}{ready && view === 'list' && !shown.some(e => e.startDate <= toISO(endOfMonth(cursor)) && effectiveEndDate(e) >= month + '-01') && !Object.keys(cashDays).some(day => day.startsWith(month)) && <p className="ref-muted">이 달에 표시할 항목이 없습니다.</p>}</div>}
       </div>
     </section>
     <aside className="ref-details" aria-label="선택한 날짜 요약">
       <header className="ref-date-title"><h2>{Number(selected.slice(5, 7))}월 {fmtDayShort(selected)}</h2><button aria-label="선택한 날짜에 일정 추가" onClick={() => onCreate('task', selected)}><Icon.Plus size={22} /></button></header>
       <section className="ref-panel" aria-label="선택한 날 일정"><h2>{selected === today ? '오늘 일정' : '선택한 날 일정'} <small>{ready ? agenda.length : '—'}</small></h2>
-        {ready ? agenda.length ? agenda.map(entryButton) : <p className="ref-muted">등록된 일정이 없습니다.</p> : <p className="ref-muted">{notice}</p>}
+        <div className="ref-panel-content" tabIndex={0}>{ready ? agenda.length ? agenda.map(entryButton) : <p className="ref-muted">등록된 일정이 없습니다.</p> : <p className="ref-muted">{notice}</p>}</div>
       </section>
       <section className="ref-panel" aria-label="선택한 날 할 일"><h2>할 일 <small>{ready ? todos.length : '—'}</small></h2>
-        {ready && (todos.length ? todos.map(e => <div className={'ref-todo' + (isDone(e) ? ' is-done' : '')} key={e.id}>
+        <div className="ref-panel-content" tabIndex={0}>{ready && (todos.length ? todos.map(e => <div className={'ref-todo' + (isDone(e) ? ' is-done' : '')} key={e.id}>
           <input type="checkbox" aria-label={displayTitle(e) + ' 완료'} checked={isDone(e)} onChange={() => onStatus(e, isDone(e) ? 'planned' : 'done')} />
           <button onClick={() => onEntry(e)}>{displayTitle(e)}</button>
-        </div>) : <p className="ref-muted">등록된 할 일이 없습니다.</p>)}
+        </div>) : <p className="ref-muted">등록된 할 일이 없습니다.</p>)}</div>
       </section>
       {showNotes && <section className="ref-panel" aria-label="이번 달 노트"><h2>노트 <small>{ready ? recentNotes.length : '—'}</small><button aria-label="노트 추가" onClick={() => onCreate('idea', selected)}><Icon.Plus size={17} /></button></h2>
-        {ready && (recentNotes.length ? recentNotes.slice(0, 3).map(e => <button key={e.id} className="ref-note" onClick={() => onEntry(e)}><span><Icon.List size={20} /></span><div><strong>{displayTitle(e)}</strong><small>{e.note || e.startDate}</small></div></button>) : <p className="ref-muted">이번 달 노트가 없습니다.</p>)}
-        {ready && recentNotes.length > 3 && <button className="ref-text-link" onClick={() => onNavigate('idea')}>노트 모두 보기</button>}
+        <div className="ref-panel-content" tabIndex={0}>{ready && (recentNotes.length ? recentNotes.map(e => <button key={e.id} className="ref-note" onClick={() => onEntry(e)}><span><Icon.List size={20} /></span><div><strong>{displayTitle(e)}</strong><small>{e.note || e.startDate}</small></div></button>) : <p className="ref-muted">이번 달 노트가 없습니다.</p>)}</div>
       </section>}
       {showMoney && <section className="ref-panel ref-expense" aria-label="월 지출 요약"><h2>{month === today.slice(0, 7) ? '이번 달 지출' : cursor.getMonth() + 1 + '월 지출'}</h2>
         {!moneyReady ? <p className="ref-muted">가계부 자료를 확인하는 중입니다.</p> : !money.supported ? <p className="ref-muted">통화가 다른 내역은 가계부에서 확인해 주세요.</p> : <>
