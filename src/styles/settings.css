@@ -59,9 +59,7 @@
 .settings-service-eyebrow { font-size: .6875rem; color: var(--ink-3); letter-spacing: .04em; }
 .settings-service h3 { font-size: 1.125rem; letter-spacing: -.035em; margin: 10px 0; }
 .settings-service p { color: var(--ink-2); font-size: .8125rem; line-height: 1.8; margin: 0; }
-.settings-service-preview { display: grid; grid-template-columns: repeat(5, 1fr) 1.6fr; gap: 6px; margin: 18px 0; padding: 12px; background: var(--bg); border-radius: 8px; border: 1px solid var(--line); color: var(--ink-3); }
-.settings-service-preview span { font-size: 8px; min-height: 52px; border-right: 1px solid var(--line); }
-.settings-service-preview i { display: block; margin: 12px 5px 0 0; height: 4px; background: color-mix(in srgb, var(--accent) 22%, var(--bg)); border-radius: 3px; }
-.settings-service-preview span:last-child { border: 0; }
 .settings-service a { display: flex; justify-content: space-between; align-items: center; min-height: 44px; color: var(--accent); font-size: .8125rem; font-weight: 650; text-decoration: none; }
 .settings-service a:focus-visible { outline: 2px solid var(--accent); outline-offset: 4px; }
+
+.settings-service-image { display:block; width:100%; height:auto; border:1px solid var(--line); border-radius:12px; }

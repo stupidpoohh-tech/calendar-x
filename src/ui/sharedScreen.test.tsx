@@ -43,6 +43,7 @@ const mine = (e: Entry): SharedTodoItem =>
 type P = Parameters<typeof SharedScreen>[0];
 
 function mount(over: {
+  contextTarget?: HTMLElement | null;
   items?: SharedTodoItem[];
   ddays?: P['ddays'];
   collections?: P['collections'];
@@ -75,6 +76,7 @@ function mount(over: {
   onCursorChange?: (d: Date) => void;
 } = {}) {
   const props = {
+    contextTarget: over.contextTarget,
     board: over.board ?? board,
     partner: over.partner === undefined ? 'owner' : over.partner,
     myUid: over.myUid ?? ME,
@@ -760,5 +762,23 @@ describe('보드 안의 탭', () => {
   it('위가 넘겨준 탭을 그대로 연다 — 마지막 자리로 돌아온다', () => {
     mount({ tab: 'notes' });
     expect(screen.getByRole('button', { name: '글쓰기' })).toBeInTheDocument();
+  });
+});
+
+describe('공통 사이드바의 공유 정보', () => {
+  it('공간 정보와 D-Day를 공통 메뉴로 옮겨도 관리 패널을 연다', () => {
+    const target = document.createElement('div');
+    document.body.appendChild(target);
+    const result = mount({ contextTarget: target });
+    expect(within(target).getByText('우리')).toBeVisible();
+    expect(screen.queryByRole('button', { name: '공유 설정' })).toBeNull();
+    const dday = within(target).getByRole('button', { name: 'D-Day 관리' });
+    fireEvent.click(dday);
+    expect(dday).toHaveAttribute('aria-expanded', 'true');
+    expect(document.querySelector('.sh-common')).toBeNull();
+    cleanup();
+    expect(target).toBeEmptyDOMElement();
+    target.remove();
+    expect(result).toBeDefined();
   });
 });

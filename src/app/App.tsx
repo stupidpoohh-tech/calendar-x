@@ -18,7 +18,7 @@ import {
 import {
   MERGE_SKIPS_RECOVERY, mergeSkipsLedger, recoveryDiffers, REPLACE_DISABLED_REASON, safeMerge, type RestoreIO,
 } from '../data/restore';
-import { LENSES, LENS_BY_ID, SHARED_TABS } from '../domain/constants';
+import { LENSES, LENS_BY_ID } from '../domain/constants';
 import { calendarAmountCaption, lensVisible } from '../domain/layout';
 import { endOfMonth, fmtMonthTitle, startOfMonth, toISO } from '../domain/date';
 import { displayTitle, effectiveEndDate, newEntry, newMoney, uid as newId, withDerived } from '../domain/entry';
@@ -80,6 +80,7 @@ import { SharedScreen } from '../ui/SharedScreen';
 import { SharedJoinSheet, SharedSettingsSheet, SharedStartSheet } from '../ui/SharedInvite';
 import { SettingsSheet } from '../ui/SettingsSheet';
 import { Dashboard } from '../ui/Dashboard';
+import { AppNavigation } from '../ui/AppNavigation';
 import { useDialog } from '../ui/Dialog';
 import { useAuth } from './useAuth';
 import { usePrefs } from './usePrefs';
@@ -133,6 +134,7 @@ function Workspace({ uid, user, onSignOut }: WorkspaceProps) {
   const { prefs, set } = usePrefs();
   const [cursor, setCursor] = useState(() => new Date());
   const [dashboardQuery, setDashboardQuery] = useState('');
+  const [sharedContextTarget, setSharedContextTarget] = useState<HTMLDivElement | null>(null);
   const [filters, setFilters] = useState<Filters>(emptyFilters);
   const [showFilters, setShowFilters] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
@@ -1850,9 +1852,16 @@ function Workspace({ uid, user, onSignOut }: WorkspaceProps) {
     />
   );
 
+  const navigateLens = (next: LensId) => {
+    set('lens', next);
+    if (next === 'task') set('view', 'calendar');
+    setFilters(emptyFilters());
+    setShowFilters(false);
+    if (next === 'money') { setLedgerTab('history'); setLedgerPeriod(cursorISO.slice(0, 7)); }
+  };
   const quickActions = (
         <div className="mobile-actions">
-          {!sharedOpen && <button className="add-btn" aria-label={ledgerOn ? '거래 추가' : '일정 추가'} onClick={() => openCreate()}><Icon.Plus size={16} /></button>}
+          {!sharedOpen && <button className="add-btn" aria-label={ledgerOn ? '거래 추가' : '일정 추가'} onClick={() => openCreate()}><Icon.Plus size={16} /><span className="quick-add-label">{ledgerOn ? '거래 추가' : '추가'}</span></button>}
           <details className="mobile-more" onKeyDown={(e) => {
             if (e.key === 'Escape') { e.currentTarget.open = false; e.currentTarget.querySelector('summary')?.focus(); }
           }}>
@@ -1895,9 +1904,13 @@ function Workspace({ uid, user, onSignOut }: WorkspaceProps) {
             onStart={() => setSharedSheet('start')}
           /></div>
         )}
-        {dashboardOn && <button className="ico-btn" aria-label={isAnon ? '로그인 · 가입' : '설정'} onClick={() => isAnon ? setShowAuth(true) : setShowSettings(true)}>{isAnon ? <Icon.User size={20} /> : <Icon.Settings size={20} />}</button>}
+        <button className="ico-btn masthead-settings" aria-label={isAnon ? '로그인 · 가입' : '설정'} onClick={() => isAnon ? setShowAuth(true) : setShowSettings(true)}>{isAnon ? <Icon.User size={20} /> : <Icon.Settings size={20} />}</button>
       </div>
-      {!dashboardOn && <header className="topbar" data-space={sharedOpen ? 'shared' : 'me'}>
+      <div className="workspace-shell">
+        <AppNavigation shared={sharedOpen} lens={lens} sharedTab={prefs.sharedTab} showNotes={layout.notes} showMoney={layout.ledger} demo={isAnon}
+          contextRef={setSharedContextTarget} onNavigate={navigateLens} onSharedNavigate={(tab) => set('sharedTab', tab)} onManageSharing={() => setSharedSheet('settings')} />
+        <div className="workspace-content">
+      {!dashboardOn && !sharedOpen && !ledgerOn && <header className="topbar" data-space={sharedOpen ? 'shared' : 'me'}>
         <div className="header-left">
           {/* 가계부는 보기마다 자기 기간 도구를 가진다 — 위에 달력 월을 하나 더 두면 무엇이 무엇을 바꾸는지 흐려진다. */}
           {!sharedOpen && !ledgerOn && !dashboardOn && (
@@ -1917,45 +1930,6 @@ function Workspace({ uid, user, onSignOut }: WorkspaceProps) {
         </div>
           )}
         </div>
-        {/*
-          **두 공간이 같은 탭 줄을 쓴다.**
-
-          공유에 있을 때 그 보드의 탭을 화면 안쪽에 한 줄 더 그리면, 탭처럼 생긴 줄이
-          둘이 되고 공간을 옮길 때마다 본문이 위아래로 튄다. 자리는 하나고 내용만
-          바뀐다 — 지금 어느 공간인지는 위의 👤 / 👥 가 말한다.
-        */}
-        {sharedOpen ? (
-          <nav className="lenses" role="tablist" aria-label="같이 보기">
-            {SHARED_TABS.map((t) => (
-              <button
-                key={t.id}
-                role="tab"
-                aria-selected={prefs.sharedTab === t.id}
-                className={'lens' + (prefs.sharedTab === t.id ? ' on' : '')}
-                style={{ ['--ac' as string]: `var(${t.accentVar})` }}
-                onClick={() => set('sharedTab', t.id)}
-              >
-                <span className="lens-dot" />{t.label}
-              </button>
-            ))}
-          </nav>
-        ) : (
-          <nav className="lenses" role="tablist" aria-label="렌즈">
-            {LENSES.filter((l) => lensVisible(l.id, layout)).map((l) => (
-              <button
-                key={l.id}
-                role="tab"
-                aria-selected={lens === l.id}
-                className={'lens' + (lens === l.id ? ' on' : '')}
-                style={{ ['--ac' as string]: `var(${l.accentVar})` }}
-                onClick={() => { set('lens', l.id); if (l.id === 'task') set('view', 'calendar'); setFilters(emptyFilters()); }}
-              >
-                <span className="lens-dot" />{l.label}
-              </button>
-            ))}
-          </nav>
-        )}
-
         {/*
           좁은 화면의 추가(+) · 더보기(···). 가계부에서는 머리에 두지 않고 보기의 기간 도구 옆으로
           내려간다 — 가계부는 월 이동을 머리에서 숨기므로, 여기 두면 이 둘만으로 한 줄을 차지했다.
@@ -1989,13 +1963,6 @@ function Workspace({ uid, user, onSignOut }: WorkspaceProps) {
           </button>
         </div>
           )}
-        {isAnon ? (
-          <button className="landing-cta-sm" onClick={() => setShowAuth(true)}>로그인 · 가입</button>
-        ) : (
-          <button className="ico-btn" onClick={() => setShowSettings(true)} aria-label="설정">
-            <Icon.Settings size={16} />
-          </button>
-        )}
         </div>
       </header>}
 
@@ -2019,13 +1986,14 @@ function Workspace({ uid, user, onSignOut }: WorkspaceProps) {
       </div>
 
       {/*
-        같이 보기는 **본문을 대신 차지한다.** 상단 렌즈는 그대로 남아 있어 언제든
+        같이 보기는 **본문을 대신 차지한다.** 공통 공간 전환은 그대로 남아 있어 언제든
         돌아올 수 있고, 카드도 달력도 뜨지 않으므로 지금 보고 있는 것이 공유 화면임이
         분명하다. 보드가 없으면 열리지 않는다.
       */}
       {sharedOpen && shared.board && uid ? (
         <main className="main">
           <SharedScreen
+            contextTarget={sharedContextTarget}
             board={shared.board}
             partner={shared.partner}
             myUid={uid}
@@ -2138,7 +2106,7 @@ function Workspace({ uid, user, onSignOut }: WorkspaceProps) {
           <>
           <Dashboard today={today} store={store} showMoney={layout.ledger} showNotes={layout.notes} demo={isAnon}
             cursor={cursor} onCursorChange={setCursor} weekStart={prefs.weekStart} query={dashboardQuery}
-            onNavigate={(next) => { set('lens', next); if (next === 'task') set('view', 'calendar'); setFilters(emptyFilters()); if (next === 'money') { setLedgerTab('history'); setLedgerPeriod(cursorISO.slice(0, 7)); } }}
+            onNavigate={navigateLens}
             onEntry={openEdit} onStatus={handleStatus}
             onCreate={(kind, date) => openCreate({ ...newEntry(kind, { startDate: date }), startDate: date })} />
           <div className="utility-strip">{pinnedSection}</div>
@@ -2534,6 +2502,8 @@ function Workspace({ uid, user, onSignOut }: WorkspaceProps) {
       )}
 
       <BrandFooter />
+        </div>
+      </div>
 
       {onboarding.open && !showAuth && !showSettings && !join && !sharedSheet &&
         !new URLSearchParams(window.location.search).has(INVITE_PARAM) && (

@@ -51,8 +51,6 @@ describe('참고 화면 대시보드', () => {
     expect(props.onEntry).toHaveBeenCalledWith(entry);
     fireEvent.click(screen.getByRole('button', { name: '선택한 날짜에 일정 추가' }));
     expect(props.onCreate).toHaveBeenCalledWith('task', '2026-10-31');
-    fireEvent.click(within(screen.getByRole('navigation', { name: '대시보드 메뉴' })).getByRole('button', { name: '캘린더' }));
-    expect(props.onNavigate).toHaveBeenCalledWith('task');
   });
   it('시간 있는 일정과 종일 할 일을 구분하고 검색을 두 패널에 적용한다', () => {
     const props = setup();
@@ -97,16 +95,6 @@ describe('참고 화면 대시보드', () => {
     expect(result.period.end).toBe('2026-10-24');
     expect(result.spending).toBe(1000);
     expect(dashboardSpending({ ...store, entries: [{ ...entry, money: { ...entry.money!, currency: 'USD' } }] }, '2026-10').supported).toBe(false);
-  });
-  it('메뉴 네 개를 각각 연결하고 오늘·할 일 메뉴는 제거한다', () => {
-    const props = setup();
-    render(<Dashboard {...props} />);
-    const nav = within(screen.getByRole('navigation', { name: '대시보드 메뉴' }));
-    expect(nav.getAllByRole('button').map(b => b.textContent)).toEqual(['대시보드', '캘린더', '노트', '가계부']);
-    for (const [name, lens] of [['대시보드', 'all'], ['캘린더', 'task'], ['노트', 'idea'], ['가계부', 'money']]) {
-      fireEvent.click(nav.getByRole('button', { name }));
-      expect(props.onNavigate).toHaveBeenLastCalledWith(lens);
-    }
   });
   it('일정과 모든 노트를 달력에 표시하고 금융 상세 대신 날짜별 합계를 낸다', () => {
     const props = setup();

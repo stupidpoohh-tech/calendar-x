@@ -58,10 +58,10 @@ const FONT_SCALES: Array<[FontScale, string]> = [
 ];
 
 
-type Page = 'home' | 'appearance' | 'ledger' | 'sharing' | 'recovery' | 'data' | 'account' | 'help';
+type Page = 'home' | 'appearance' | 'ledger' | 'sharing' | 'recovery' | 'data' | 'account' | 'help' | 'clearweek';
 const TITLES: Record<Page, string> = {
   home: '설정', appearance: '화면과 캘린더', ledger: '가계부', sharing: '같이 보기',
-  recovery: '회복 · Recovery', data: '데이터 관리', account: '계정', help: '사용 안내',
+  recovery: '회복 · Recovery', data: '데이터 관리', account: '계정', help: '사용 안내', clearweek: '클리어위크',
 };
 const DESCRIPTIONS: Record<Exclude<Page, 'home'>, string> = {
   appearance: '사용할 기능과 화면의 표시 방식을 선택합니다.',
@@ -71,6 +71,7 @@ const DESCRIPTIONS: Record<Exclude<Page, 'home'>, string> = {
   data: '기록을 백업하거나 가져오고, 필요한 경우 정리합니다.',
   account: '로그인한 계정과 이 기기의 연결을 확인합니다.',
   help: '캘린더 X의 주요 기능을 다시 살펴봅니다.',
+  clearweek: '이번 주를 한 장에 정리하는 별도 서비스를 소개합니다.',
 };
 
 export function SettingsSheet({
@@ -154,7 +155,11 @@ export function SettingsSheet({
             <div className="settings-menu">
               {menu('data', Icon.Download, '백업 · 가져오기 · 데이터 정리', legacyCount && !migratedAt ? '이관 가능' : undefined)}
               {menu('account', Icon.User, user.email ?? '로그인 계정')}
-              {menu('help', Icon.Bulb, '튜토리얼 · 클리어위크')}
+              {menu('help', Icon.Bulb, '튜토리얼 다시 보기')}
+            </div>
+            <h3 className="settings-group-title">연결 서비스</h3>
+            <div className="settings-menu">
+              {menu('clearweek', Icon.Calendar, '이번 주를 한 장에 · Clear Week')}
             </div>
           </section>
 
@@ -343,11 +348,13 @@ export function SettingsSheet({
                 <Icon.Chevron size={16} />
               </button>}
             </div>
+          </section>
+          <section className="settings-page" hidden={page !== 'clearweek'} aria-label="클리어위크 소개">
+            <img className="settings-service-image" src="/clear-week-guide.png" width="1536" height="807" alt="Clear Week — 이번 주를 한 장에. 요일별 일정과 메모를 보여 주는 모바일 주간 플래너" loading="lazy" />
             <div className="settings-service">
-              <span className="settings-service-eyebrow">함께 쓰면 좋은 서비스</span>
+              <span className="settings-service-eyebrow">Clear Week</span>
               <h3>한 주를 가볍게, 클리어위크</h3>
               <p>종이 플래너처럼 한 주의 할 일을 펼쳐 보고, 떠오른 생각을 여백에 적어 보세요. 주간 계획에 집중하고 싶을 때 이용할 수 있는 별도 서비스입니다.</p>
-              <div className="settings-service-preview" aria-hidden="true"><span>MON<i /></span><span>TUE<i /></span><span>WED<i /></span><span>THU<i /></span><span>FRI<i /></span><span>주간 메모<i /></span></div>
               <a href="https://clear-week.pages.dev/" target="_blank" rel="noopener noreferrer">클리어위크 살펴보기 <span>↗</span><span className="sr-only"> (새 탭)</span></a>
             </div>
           </section>

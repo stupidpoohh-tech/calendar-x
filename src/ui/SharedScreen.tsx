@@ -1,40 +1,10 @@
 /**
- * 같이 보기 화면.
- *
- * ── 위계 ────────────────────────────────────────────────────────
- *
- *   캘린더 | 리스트 | 노트              ← 탭. **셸이 최상단에 그린다**
- *   👤   👥                             ← 공간
- *   ← 나                                같이 보기 · {보드}
- *   [대표 D-Day]  📌 고정된 노트        ← 보드 공통. 한 줄
- *                본문
- *
- * 탭 줄이 이 화면에 없는 이유는 **렌즈와 같은 자리를 쓰기 때문**이다. 두 공간이 탭을
- * 각각 다른 높이에 그리면 공간을 옮길 때마다 본문이 위아래로 튀고, 화면에 탭처럼
- * 생긴 줄이 둘이 된다.
- *
- * ── 세 탭이 각각 무엇인가 ───────────────────────────────────────
- *
- *   캘린더  둘이 **실제로 해야 하는 것.** 날짜가 있든 없든 여기 있다
- *   리스트  **언젠가** 같이 하고 싶은 것. 날짜도 마감도 없다
- *   노트    게시판처럼 쌓이는 글. 고정 노트도 이 중 하나다
- *
- * 해야 할 것을 두 탭으로 나누지 않는다. 공유 보드에서 "해야 하는 것" 은 하나이고,
- * 두 자리로 나누면 어디에 적어야 하는지가 매번 애매해진다.
- *
- * ── 캘린더 탭은 리스트가 기본, 달력도 남긴다 ────────────────────
- *
- * 둘이 보는 목록은 "지금 뭐가 남았나" 가 먼저라 리스트가 기본이다. 다만 이 앱은
- * 캘린더이고 날짜가 붙은 항목은 달력에서 봐야 읽히므로, 달력 보기를 토글로 남긴다.
- * **달력은 `MonthCalendar` 를 그대로 쓴다** — 월 그리드 · 기간 바 · "항목을 숨기지
- * 않는다" 가 전부 거기 있고, 공유용으로 하나 더 그리면 두 달력이 서서히 달라진다.
- *
- * ── 이 화면의 편집은 공유 자료만 바꾼다 ─────────────────────────
- *
- * 콜백은 전부 공유 타입을 받는다. 달력이 돌려주는 `Entry` 는 id 로 원래 항목을 되찾는
- * 데만 쓰고, 그대로 저장하는 길은 없다.
+ * 같이 보기 본문. 메뉴는 공통 셸이 담당하며 공간 정보와 D-Day를 그 셸에 표시한다.
+ * 캘린더는 실제 일정, 리스트는 언젠가 함께할 것, 노트는 공유 기록을 다룬다.
+ * 모든 편집 콜백은 공유 타입만 받으며 개인 원본을 직접 저장하지 않는다.
  */
 import { useMemo, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { colorHex } from '../domain/constants';
 import { ddayCount, fmtDdayDate } from '../domain/dday';
 import { fmtDayShort, fmtMonthTitle } from '../domain/date';
@@ -55,6 +25,7 @@ import { SharedItemSheet } from './SharedItemSheet';
 import { SharedNotes } from './SharedNotes';
 
 interface Props {
+  contextTarget?: HTMLElement | null;
   board: SharedBoard;
   partner: string | null;
   myUid: string;
@@ -75,7 +46,7 @@ interface Props {
   /**
    * 보고 있는 탭.
    *
-   * **탭 줄은 이 화면에 없다.** 렌즈와 같은 자리(최상단 한 줄)를 쓰므로 셸이 그린다 —
+   * **메뉴는 이 화면에 없다.** PC 사이드바와 모바일 플로팅 바는 공통 셸이 그린다 —
    * 두 공간이 탭을 각각 다른 높이에 그리면 공간을 옮길 때마다 본문이 위아래로 튄다.
    * 여기서는 받은 값으로 무엇을 그릴지 고르고, 고정 노트 줄이 노트 탭으로 보낸다.
    */
@@ -113,7 +84,7 @@ const NO_ACCOUNTS: [] = [];
 const NO_ENTRIES: Entry[] = [];
 
 export function SharedScreen({
-  board, partner, myUid, items, ddays, collections, collectionItems, notes, legacyMemo,
+  contextTarget, board, partner, myUid, items, ddays, collections, collectionItems, notes, legacyMemo,
   contentReady, todayISO, cursor, onCursorChange, view, onViewChange, tab, onTabChange, weekStart,
   onBack, onOpenInvite, onSaveItem, onUnshareItem, onDeleteItem,
   onSaveDday, onDeleteDday,
@@ -189,6 +160,25 @@ export function SharedScreen({
     onSaveItem(applyOverrides(item, { status: isDone ? 'planned' : 'done' }, myUid));
   };
 
+  const ddayButton = (
+        <button
+          className={'sh-dd' + (showDdays ? ' on' : '')}
+          onClick={() => setShowDdays((v) => !v)}
+          aria-expanded={showDdays}
+          aria-label="D-Day 관리"
+        >
+          {leadDday ? (
+            <>
+              <span className="sh-dd-t">{leadDday.title || '(제목 없음)'}</span>
+              <span className="sh-dd-n">{ddayCount(leadDday.date, todayISO).label}</span>
+              <span className="sh-dd-d">{fmtDdayDate(leadDday.date, todayISO)}</span>
+            </>
+          ) : (
+            <><Icon.Plus size={12} />D-Day</>
+          )}
+        </button>
+  );
+
   const row = (item: SharedTodoItem) => {
     const v = sharedView(item);
     const isDone = v.status === 'done';
@@ -236,7 +226,13 @@ export function SharedScreen({
 
   return (
     <section className="sh" aria-label="같이 보기">
-      <div className="sh-top">
+      {contextTarget && createPortal(<div className="shared-workspace-context">
+        <p className="workspace-context-label">같이 보기</p>
+        <strong className="workspace-space-name">{board.name}</strong>
+        <small>{partner ?? '초대 수락 대기 중'}</small>
+        {ddayButton}
+      </div>, contextTarget)}
+      {contextTarget === undefined && <div className="sh-top">
         <button className="sh-back" onClick={onBack}>
           <Icon.Chevron size={14} dir="left" />나
         </button>
@@ -250,29 +246,14 @@ export function SharedScreen({
         <button className="ico-btn sm" onClick={onOpenInvite} aria-label="공유 설정">
           <Icon.Settings size={15} />
         </button>
-      </div>
+      </div>}
 
       {/*
         보드 공통. 어느 탭에서나 보이지만 **한 줄을 넘지 않는다** — 본문이 밀리면
         무엇을 하는 화면인지가 흐려진다. 관리는 눌러서 펼친다.
       */}
-      <div className="sh-common">
-        <button
-          className={'sh-dd' + (showDdays ? ' on' : '')}
-          onClick={() => setShowDdays((v) => !v)}
-          aria-expanded={showDdays}
-          aria-label="D-Day 관리"
-        >
-          {leadDday ? (
-            <>
-              <span className="sh-dd-t">{leadDday.title || '(제목 없음)'}</span>
-              <span className="sh-dd-n">{ddayCount(leadDday.date, todayISO).label}</span>
-              <span className="sh-dd-d">{fmtDdayDate(leadDday.date, todayISO)}</span>
-            </>
-          ) : (
-            <><Icon.Plus size={12} />D-Day</>
-          )}
-        </button>
+      {(contextTarget === undefined || pinned) && <div className="sh-common">
+        {contextTarget === undefined && ddayButton}
 
         {pinned && (
           <button className="sh-pinned" onClick={() => onTabChange('notes')}>
@@ -281,7 +262,7 @@ export function SharedScreen({
             <span>{noteSummary(pinned)}</span>
           </button>
         )}
-      </div>
+      </div>}
 
       {showDdays && (
         <SharedDdayPanel
@@ -350,6 +331,7 @@ export function SharedScreen({
                     key={v}
                     className={'seg-btn' + (view === v ? ' on' : '')}
                     onClick={() => onViewChange(v)}
+                    aria-label={v === 'calendar' ? '캘린더' : '리스트'}
                     aria-pressed={view === v}
                   >
                     {v === 'calendar' ? <Icon.Calendar size={14} /> : <Icon.List size={14} />}
@@ -367,7 +349,7 @@ export function SharedScreen({
                   <Icon.EyeOff size={15} />
                 </button>
               )}
-              <button className="add-btn" onClick={() => startCreate()}>
+              <button className="add-btn" aria-label="추가" onClick={() => startCreate()}>
                 <Icon.Plus size={16} /><span className="lbl">추가</span>
               </button>
             </div>
