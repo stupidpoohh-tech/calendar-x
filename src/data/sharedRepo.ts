@@ -24,7 +24,7 @@ import {
   arrayRemove, arrayUnion, collection, deleteDoc, deleteField, getDoc, getDocs, onSnapshot,
   query, setDoc, updateDoc, where, writeBatch, type Firestore,
 } from 'firebase/firestore';
-import { isShareableTask, sameSource, sourceOf } from '../domain/shared';
+import { isMirrorableTask, isShareableTask, sameSource, sourceOf } from '../domain/shared';
 import type {
   Entry, SharedBoard, SharedCollection, SharedCollectionItem, SharedDday, SharedInvite,
   SharedNote, SharedPin, SharedSource, SharedTodoItem,
@@ -385,10 +385,13 @@ export interface SharedSyncPlan {
  * 보면 상대가 올린 항목이 "내 원본에 없다" 로 읽혀 통째로 지워지고, 상대가 다음에
  * 화면을 열면 다시 올라온다 — 항목이 사라졌다 나타났다 한다.
  *
- * 공유 대상이 아닌 내 항목이 올라가 있으면 지운다 — 원본이 사라졌거나, 할 일이 아니게
- * 됐거나(아이디어로 강등), 회복 항목이거나, **비공개로 표시했거나**, 지나간 일정이다.
- * 뒤의 둘은 손대지 않아도 생기므로(시간이 흐르고, 나중에 비공개로 바꾸고), 이 맞추기가
- * 보드를 스스로 정리하는 자리가 된다.
+ * 보드에 있을 수 없는 내 항목이 올라가 있으면 지운다 — 원본이 사라졌거나, 할 일이 아니게
+ * 됐거나(아이디어로 강등), 회복 항목이거나, **비공개로 표시했거나**. 비공개는 나중에 바꾸므로
+ * 이 맞추기가 보드를 정리하는 자리가 된다.
+ *
+ * **지나간 일정은 지우지 않는다.** 새로 올리지 않을 뿐이다(`isShareableTask`) — 이미 올라간 것은
+ * 지나도 남고 원본이 바뀌면 갱신된다(`isMirrorableTask`). 예전에는 날짜가 지나는 순간 여기서
+ * 지워, 함께 본 일정이 같이 보기 달력에서 어제부터 사라졌다.
  *
  * 공유 화면에서만 만든 항목(`localOnly`)은 누구 것이든 건드리지 않는다. 원본이 없는
  * 것이 정상이고, 지우면 되살릴 곳이 없다 — 지난 날짜라도 그것은 보드의 자기 기록이다.
@@ -396,10 +399,16 @@ export interface SharedSyncPlan {
 export function planMirrorSync(
   tasks: readonly Entry[], items: readonly SharedTodoItem[], todayISO: string, myUid: string,
 ): SharedSyncPlan {
-  const shareable = tasks.filter((t) => isShareableTask(t, todayISO));
   const byId = new Map(items.map((i) => [i.id, i]));
+  const mineOnBoard = (id: string) => {
+    const i = byId.get(id);
+    return !!i && !i.localOnly && i.sourceEntryId === id && i.createdBy === myUid;
+  };
+  // 새로 올리는 것은 지나지 않은 것뿐이다. 이미 올라간 내 항목은 지나도 남기고 갱신한다.
+  const mirrored = tasks.filter((t) => isMirrorableTask(t)
+    && (isShareableTask(t, todayISO) || mineOnBoard(t.id)));
   const upserts: SharedSyncPlan['upserts'] = [];
-  for (const t of shareable) {
+  for (const t of mirrored) {
     const source = sourceOf(t);
     const existing = byId.get(t.id);
     if (existing
@@ -409,7 +418,7 @@ export function planMirrorSync(
     upserts.push({ id: t.id, source });
   }
 
-  const alive = new Set(shareable.map((t) => t.id));
+  const alive = new Set(mirrored.map((t) => t.id));
   const deletes = items
     .filter((i) => !i.localOnly
       && i.sourceEntryId !== null

@@ -612,7 +612,13 @@ describe('저장이 공유에 하는 일', () => {
     expect(sharedChange(past, task({ startDate: '2026-09-02' }), TODAY)).toBe('none');
   });
 
-  it('앞으로 오는 일정을 지난 날로 옮기면 지운다', () => {
-    expect(sharedChange(task(), task({ startDate: '2026-09-01' }), TODAY)).toBe('remove');
+  it('앞으로 오는 일정을 지난 날로 옮기면 지우지 않고 고친 값을 보낸다 — 이미 올라가 있다', () => {
+    expect(sharedChange(task(), task({ startDate: '2026-09-01' }), TODAY)).toBe('push');
+  });
+
+  it('지난 일정도 할 일이 아니게 되거나 비공개가 되면 내린다', () => {
+    const past = task({ startDate: '2026-09-01' });
+    expect(sharedChange(past, withDerived({ ...past, keepPrivate: true }), TODAY)).toBe('remove');
+    expect(sharedChange(past, withDerived({ ...past, kind: 'idea' }), TODAY)).toBe('remove');
   });
 });

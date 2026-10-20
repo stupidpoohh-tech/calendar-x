@@ -34,7 +34,7 @@ import {
 } from '../data/sharedRepo';
 import { uid as newId } from '../domain/entry';
 import {
-  isShareableTask, newInviteCode, partnerName, sharedTitle, sourceOf,
+  isMirrorableTask, newInviteCode, partnerName, sharedTitle, sourceOf,
 } from '../domain/shared';
 import type {
   Entry, SharedBoard, SharedCollection, SharedCollectionItem, SharedDday, SharedInvite,
@@ -270,7 +270,8 @@ export function useSharedBoard({ uid, todayISO, accountName, open, onError, comm
     */
     const pushEntry = (e: Entry) => {
       if (!activeBoard || !uid) return;
-      if (!isShareableTask(e, todayISO)) return;
+      // 올릴지는 부르는 쪽이 정한다(`sharedChange`) — 이미 올라간 지난 일정의 갱신도 여기로 온다.
+      if (!isMirrorableTask(e)) return;
       commit({
         kind: 'sharedSource', label: '같이 보기',
         summary: e.title.trim() || '(제목 없음)',

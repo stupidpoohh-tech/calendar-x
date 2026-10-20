@@ -469,13 +469,15 @@ describe('맞추기 — 보드를 만든 뒤 한 번', () => {
     사용자의 TODO 는 몇 년치가 쌓여 있다. 그것이 통째로 올라가면 상대 화면이 지난
     기록으로 덮인다 — 실제로 230건이 올라갔다. 맞추기가 그것을 정리하는 자리다.
   */
-  it('지나간 일정은 올리지 않고, 이미 올라간 것은 지운다', async () => {
+  it('지나간 일정은 새로 올리지 않고, 이미 올라간 것은 지나도 남긴다', async () => {
     const { owner, member } = await connect();
     const past = task({ id: 'past-1', title: '지난 달 할 일', startDate: '2026-08-01' });
+    const pastNew = task({ id: 'past-2', title: '올린 적 없는 지난 일', startDate: '2026-08-02' });
     const future = task({ id: 'future-1', title: '다음 주 할 일', startDate: '2026-09-30' });
     await saveEntry(owner, OWNER, past);
+    await saveEntry(owner, OWNER, pastNew);
     await saveEntry(owner, OWNER, future);
-    // 지난 항목이 이미 보드에 올라가 있는 상태를 만든다.
+    // 지난 항목 하나가 이미 보드에 올라가 있는 상태를 만든다.
     await pushSource(owner, BOARD, past.id, sourceOf(past), OWNER, NOW);
 
     const tasks = await fetchMyTasks(owner, OWNER);
@@ -484,9 +486,7 @@ describe('맞추기 — 보드를 만든 뒤 한 번', () => {
     await applyMirrorSync(owner, BOARD, OWNER, planMirrorSync(tasks, items, TODAY, OWNER), NOW);
 
     const after = await getDocs(collection(member, `sharedBoards/${BOARD}/items`));
-    expect(after.docs.map((d) => d.id)).toEqual(['future-1']);
-    // 원본은 그대로다. 공유에서 빠질 뿐이다.
-    expect((await getDoc(doc(owner, `users/${OWNER}/entries/past-1`))).exists()).toBe(true);
+    expect(after.docs.map((d) => d.id).sort()).toEqual(['future-1', 'past-1']);
   });
 
   it('맞추기가 상대의 수정과 감춤을 지우지 않는다', async () => {

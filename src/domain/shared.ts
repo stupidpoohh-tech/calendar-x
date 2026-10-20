@@ -77,10 +77,14 @@ export interface SharedView extends SharedSource {
  * 반복 전개분(`virtual`)도 뺀다 — 저장되지 않는 화면용 사본이다.
  * 사용자가 **비공개로 표시한 항목**(`keepPrivate`)도 뺀다.
  *
- * ── 그리고 **지나간 일정은 공유하지 않는다** ────────────────────
+ * ── 그리고 **지나간 일정은 새로 올리지 않는다** ──────────────────
  *
  * 같이 보기는 "둘이 앞으로 무엇을 하는가" 를 보는 자리다. 몇 년치 할 일을 통째로
  * 올리면 상대 화면이 지난 기록으로 덮여 이번 주에 무엇이 있는지 볼 수 없다.
+ *
+ * **이미 올라간 것은 지나도 남는다** (`isMirrorableTask`). 예전에는 날짜가 지나는 순간
+ * 맞추기가 보드에서 지워, 함께 본 일정이 어제 날짜부터 같이 보기 달력에서 사라졌다.
+ * 지난 기록을 막는 것은 처음 올릴 때 한 번이면 충분하다.
  *
  * 경계는 **끝나는 날**이다 — 어제 시작해 모레 끝나는 일정은 아직 진행 중이므로
  * 남는다. 오늘 끝나는 것도 남는다.
@@ -91,10 +95,20 @@ export interface SharedView extends SharedSource {
  * 이득이 없다. 끝난 뒤에도 남아 있을 수 있고, 그 편이 있는 것을 지우는 것보다 낫다.)
  */
 export function isShareableTask(e: Entry, todayISO: DateISO): boolean {
+  return isMirrorableTask(e) && !isPastTask(e, todayISO);
+}
+
+/**
+ * 날짜와 무관하게 보드에 **남아 있을 수 있는** 항목인가.
+ *
+ * 새로 올리는 문턱(`isShareableTask`)에서 '지나지 않았다' 만 뺀 것이다. 이미 올라간 항목은
+ * 지나도 이 값이 참인 동안 남고 갱신된다. 할 일이 아니게 되거나 · 비공개가 되거나 · 원본이
+ * 사라지면 내린다.
+ */
+export function isMirrorableTask(e: Entry): boolean {
   if (e.kind !== 'task' || e.recovery != null || e.virtual === true) return false;
   // 비공개로 표시한 항목은 올리지 않는다. 이미 올라가 있으면 맞추기가 내린다.
-  if (e.keepPrivate === true) return false;
-  return !isPastTask(e, todayISO);
+  return e.keepPrivate !== true;
 }
 
 /**
@@ -111,18 +125,20 @@ export function isShareableTask(e: Entry, todayISO: DateISO): boolean {
  * 거절해 "저장하지 못했습니다" 가 떴다 — 개인 항목은 멀쩡히 저장됐는데도 실패한
  * 것처럼 보였다.
  *
- * 그래서 **직전 값이 공유 대상이었을 때만** 내린다. `before` 가 null 이면 새 항목이고,
- * 새 항목은 보드에 있을 수 없다.
+ * 그래서 **직전 값이 보드에 있을 수 있었을 때만** 내린다. `before` 가 null 이면 새 항목이고,
+ * 새 항목은 보드에 있을 수 없다. 지난 일정이라도 이미 올라가 있을 수 있으므로, 할 일이 아니게
+ * 되거나 비공개가 되면 내린다(없는 문서를 지우는 것은 규칙이 받는다 — `resource == null`).
  *
- * 시간이 흘러 지난 일정이 된 것은 여기서 잡히지 않는다 (직전 값도 이미 지난 일정이라
- * `remove` 가 아니라 `none` 이다). 그것은 저장과 무관하게 일어나는 일이고, 화면을
- * 열 때 맞추기가 정리한다 (`planMirrorSync`).
+ * 날짜를 지난 날로 옮긴 항목은 내리지 않고 고친 값을 보낸다 — 직전 값이 올라가 있던 것이다.
+ * 이미 지난 항목을 고쳤을 때는 보드에 있는지 여기서 알 수 없어 아무것도 보내지 않고, 화면을
+ * 열 때 맞추기가 올라가 있는 것만 갱신한다 (`planMirrorSync`).
  */
 export function sharedChange(
   before: Entry | null, after: Entry, todayISO: DateISO,
 ): 'push' | 'remove' | 'none' {
   if (isShareableTask(after, todayISO)) return 'push';
-  if (before && isShareableTask(before, todayISO)) return 'remove';
+  if (isMirrorableTask(after)) return before && isShareableTask(before, todayISO) ? 'push' : 'none';
+  if (before && isMirrorableTask(before)) return 'remove';
   return 'none';
 }
 

@@ -25,7 +25,7 @@ import { calendarAmountCaption, lensVisible } from '../domain/layout';
 import { endOfMonth, fmtMonthTitle, startOfMonth, toISO } from '../domain/date';
 import { displayTitle, effectiveEndDate, newEntry, newMoney, uid as newId, withDerived } from '../domain/entry';
 import {
-  INVITE_PARAM, isShareableTask, newNote, repinNotes, sharedChange, sharedTitle,
+  INVITE_PARAM, isMirrorableTask, newNote, repinNotes, sharedChange, sharedTitle,
 } from '../domain/shared';
 import { formatAmount } from '../domain/money';
 import { applyFilters, collectTags, emptyFilters, hasActiveFilter } from '../domain/filters';
@@ -1207,7 +1207,7 @@ function Workspace({ uid, user, onSignOut }: WorkspaceProps) {
       유령 항목을 만들지 않는 쪽을 골랐다. 공유 화면에서 고쳐 둔 값이 있었다면 그것도
       함께 사라지므로, 그 사실을 삭제 전에 알린다.
     */
-    const sharedNote = shared.board && isShareableTask(e, today)
+    const sharedNote = shared.board && isMirrorableTask(e)
       ? ' 같이 보기에서도 사라집니다 — 거기서 고쳐 둔 내용이 있으면 함께 지워집니다.'
       : '';
     const confirmedFrom = isActual(e) ? e.money?.plannedRef : null;
@@ -1240,8 +1240,8 @@ function Workspace({ uid, user, onSignOut }: WorkspaceProps) {
         summary: displayTitle(e), payload: { id: baseIdOf(e.id) },
       });
     }
-    // 올라간 적 없는 항목은 지울 것도 없다 — 보내 봐야 규칙이 거절한다.
-    if (isShareableTask(e, today)) shared.removeEntry(baseIdOf(e.id));
+    // 지난 일정이라도 이미 올라가 있을 수 있다. 없는 문서를 지우는 것은 규칙이 받는다.
+    if (isMirrorableTask(e)) shared.removeEntry(baseIdOf(e.id));
     dialog.toast('삭제했습니다.');
   }, [uid, isAnon, promptLogin, dialog, closeModal, recovery, commit, shared, today, deleteActual]);
 

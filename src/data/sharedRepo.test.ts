@@ -161,10 +161,21 @@ describe('지나간 일정', () => {
     expect(isEmptyPlan(planMirrorSync([pastTask('old')], [], TODAY, OWNER))).toBe(true);
   });
 
-  it('이미 올라가 있으면 지운다', () => {
+  it('이미 올라가 있으면 지나도 남는다 — 같이 보기 달력에서 사라지지 않는다', () => {
     const plan = planMirrorSync([pastTask('old')], [mirrored(pastTask('old'))], TODAY, OWNER);
-    expect(plan.deletes).toEqual(['old']);
+    expect(plan.deletes).toEqual([]);
     expect(plan.upserts).toEqual([]);
+  });
+
+  it('올라가 있는 지난 일정을 원본에서 고치면 갱신한다', () => {
+    const edited = pastTask('old', { title: '고친 제목' });
+    const plan = planMirrorSync([edited], [mirrored(pastTask('old'))], TODAY, OWNER);
+    expect(plan.upserts.map((u) => [u.id, u.source.title])).toEqual([['old', '고친 제목']]);
+    expect(plan.deletes).toEqual([]);
+  });
+
+  it('올라가 있는 지난 일정도 원본을 지우면 내린다', () => {
+    expect(planMirrorSync([], [mirrored(pastTask('old'))], TODAY, OWNER).deletes).toEqual(['old']);
   });
 
   it('오늘 것은 남는다', () => {
@@ -177,9 +188,11 @@ describe('지나간 일정', () => {
     expect(planMirrorSync([running], [], TODAY, OWNER).upserts.map((u) => u.id)).toEqual(['r']);
   });
 
-  it('어제 끝난 기간 일정은 지운다', () => {
+  it('어제 끝난 기간 일정도 올라가 있으면 남는다', () => {
     const ended = task('e', { startDate: '2026-09-01', endDate: '2026-09-22' });
-    expect(planMirrorSync([ended], [mirrored(ended)], TODAY, OWNER).deletes).toEqual(['e']);
+    expect(planMirrorSync([ended], [mirrored(ended)], TODAY, OWNER).deletes).toEqual([]);
+    // 올라간 적 없으면 새로 올리지 않는다.
+    expect(isEmptyPlan(planMirrorSync([ended], [], TODAY, OWNER))).toBe(true);
   });
 
   it('끝이 없는 반복은 시작일이 오래돼도 남는다 — 지금 돌고 있다', () => {
@@ -190,12 +203,13 @@ describe('지나간 일정', () => {
     expect(planMirrorSync([repeating], [], TODAY, OWNER).upserts.map((u) => u.id)).toEqual(['rep']);
   });
 
-  it('끝난 반복은 지운다', () => {
+  it('끝난 반복도 올라가 있으면 남고, 올라간 적 없으면 올리지 않는다', () => {
     const finished = newEntry('task', {
       id: 'rep', title: 'rep', startDate: '2025-01-01',
       recurrence: { freq: 'weekly', interval: 1, until: '2026-08-01', count: null },
     });
-    expect(planMirrorSync([finished], [mirrored(finished)], TODAY, OWNER).deletes).toEqual(['rep']);
+    expect(planMirrorSync([finished], [mirrored(finished)], TODAY, OWNER).deletes).toEqual([]);
+    expect(isEmptyPlan(planMirrorSync([finished], [], TODAY, OWNER))).toBe(true);
   });
 
   it('공유 화면에서만 만든 지난 항목은 지우지 않는다 — 되살릴 곳이 없다', () => {
