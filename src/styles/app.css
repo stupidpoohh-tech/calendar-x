@@ -848,6 +848,14 @@
 .sheet-eyebrow { font-size: 0.65625rem; font-weight: 700; letter-spacing: .08em; color: var(--ink-3); margin-bottom: 3px; }
 .sheet-t { margin: 0; font-size: 1.1875rem; font-weight: 700; letter-spacing: -.01em; }
 .sheet-b { padding: 0 18px; overflow-y: auto; flex: 1; display: flex; flex-direction: column; gap: 6px; }
+/*
+  떠 있는 창(.mod · .sheet)은 화면 높이를 넘지 않고 본문만 넘긴다. 세로 flex 의 자식은 기본
+  min-height 가 내용 높이라, 0 으로 풀지 않으면 overflow 가 있어도 줄지 않고 창 밖으로 잘린다 —
+  생활비 · 세이브 창에서 미결정 지출이 수십 건이면 아래가 보이지도 넘겨지지도 않았다.
+*/
+.sheet-b, .mod-body { min-height: 0; overscroll-behavior: contain; }
+.sheet-h, .mod-head, .mod-foot { flex-shrink: 0; }
+.sheet-b > *, .mod-body > * { flex-shrink: 0; }
 .sheet-f {
   padding: 14px 18px; border-top: 1px solid var(--line);
   background: color-mix(in oklab, var(--bg-elev) 92%, var(--ink));

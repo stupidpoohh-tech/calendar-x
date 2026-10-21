@@ -108,6 +108,24 @@ describe('내역', () => {
     expect(totals()).toBe(before);
   });
 
+  it('엑셀로 내려받기 — 지금 보이는 목록의 실제 거래만, 범위와 보기를 파일 이름에 적는다', () => {
+    const create = vi.fn(() => 'blob:x');
+    const revoke = vi.fn();
+    Object.assign(URL, { createObjectURL: create, revokeObjectURL: revoke });
+    const names: string[] = [];
+    const click = vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(function (this: HTMLAnchorElement) { names.push(this.download); });
+    mount({ entries });
+    // 이 기간: 실제 3건(급여 · 점심 · 원금) + 예정 1건(보험료).
+    expect(screen.getByText('실제 거래 3건 · 예정 1건은 넣지 않습니다')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: /엑셀로 내려받기/ }));
+    fireEvent.click(within(screen.getByRole('radiogroup', { name: '보기' })).getByRole('radio', { name: '수입' }));
+    expect(screen.getByText('실제 거래 1건')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: /엑셀로 내려받기/ }));
+    expect(names).toEqual(['calendarx-ledger-2026-10.xlsx', 'calendarx-ledger-2026-10-income.xlsx']);
+    expect(create).toHaveBeenCalledTimes(2);
+    click.mockRestore();
+  });
+
   it('합계는 실제 거래만, 원금은 지출이 아니라 대금 — 수지 = 수입 − 지출 − 대금', () => {
     mount({ entries });
     const totals = document.querySelector('.led-totals')! as HTMLElement;

@@ -50,6 +50,8 @@ import type {
 import { AnnualBudgetForm, AnnualBudgetSection } from './AnnualBudgetSection';
 import { LEDGER_NOTE_MAX } from '../data/converters';
 import type { FeedState } from '../app/useStore';
+import { EXPORT_WIDTHS, ledgerExportRows } from '../domain/ledgerExport';
+import { buildXlsx, downloadXlsx } from '../data/xlsxWrite';
 import { Icon } from './Icon';
 import { isComposingEnter } from './ime';
 import { blankRow, type BatchRow } from './batchRows';
@@ -262,7 +264,7 @@ function TotalsRow({ t, phase }: { t: LedgerTotals; phase: 'past' | 'current' | 
 type Scope = 'period' | 'year' | 'all';
 
 function LedgerHistory({
-  entries, period, todayISO, settleDay, categories, onEntryClick, subscribeAll,
+  entries, period, todayISO, settleDay, categories, onEntryClick, subscribeAll, cards,
 }: LedgerScreenProps & { period: Period }) {
   const [q, setQ] = useState('');
   const [scope, setScope] = useState<Scope>('period');
@@ -307,6 +309,21 @@ function LedgerHistory({
   );
 
   const groups = useMemo(() => groupByDay(shown), [shown]);
+  /*
+    엑셀 내려받기 — 지금 보이는 목록 그대로(범위 · 검색 · 보기). 실제 거래만 싣는다(`ledgerExport.ts`).
+    파일 이름은 범위를 따른다 — 정산 기간이면 기간 열쇠, 연도면 정산 연도, 전체면 내려받은 날.
+  */
+  const exported = useMemo(() => ledgerExportRows(shown, categories, cards), [shown, categories, cards]);
+  const exportReady = scope !== 'all' || all.state === 'ready';
+  const downloadExcel = () => {
+    // 파일 이름은 영문 · 숫자로 둔다 — 한글 이름은 일부 브라우저에서 'download' 로 바뀌어 내려온다(재현됨).
+    const range = scope === 'period' ? period.key : scope === 'year' ? `${year}` : `all-${todayISO}`;
+    const which = side === 'income' ? '-income' : side === 'expense' ? '-expense' : '';
+    downloadXlsx(
+      buildXlsx(exported.rows, { sheetName: '가계부', widths: EXPORT_WIDTHS }),
+      `calendarx-ledger-${range}${which}.xlsx`,
+    );
+  };
   const byAmount = useMemo(
     () => (sort === 'amount' ? [...shown].sort((a, b) => b.amount - a.amount || b.date.localeCompare(a.date)) : []),
     [shown, sort],
@@ -386,6 +403,19 @@ function LedgerHistory({
             </button>
           ))}
         </div>
+      </div>
+      <div className="led-export">
+        <button
+          className="btn ghost sm" disabled={!exportReady || exported.count === 0} onClick={downloadExcel}
+          aria-label={`엑셀로 내려받기 — 실제 거래 ${exported.count}건`}
+        >
+          <Icon.Download size={13} /> 엑셀로 내려받기
+        </button>
+        {exportReady && (
+          <span className="led-note">
+            실제 거래 {exported.count.toLocaleString('ko-KR')}건{exported.skippedPlanned > 0 && ` · 예정 ${exported.skippedPlanned}건은 넣지 않습니다`}
+          </span>
+        )}
       </div>
       {scope === 'year' && (
         <p className="led-note led-scope">{year}년 정산 연도 · {periodRange({ key: period.key, start: yearRange.start, end: yearRange.end })}</p>
