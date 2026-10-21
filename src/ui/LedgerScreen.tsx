@@ -268,6 +268,8 @@ function LedgerHistory({
   const [scope, setScope] = useState<Scope>('period');
   /** 날짜순(일자로 묶음) · 큰 금액순(묶지 않고 금액 큰 것부터). 큰 지출을 먼저 찾을 때 쓴다. */
   const [sort, setSort] = useState<'date' | 'amount'>('date');
+  /** 보기 — 전체 · 들어온 돈(수입) · 나간 돈(지출 · 대출 · 카드 대금 등). 위의 합계는 거르지 않는다. */
+  const [side, setSide] = useState<'all' | 'income' | 'expense'>('all');
   const [all, setAll] = useState<{ state: 'loading' | 'ready' | 'error'; items: Entry[] }>({ state: 'loading', items: [] });
   const [retry, setRetry] = useState(0);
 
@@ -299,14 +301,18 @@ function LedgerHistory({
     const [from, to] = scope === 'year' ? [yearRange.start, yearRange.end] : [period.start, period.end];
     return historyItems(entries, from, to).filter((i) => matchesQuery(i.entry, q, categories));
   }, [scope, all.items, entries, period, q, categories, yearRange]);
+  const shown = useMemo(
+    () => (side === 'all' ? items : items.filter((i) => (side === 'income' ? i.sign > 0 : i.sign < 0))),
+    [items, side],
+  );
 
-  const groups = useMemo(() => groupByDay(items), [items]);
+  const groups = useMemo(() => groupByDay(shown), [shown]);
   const byAmount = useMemo(
-    () => (sort === 'amount' ? [...items].sort((a, b) => b.amount - a.amount || b.date.localeCompare(a.date)) : []),
-    [items, sort],
+    () => (sort === 'amount' ? [...shown].sort((a, b) => b.amount - a.amount || b.date.localeCompare(a.date)) : []),
+    [shown, sort],
   );
   const catName = (id: string | null | undefined) => (id ? categories.find((c) => c.id === id)?.name ?? '알 수 없는 카테고리' : null);
-  const searching = q.trim().length > 0 || scope !== 'period';
+  const searching = q.trim().length > 0 || scope !== 'period' || side !== 'all';
   /** 거래 한 줄. 큰 금액순에서는 일자로 묶지 않으므로 날짜를 줄 안에 적는다. */
   const row = (it: HistoryItem, withDate: boolean) => {
     const badge = flowBadge(it.entry);
@@ -356,16 +362,30 @@ function LedgerHistory({
           ))}
         </div>
       </div>
-      <div className="seg led-sort" role="radiogroup" aria-label="정렬">
-        {([['date', '날짜순'], ['amount', '큰 금액순']] as const).map(([id, label]) => (
-          <button
-            key={id} role="radio" aria-checked={sort === id}
-            className={'seg-btn' + (sort === id ? ' on' : '')}
-            onClick={() => setSort(id)}
-          >
-            {label}
-          </button>
-        ))}
+      <div className="led-listbar">
+        <div className="seg led-sort" role="radiogroup" aria-label="정렬">
+          {([['date', '날짜순'], ['amount', '큰 금액순']] as const).map(([id, label]) => (
+            <button
+              key={id} role="radio" aria-checked={sort === id}
+              className={'seg-btn' + (sort === id ? ' on' : '')}
+              onClick={() => setSort(id)}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
+        {/* 목록만 거른다. 위의 합계(수입 · 지출 · 대금 · 수지)는 그대로 이 기간 전체다. */}
+        <div className="seg led-side" role="radiogroup" aria-label="보기">
+          {([['all', '전체'], ['income', '수입'], ['expense', '지출']] as const).map(([id, label]) => (
+            <button
+              key={id} role="radio" aria-checked={side === id}
+              className={'seg-btn' + (side === id ? ' on' : '')}
+              onClick={() => setSide(id)}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
       </div>
       {scope === 'year' && (
         <p className="led-note led-scope">{year}년 정산 연도 · {periodRange({ key: period.key, start: yearRange.start, end: yearRange.end })}</p>

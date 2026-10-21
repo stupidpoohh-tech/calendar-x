@@ -197,6 +197,8 @@ button.led-cat-n:hover svg { color: var(--accent); }
 .led-search { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; }
 .led-search .mod-input { flex: 1 1 200px; min-width: 0; }
 .led-sort { align-self: flex-start; }
+/* 정렬(왼쪽) · 보기(오른쪽) 한 줄. 좁으면 다음 줄로 내려간다 */
+.led-listbar { display: flex; align-items: center; justify-content: space-between; gap: 8px; flex-wrap: wrap; }
 .led-flat { list-style: none; margin: 0; padding: 0; }
 
 /* 일자 머리 아래 거래는 들여 쓰고 왼쪽 줄로 묶는다 — 날짜가 바뀌는 자리가 한눈에 보인다. */

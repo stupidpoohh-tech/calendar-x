@@ -50,7 +50,7 @@ describe('자료가 다 오기 전에는 합계를 내지 않는다', () => {
   it('캐시에서 온 값이면 숫자는 내되 한 줄을 덧붙인다', () => {
     mount({ entries, feed: { ...LIVE, status: 'cache', fromCache: true } });
     expect(screen.getByText(/이 기기에 저장된 자료 기준/)).toBeInTheDocument();
-    expect(screen.getByText('지출')).toBeInTheDocument();
+    expect(within(document.querySelector('.led-totals') as HTMLElement).getByText('지출')).toBeInTheDocument();
   });
 });
 
@@ -92,6 +92,22 @@ describe('내역', () => {
     expect(document.querySelectorAll('.led-day')).toHaveLength(0);
   });
 
+  it('보기 — 전체 · 수입 · 지출로 목록을 거르고, 위의 합계는 그대로다', () => {
+    mount({ entries });
+    const amounts = () => [...document.querySelectorAll('.led-row-a')].map((n) => n.textContent);
+    const totals = () => document.querySelector('.led-totals')!.textContent;
+    const before = totals();
+    expect(within(screen.getByRole('radiogroup', { name: '보기' })).getByRole('radio', { name: '전체' })).toHaveAttribute('aria-checked', 'true');
+    fireEvent.click(within(screen.getByRole('radiogroup', { name: '보기' })).getByRole('radio', { name: '수입' }));
+    expect(amounts()).toEqual(['+3,000,000']);
+    fireEvent.click(within(screen.getByRole('radiogroup', { name: '보기' })).getByRole('radio', { name: '지출' }));
+    expect(amounts().sort()).toEqual(['−12,000', '−300,000', '−50,000'].sort());
+    // 큰 금액순과 함께 쓴다.
+    fireEvent.click(screen.getByRole('radio', { name: '큰 금액순' }));
+    expect(amounts()).toEqual(['−300,000', '−50,000', '−12,000']);
+    expect(totals()).toBe(before);
+  });
+
   it('합계는 실제 거래만, 원금은 지출이 아니라 대금 — 수지 = 수입 − 지출 − 대금', () => {
     mount({ entries });
     const totals = document.querySelector('.led-totals')! as HTMLElement;
@@ -131,7 +147,7 @@ describe('내역', () => {
     fireEvent.change(screen.getByLabelText('거래 검색'), { target: { value: '점심' } });
     fireEvent.click(screen.getByRole('radio', { name: '2026년' }));
     expect(screen.getByRole('button', { name: /점심/ })).toBeInTheDocument();
-    fireEvent.click(screen.getByRole('radio', { name: '전체' }));
+    fireEvent.click(within(screen.getByRole('radiogroup', { name: '검색 범위' })).getByRole('radio', { name: '전체' }));
     expect(p.subscribeAll).toHaveBeenCalledTimes(1);
     act(() => push!([old]));
     await waitFor(() => expect(screen.getByRole('button', { name: /옛날 점심/ })).toBeInTheDocument());
