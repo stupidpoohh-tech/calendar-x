@@ -729,7 +729,7 @@ function Workspace({ uid, user, onSignOut }: WorkspaceProps) {
 
   const saveLedgerNote = useCallback((n: LedgerNote) => {
     if (isAnon || !uid) { void promptLogin(); return; }
-    commit({ kind: 'ledgerNote', label: '기간 메모', summary: n.period, payload: n });
+    return commit({ kind: 'ledgerNote', label: '기간 메모', summary: n.period, payload: n });
   }, [isAnon, uid, promptLogin, commit]);
 
   /** 생활비에 연결되지 않은 실제 지출을 그 주머니에 건다. 사용처는 하나만 — 대출 연결은 푼다. */
