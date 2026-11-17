@@ -41,10 +41,10 @@ import {
 } from '../domain/budget';
 import { daySummary } from '../domain/daySummary';
 import { balanceViewOn, calcScopeOf } from '../domain/tide';
-import { ymOf } from '../domain/date';
+import { ymOf, ymOfDate } from '../domain/date';
 import { isRecoveryEntry } from '../domain/recovery';
 import type {
-  AnnualBudget, Account, Budget, Card, Category, CategoryBudget, Entry, Filters, LedgerNote, LedgerTabId, LensId, Reserve, SharedInvite, SharedNote, SharedTodoItem,
+  AnnualBudget, Account, Budget, Card, Category, CategoryBudget, Entry, Filters, LedgerNote, LedgerTabId, LensId, MonthNote, Reserve, SharedInvite, SharedNote, SharedTodoItem,
   TaskStatus, ViewId, YearMonth,
 } from '../domain/types';
 import { ConfirmSheet } from '../ui/ConfirmSheet';
@@ -70,6 +70,7 @@ import { EntryModal, type SaveOptions } from '../ui/EntryModal';
 import { FilterPanel } from '../ui/FilterPanel';
 import { Icon } from '../ui/Icon';
 import { ListView } from '../ui/ListView';
+import { MonthNotePanel } from '../ui/MonthNotePanel';
 import { MonthCalendar } from '../ui/MonthCalendar';
 import { MonthPicker } from '../ui/MonthPicker';
 import { MoneyPanel } from '../ui/MoneyPanel';
@@ -730,6 +731,11 @@ function Workspace({ uid, user, onSignOut }: WorkspaceProps) {
   const saveLedgerNote = useCallback((n: LedgerNote) => {
     if (isAnon || !uid) { void promptLogin(); return; }
     commit({ kind: 'ledgerNote', label: '기간 메모', summary: n.period, payload: n });
+  }, [isAnon, uid, promptLogin, commit]);
+
+  const saveMonthNote = useCallback((n: MonthNote) => {
+    if (isAnon || !uid) { void promptLogin(); return; }
+    commit({ kind: 'monthNote', label: '월별 메모', summary: n.month, payload: n });
   }, [isAnon, uid, promptLogin, commit]);
 
   /** 생활비에 연결되지 않은 실제 지출을 그 주머니에 건다. 사용처는 하나만 — 대출 연결은 푼다. */
@@ -2229,7 +2235,22 @@ function Workspace({ uid, user, onSignOut }: WorkspaceProps) {
               </div>
             )}
           />
-        ) : view === 'calendar' ? (
+        ) : (
+          <>
+          {/*
+            노트 화면 맨 위의 월별 메모. 보고 있는 달의 목표 · 결과 한 장이고, 커서를 옮기면
+            그 달의 글로 바뀐다. 아이디어 목록 위에 두는 이유는 그 달에 무엇을 하려 했는지를
+            먼저 보고 적기 때문이다. 글이라 한도 · 예상 잔고 · 결산 어디에도 들어가지 않는다.
+          */}
+          {lens === 'idea' && (
+            <MonthNotePanel
+              month={ymOfDate(cursor)}
+              note={store.monthNotes.find((n) => n.id === ymOfDate(cursor)) ?? null}
+              feed={store.monthNotesFeed}
+              onSave={saveMonthNote}
+            />
+          )}
+          {view === 'calendar' ? (
           <MonthCalendar
             cursor={cursor}
             onCursorChange={setCursor}
@@ -2246,7 +2267,7 @@ function Workspace({ uid, user, onSignOut }: WorkspaceProps) {
             onDayOpen={setDaySheet}
             onDayCreate={(iso) => openCreate({ startDate: iso })}
           />
-        ) : (
+          ) : (
           <ListView
             cursor={cursor}
             entries={visible}
@@ -2255,6 +2276,8 @@ function Workspace({ uid, user, onSignOut }: WorkspaceProps) {
             onEntryClick={openEdit}
             onReorder={handleReorder}
           />
+          )}
+          </>
         )}
       </main>
 

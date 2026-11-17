@@ -1829,3 +1829,31 @@
   .rec-opts li .rec-kind { grid-column: 1 / -1; width: 100%; }
   .rec-opts li .ico-btn { width: 32px; height: 44px; }
 }
+
+/* ---------- 월별 메모 (노트 화면) ----------
+   목표 · 결과를 좌 · 우 두 칸으로 나눈다. 좁은 화면에서도 쌓지 않는다 — 위아래로 쌓으면
+   "왼쪽이 목표" 라는 약속이 깨져 어느 칸에 적는지가 매번 애매해진다. */
+.mnote {
+  display: flex; flex-direction: column; gap: 8px; padding: 12px;
+  border: 1px solid var(--line); border-radius: var(--radius); background: var(--bg-elev);
+}
+.mnote-h { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.mnote-t { margin: 0; font-size: 0.875rem; font-weight: 600; color: var(--ink); }
+.mnote-sub { font-weight: 400; color: var(--ink-3); }
+.mnote-cols { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; align-items: start; }
+.mnote-col { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.mnote-cap {
+  font-size: 0.6875rem; font-weight: 600; letter-spacing: .02em;
+  color: var(--lens-idea);
+}
+.mnote-in { width: 100%; min-height: 92px; resize: vertical; font: inherit; font-size: 0.875rem; line-height: 1.6; }
+.mnote-body {
+  margin: 0; font-size: 0.875rem; line-height: 1.65; color: var(--ink);
+  white-space: pre-wrap; overflow-wrap: anywhere;
+}
+.mnote-empty, .mnote-note { margin: 0; font-size: 0.75rem; line-height: 1.5; color: var(--ink-3); }
+.mnote-a { display: flex; justify-content: flex-end; align-items: center; gap: 6px; }
+@media (max-width: 480px) {
+  .mnote { padding: 10px; }
+  .mnote-cols { gap: 6px; }
+}

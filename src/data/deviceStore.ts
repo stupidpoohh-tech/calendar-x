@@ -16,11 +16,11 @@ export interface DeviceData extends BackupData {
   transferTo: string | null;
 }
 export const deviceCollections = ['entries', 'accounts', 'debts', 'pins', 'budgets', 'reserves', 'categories',
-  'categoryBudgets', 'ledgerNotes', 'annualBudgets', 'cards'] as const;
+  'categoryBudgets', 'ledgerNotes', 'monthNotes', 'annualBudgets', 'cards'] as const;
 export type DeviceCollection = typeof deviceCollections[number];
 export function emptyDevice(): DeviceData {
   return { version: 1, revision: 0, entries: [], accounts: [], debts: [], pins: [], budgets: [], reserves: [],
-    categories: defaultCategories(new Date().toISOString()), categoryBudgets: [], ledgerNotes: [],
+    categories: defaultCategories(new Date().toISOString()), categoryBudgets: [], ledgerNotes: [], monthNotes: [],
     annualBudgets: [], cards: [], recovery: defaultRecoveryRule(), ledger: { settleDay: 1 },
     layout: { ...NEW_USER_LAYOUT }, transferTo: null };
 }
@@ -112,7 +112,7 @@ export function applyDeviceOp(data: DeviceData, op: CommitInput): DeviceData {
   if (data.transferTo) throw new Error('계정 백업을 진행 중입니다. 처음 백업한 계정으로 로그인해 백업을 완료해 주세요. 기기 원본은 보관되어 있습니다.');
   const collections: Record<string, DeviceCollection> = { entry: 'entries', account: 'accounts', debt: 'debts',
     pin: 'pins', budget: 'budgets', reserve: 'reserves', category: 'categories', categoryBudget: 'categoryBudgets',
-    annualBudget: 'annualBudgets', card: 'cards', ledgerNote: 'ledgerNotes' };
+    annualBudget: 'annualBudgets', card: 'cards', ledgerNote: 'ledgerNotes', monthNote: 'monthNotes' };
   const key = collections[op.kind.replace(/Delete$/, '')];
   if (key) {
     const item = op.payload as { id: string };

@@ -768,6 +768,28 @@ describe('가계부 결산 — 카테고리 · 카테고리 예산 · 정산 시
     await assertFails(setDoc(at('2026-11', OTHER), note({ period: '2026-11' })));
   });
 
+  it('월별 메모 — id 가 곧 달이고, 목표 · 결과는 각각 5000자까지. 남은 읽지도 쓰지도 못한다', async () => {
+    const note = (p: Record<string, unknown> = {}) => ({
+      month: '2026-11', goal: '이사 준비', result: '계약 완료', createdAt: 't', updatedAt: 't', ...p,
+    });
+    const at = (id: string, who = ME) => doc(db(who), `users/${ME}/monthNotes/${id}`);
+    await assertSucceeds(setDoc(at('2026-11'), note()));
+    await assertSucceeds(getDoc(at('2026-11')));
+    // 한 칸만 적은 메모가 정상이다.
+    await assertSucceeds(setDoc(at('2026-11'), note({ result: '' })));
+    await assertSucceeds(setDoc(at('2026-11'), note({ goal: 'x'.repeat(5000) })));
+    await assertFails(setDoc(at('2026-11'), note({ goal: 'x'.repeat(5001) })));
+    await assertFails(setDoc(at('2026-11'), note({ result: 'x'.repeat(5001) })));
+    await assertFails(setDoc(at('2026-12'), note()));
+    await assertFails(setDoc(at('2026-13'), note({ month: '2026-13' })));
+    await assertFails(setDoc(at('memo'), note({ month: 'memo' })));
+    await assertFails(setDoc(at('2026-11'), note({ goal: 3 })));
+    // 두 칸 모두 있어야 한다 — 한 칸을 빼고 쓰면 읽는 쪽이 빈 글과 가를 수 없다.
+    await assertFails(setDoc(at('2026-11'), { month: '2026-11', goal: '목표', createdAt: 't', updatedAt: 't' }));
+    await assertFails(getDoc(at('2026-11', OTHER)));
+    await assertFails(setDoc(at('2026-10', OTHER), note({ month: '2026-10' })));
+  });
+
   it('정산 시작일은 1~31 정수다. 이웃 필드(회복 규칙)는 그대로 쓴다', async () => {
     const me = doc(db(ME), `users/${ME}`);
     await assertSucceeds(setDoc(me, { ledger: { settleDay: 25 } }, { merge: true }));

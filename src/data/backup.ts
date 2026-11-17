@@ -9,7 +9,7 @@ import { todayISO } from '../domain/date';
 import type {
   AnnualBudget,
   Card,
-  Account, Budget, Category, CategoryBudget, Debt, Entry, LedgerNote, LedgerSettings, Pin, RecoveryRule, Reserve,
+  Account, Budget, Category, CategoryBudget, Debt, Entry, LedgerNote, LedgerSettings, MonthNote, Pin, RecoveryRule, Reserve,
 } from '../domain/types';
 
 /**
@@ -46,8 +46,13 @@ import type {
  * 파일이다. 거래에는 카드 연결(`money.cardId` · `money.cardCycle`)이 실릴 수 있다 — 예전 앱이 가져오면 연결이 떨어져
  * 미결제가 사라지고 한도가 부푼다. 예전 앱은 모르는 버전을 거절한다.
  */
+/*
+ * 13 부터 `monthNotes`(노트 화면의 월별 메모 — 목표 · 결과)가 **필수**다. 같은 이유로 올렸다 —
+ * 메모가 빠진 잘린 파일과 그 구조가 없던 시절의 파일을 가르기 위해서다. 예전 앱은 모르는
+ * 버전을 거절하므로, 그 앱이 이 파일을 가져와 월별 메모를 흘리는 길도 함께 막힌다.
+ */
 // v12 preserves Recovery off/do classifications; older apps must not silently discard them.
-export const BACKUP_VERSION = 12;
+export const BACKUP_VERSION = 13;
 
 export interface BackupPayload {
   app: 'Dada Calendar';
@@ -62,6 +67,8 @@ export interface BackupPayload {
   categories: Category[];
   categoryBudgets: CategoryBudget[];
   ledgerNotes: LedgerNote[];
+  /** 월별 메모(v13). 노트 화면의 목표 · 결과. */
+  monthNotes: MonthNote[];
   /** 연간 카테고리 예산(v9). */
   annualBudgets: AnnualBudget[];
   /** 신용카드(v11). */
@@ -86,6 +93,7 @@ export interface BackupData {
   categories: Category[];
   categoryBudgets: CategoryBudget[];
   ledgerNotes: LedgerNote[];
+  monthNotes: MonthNote[];
   annualBudgets: AnnualBudget[];
   cards: Card[];
   ledger: LedgerSettings | null;
@@ -106,6 +114,7 @@ export function buildBackup(data: BackupData): BackupPayload {
     categories: data.categories,
     categoryBudgets: data.categoryBudgets,
     ledgerNotes: data.ledgerNotes,
+    monthNotes: data.monthNotes,
     annualBudgets: data.annualBudgets,
     cards: data.cards,
     ledger: data.ledger,
@@ -145,7 +154,7 @@ export function downloadJSON(payload: unknown, filename: string): void {
 export function countBackup(d: Omit<BackupData, 'recovery' | 'ledger'>): number {
   return d.entries.length + d.accounts.length + d.debts.length + d.pins.length
     + d.budgets.length + d.reserves.length + d.categories.length + d.categoryBudgets.length
-    + d.ledgerNotes.length + d.annualBudgets.length + d.cards.length;
+    + d.ledgerNotes.length + d.monthNotes.length + d.annualBudgets.length + d.cards.length;
 }
 
 /** 병합. 같은 id 는 원본을 남기고 새 항목만 더한다. */
@@ -164,6 +173,7 @@ export function mergeBackup(current: BackupData, incoming: BackupData): BackupDa
     categories: merge(current.categories, incoming.categories),
     categoryBudgets: merge(current.categoryBudgets, incoming.categoryBudgets),
     ledgerNotes: merge(current.ledgerNotes, incoming.ledgerNotes),
+    monthNotes: merge(current.monthNotes, incoming.monthNotes),
     annualBudgets: merge(current.annualBudgets, incoming.annualBudgets),
     cards: merge(current.cards, incoming.cards),
     // 설정은 병합할 수 없다. 쓰고 있는 것을 남긴다.

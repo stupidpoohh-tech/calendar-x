@@ -166,6 +166,11 @@ function richAccount(): BackupData {
       id: '2026-09', period: '2026-09', text: '배달을 줄이자.\n외식은 주 1회.',
       createdAt: '2026-09-25T00:00:00.000Z', updatedAt: '2026-09-25T00:00:00.000Z',
     }],
+    // v13 — 월별 메모. 두 칸(목표 · 결과)이 왕복 뒤에도 그대로여야 한다.
+    monthNotes: [{
+      id: '2026-10', month: '2026-10', goal: '이사 준비 끝내기', result: '계약까지 했다.',
+      createdAt: '2026-10-01T00:00:00.000Z', updatedAt: '2026-10-31T00:00:00.000Z',
+    }],
     ledger: { settleDay: 25 },
     recovery: { ...defaultRecoveryRule(), enabled: true, intervalDays: 4, debtCount: 1 },
   };

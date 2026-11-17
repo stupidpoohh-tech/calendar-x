@@ -640,6 +640,29 @@ export interface LedgerNote {
   updatedAt: string;
 }
 
+/**
+ * 월별 메모 — 노트(아이디어) 화면의 "이 달". 달 하나에 한 장이고 문서 id 가 곧 달 열쇠다
+ * (`YYYY-MM`, 규칙이 `id == month` 를 강제한다). 같은 달에 두 장이 생기면 어느 쪽이 그 달의
+ * 글인지 알 수 없다.
+ *
+ * 칸이 둘인 이유는 쓰는 때가 다르기 때문이다 — `goal` 은 달을 시작하며 적고 `result` 는 달을
+ * 끝내며 적는다. 한 칸에 몰아 적으면 나중에 둘을 가를 수 없다. 둘 다 그냥 글이고 계산에
+ * 들어가지 않는다.
+ *
+ * 정산 기간 메모(`LedgerNote`)와는 다른 자료다 — 그쪽은 정산 시작일이 정하는 기간이고
+ * 이쪽은 달력 월이다. 시작일을 바꿔도 이 글의 경계는 움직이지 않는다.
+ */
+export interface MonthNote {
+  id: YearMonth;
+  month: YearMonth;
+  /** 목표 — 왼쪽 칸. */
+  goal: string;
+  /** 결과 — 오른쪽 칸. */
+  result: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
 /** 가계부 설정. `users/{uid}` 문서의 `ledger` 필드에 산다. */
 export interface LedgerSettings {
   /** 매월 정산 시작일 1~31. 그 달에 없는 날이면 말일로 당긴다. */
@@ -649,7 +672,7 @@ export interface LedgerSettings {
 /** 백업이 담는 컬렉션. */
 export type BackupCollection =
   | 'entries' | 'accounts' | 'debts' | 'pins' | 'budgets' | 'reserves'
-  | 'categories' | 'categoryBudgets' | 'ledgerNotes' | 'annualBudgets' | 'cards';
+  | 'categories' | 'categoryBudgets' | 'ledgerNotes' | 'monthNotes' | 'annualBudgets' | 'cards';
 
 export type ThemePref = 'system' | 'light' | 'dark';
 /** 글씨 크기. 'auto' 는 브라우저·OS 설정을 따른다는 뜻이다. */

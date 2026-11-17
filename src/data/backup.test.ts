@@ -24,7 +24,7 @@ describe('buildBackup', () => {
   it('내보낸 파일을 그대로 되읽는다', () => {
     const data = {
       entries: [newEntry('task', { id: 't1', title: '치과', startDate: '2026-08-20' })],
-      accounts: [account], debts: [], pins: [], budgets: [], reserves: [], categories: [], categoryBudgets: [], ledgerNotes: [], annualBudgets: [], cards: [], ledger: null, recovery: null,
+      accounts: [account], debts: [], pins: [], budgets: [], reserves: [], categories: [], categoryBudgets: [], ledgerNotes: [], monthNotes: [], annualBudgets: [], cards: [], ledger: null, recovery: null,
     };
     const r = readBackupFile(JSON.stringify(buildBackup(data)));
     expect(r.ok).toBe(true);
@@ -41,7 +41,7 @@ describe('buildBackup', () => {
     // 조용히 흘리게 된다.
     const rule = { ...defaultRecoveryRule(), enabled: true, intervalDays: 5, debtCount: 2 };
     const r = readBackupFile(JSON.stringify(buildBackup({
-      entries: [], accounts: [], debts: [], pins: [], budgets: [], reserves: [], categories: [], categoryBudgets: [], ledgerNotes: [], annualBudgets: [], cards: [], ledger: null, recovery: rule,
+      entries: [], accounts: [], debts: [], pins: [], budgets: [], reserves: [], categories: [], categoryBudgets: [], ledgerNotes: [], monthNotes: [], annualBudgets: [], cards: [], ledger: null, recovery: rule,
     })));
     expect(r.ok).toBe(true);
     if (r.ok) {
@@ -61,7 +61,7 @@ describe('buildBackup', () => {
     const reserve = newReserve({ id: 'r1', name: '비상금', amountMinor: 500_000 });
     const r = readBackupFile(JSON.stringify(buildBackup({
       entries: [], accounts: [], debts: [], pins: [],
-      budgets: [budget], reserves: [reserve], categories: [], categoryBudgets: [], ledgerNotes: [], annualBudgets: [], cards: [], ledger: null, recovery: null,
+      budgets: [budget], reserves: [reserve], categories: [], categoryBudgets: [], ledgerNotes: [], monthNotes: [], annualBudgets: [], cards: [], ledger: null, recovery: null,
     })));
     expect(r.ok).toBe(true);
     if (r.ok) {
@@ -78,15 +78,15 @@ describe('buildBackup', () => {
     const theirs = newBudget({ id: 'b1', name: '파일 것', amountMinor: 100_000 });
     const added = newReserve({ id: 'r2', name: '여행', amountMinor: 300_000 });
     const merged = mergeBackup(
-      { entries: [], accounts: [], debts: [], pins: [], budgets: [mine], reserves: [], categories: [], categoryBudgets: [], ledgerNotes: [], annualBudgets: [], cards: [], ledger: null, recovery: null },
-      { entries: [], accounts: [], debts: [], pins: [], budgets: [theirs], reserves: [added], categories: [], categoryBudgets: [], ledgerNotes: [], annualBudgets: [], cards: [], ledger: null, recovery: null },
+      { entries: [], accounts: [], debts: [], pins: [], budgets: [mine], reserves: [], categories: [], categoryBudgets: [], ledgerNotes: [], monthNotes: [], annualBudgets: [], cards: [], ledger: null, recovery: null },
+      { entries: [], accounts: [], debts: [], pins: [], budgets: [theirs], reserves: [added], categories: [], categoryBudgets: [], ledgerNotes: [], monthNotes: [], annualBudgets: [], cards: [], ledger: null, recovery: null },
     );
     expect(merged.budgets).toEqual([mine]);
     expect(merged.reserves).toEqual([added]);
   });
 
   it('내보낸 파일에는 앱 이름과 버전이 들어 있다', () => {
-    const payload = buildBackup({ entries: [], accounts: [], debts: [], pins: [], budgets: [], reserves: [], categories: [], categoryBudgets: [], ledgerNotes: [], annualBudgets: [], cards: [], ledger: null, recovery: null });
+    const payload = buildBackup({ entries: [], accounts: [], debts: [], pins: [], budgets: [], reserves: [], categories: [], categoryBudgets: [], ledgerNotes: [], monthNotes: [], annualBudgets: [], cards: [], ledger: null, recovery: null });
     expect(payload.app).toBe('Dada Calendar');
     expect(payload.version).toBe(BACKUP_VERSION);
   });
@@ -101,7 +101,7 @@ describe('v6 — 결산 자료도 한 파일에', () => {
     }];
     const r = readBackupFile(JSON.stringify(buildBackup({
       entries: [], accounts: [], debts: [], pins: [], budgets: [], reserves: [],
-      categories, categoryBudgets, ledgerNotes: [], annualBudgets: [], cards: [], ledger: { settleDay: 25 }, recovery: null,
+      categories, categoryBudgets, ledgerNotes: [], monthNotes: [], annualBudgets: [], cards: [], ledger: { settleDay: 25 }, recovery: null,
     })));
     expect(r.ok).toBe(true);
     if (r.ok) {
@@ -117,7 +117,7 @@ describe('v6 — 결산 자료도 한 파일에', () => {
 
 describe('v8 — 세이브 보호 · 목표 · 보관 (P1)', () => {
   const empty = {
-    entries: [], accounts: [], debts: [], pins: [], budgets: [], categories: [], categoryBudgets: [], ledgerNotes: [], annualBudgets: [], cards: [],
+    entries: [], accounts: [], debts: [], pins: [], budgets: [], categories: [], categoryBudgets: [], ledgerNotes: [], monthNotes: [], annualBudgets: [], cards: [],
     ledger: null, recovery: null,
   };
   const off = newReserve({
@@ -178,7 +178,7 @@ describe('v8 — 세이브 보호 · 목표 · 보관 (P1)', () => {
 describe('v9 — 연간 카테고리 예산 (P2)', () => {
   const empty = {
     entries: [], accounts: [], debts: [], pins: [], budgets: [], reserves: [], categories: [], categoryBudgets: [],
-    ledgerNotes: [], annualBudgets: [], cards: [], ledger: null, recovery: null,
+    ledgerNotes: [], monthNotes: [], annualBudgets: [], cards: [], ledger: null, recovery: null,
   };
   const y26 = newAnnualBudget('beauty', 2026, 300_000);
   const y27 = newAnnualBudget('beauty', 2027, 600_000, { '04': 400_000, '10': 200_000 });
@@ -241,7 +241,7 @@ describe('v9 — 연간 카테고리 예산 (P2)', () => {
 describe('v10 — 세이브 지출 연결 (P3)', () => {
   const empty = {
     entries: [], accounts: [], debts: [], pins: [], budgets: [], reserves: [], categories: [], categoryBudgets: [],
-    ledgerNotes: [], annualBudgets: [], cards: [], ledger: null, recovery: null,
+    ledgerNotes: [], monthNotes: [], annualBudgets: [], cards: [], ledger: null, recovery: null,
   };
   const save = newReserve({ id: 'r1', name: '여행', amountMinor: 300_000 });
   const air = newEntry('money', {
@@ -300,7 +300,7 @@ describe('v10 — 세이브 지출 연결 (P3)', () => {
 describe('v11 — 신용카드 (P4)', () => {
   const empty = {
     entries: [], accounts: [], debts: [], pins: [], budgets: [], reserves: [], categories: [], categoryBudgets: [],
-    ledgerNotes: [], annualBudgets: [], cards: [], ledger: null, recovery: null,
+    ledgerNotes: [], monthNotes: [], annualBudgets: [], cards: [], ledger: null, recovery: null,
   };
   const life = newCard({ id: 'life', name: '생활 카드', closeDay: 31, payDay: 25, payMonthOffset: 1, accountId: 'a1' });
   const shoe = newEntry('money', {
@@ -316,7 +316,7 @@ describe('v11 — 신용카드 (P4)', () => {
     const r = readBackupFile(JSON.stringify(buildBackup({ ...empty, cards: [life], entries: [shoe, paid] })));
     expect(r.ok).toBe(true);
     if (r.ok) {
-      expect(r.file.format).toBe('v12');
+      expect(r.file.format).toBe('v13');
       expect(r.file.data.cards).toEqual([life]);
       expect(r.file.data.entries.map((e) => [e.money?.cardId, e.money?.cardCycle ?? null, e.money?.reserveId ?? null])).toEqual([
         ['life', null, 'trip'], ['life', '2026-11', null],
