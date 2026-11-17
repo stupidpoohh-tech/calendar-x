@@ -29,14 +29,14 @@ import {
 } from 'firebase/firestore';
 import { layoutFrom, type Layout } from '../domain/layout';
 import type {
-  AnnualBudget, Account, Budget, Card, Category, CategoryBudget, Debt, Entry, LedgerNote, LedgerSettings, Pin, RecoveryRule, Reserve,
+  AnnualBudget, Account, Budget, Card, Category, CategoryBudget, Debt, Entry, LedgerNote, LedgerSettings, MonthNote, Pin, RecoveryRule, Reserve,
   ReservePatch,
   SharedBoard, SharedCollection, SharedCollectionItem, SharedDday, SharedInvite,
   SharedNote, SharedPin, SharedSource, SharedTodoItem,
 } from '../domain/types';
 import {
   annualBudgetToDoc, accountToDoc, budgetToDoc, cardToDoc, categoryBudgetToDoc, categoryToDoc, debtToDoc, entryToDoc,
-  ledgerNoteToDoc, ledgerSettingsToDoc, pinToDoc, recoveryRuleToDoc, reservePatchToDoc, reserveToDoc,
+  ledgerNoteToDoc, ledgerSettingsToDoc, monthNoteToDoc, pinToDoc, recoveryRuleToDoc, reservePatchToDoc, reserveToDoc,
 } from './converters';
 import {
   sharedBoardToDoc, sharedCollectionItemToDoc, sharedCollectionToDoc, sharedDdayToDoc,
@@ -57,6 +57,8 @@ export type PendingKind =
   | 'recoveryRule' | 'recoveryPatch' | 'recoveryCommit'
   // 가계부 결산. 카테고리 여럿(기본 카테고리 만들기 · 순서 바꾸기)은 한 배치로 쓴다.
   | 'category' | 'categories' | 'categoryBudget' | 'ledgerSettings' | 'ledgerNote'
+  // 월별 메모(노트 화면). 달 하나에 한 장 — 문서 전체를 쓴다.
+  | 'monthNote'
   // 연간 카테고리 예산(P2). 한 해 한 카테고리 한 장 — 쓰기는 문서 전체, 월간으로 되돌리면 지운다.
   | 'annualBudget' | 'annualBudgetDelete'
   // 신용카드(P4). 문서 전체를 쓴다 — 고칠 칸이 몇 개 없고 자주 고치지 않는다. 연결된 거래가 있으면 지우지 않고 보관한다.
@@ -79,7 +81,7 @@ const KINDS: readonly PendingKind[] = [
   'entry', 'entryDelete', 'entryPrivate', 'account', 'debt', 'debtDelete',
   'pin', 'pinDelete', 'budget', 'budgetDelete', 'reserve', 'reserveDelete', 'reservePatch',
   'taskOrder', 'recoveryRule', 'recoveryPatch', 'recoveryCommit',
-  'category', 'categories', 'categoryBudget', 'ledgerSettings', 'ledgerNote', 'ledgerBatch', 'layout',
+  'category', 'categories', 'categoryBudget', 'ledgerSettings', 'ledgerNote', 'monthNote', 'ledgerBatch', 'layout',
   'annualBudget', 'annualBudgetDelete', 'card', 'cardDelete',
   'sharedBoard', 'sharedInvite', 'sharedInviteDelete',
   'sharedSource', 'sharedItem', 'sharedItemDelete',
@@ -150,7 +152,7 @@ export interface SharedSourcePayload {
 
 export type PendingPayload =
   | Entry | Account | Debt | Pin | Budget | Reserve | RecoveryRule
-  | Category | { items: Category[] } | CategoryBudget | LedgerSettings | LedgerNote | Layout | AnnualBudget | Card
+  | Category | { items: Category[] } | CategoryBudget | LedgerSettings | LedgerNote | MonthNote | Layout | AnnualBudget | Card
   | { id: string }
   | { id: string; keepPrivate: boolean }
   | { ordered: { id: string; order: number }[] }
@@ -285,6 +287,10 @@ export function sendPending(db: Firestore, uid: string, op: CommitInput): Promis
     case 'ledgerNote': {
       const n = op.payload as LedgerNote;
       return setDoc(docIn(db, uid, COL.ledgerNotes, n.id), ledgerNoteToDoc(n));
+    }
+    case 'monthNote': {
+      const n = op.payload as MonthNote;
+      return setDoc(docIn(db, uid, COL.monthNotes, n.id), monthNoteToDoc(n));
     }
     case 'annualBudget': {
       const b = op.payload as AnnualBudget;
@@ -496,6 +502,10 @@ function targetOf(op: PendingOp, uid: string): { path: string[]; base: string } 
     case 'ledgerNote': {
       const n = op.payload as LedgerNote;
       return mine(COL.ledgerNotes, n.id, n.updatedAt);
+    }
+    case 'monthNote': {
+      const n = op.payload as MonthNote;
+      return mine(COL.monthNotes, n.id, n.updatedAt);
     }
     case 'reserveDelete': return mine(COL.reserves, asId(op.payload), op.at);
     case 'annualBudget': {

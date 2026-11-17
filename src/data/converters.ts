@@ -10,7 +10,7 @@ import { MONEY_FLOWS, moneyFlowOf, moneyStatusOf } from '../domain/ledger';
 import { clampSettleDay } from '../domain/period';
 import { MONTH_NOS } from '../domain/annualBudget';
 import type {
-  AnnualBudget, MonthNo, Account, Budget, Card, Category, CategoryBudget, ColorId, Debt, Entry, EntryKind, LedgerNote, LedgerSettings,
+  AnnualBudget, MonthNo, Account, Budget, Card, Category, CategoryBudget, ColorId, Debt, Entry, EntryKind, LedgerNote, LedgerSettings, MonthNote,
   MoneyFields, MoneyFlow, MoneyType, Pin, PlannedRef, Reserve, ReservePatch,
   RecoveryFields, RecoveryOption, RecoveryRule, RecoveryWindowId,
   Recurrence, RepeatFreq, TaskStatus,
@@ -631,6 +631,25 @@ export function ledgerNoteFromDoc(id: string, raw: Raw): LedgerNote {
 
 export function ledgerNoteToDoc(n: LedgerNote): Raw {
   return { period: n.period, text: n.text, createdAt: n.createdAt, updatedAt: n.updatedAt };
+}
+
+/** 월별 메모 글자 수 상한(칸마다). 규칙과 같은 값이다. */
+export const MONTH_NOTE_MAX = 5000;
+
+/** 달 열쇠는 문서 id 를 믿는다 — 규칙이 `id == month` 를 강제하므로 둘은 같다. */
+export function monthNoteFromDoc(id: string, raw: Raw): MonthNote {
+  const month = isPeriodKey(id) ? id : isPeriodKey(raw.month) ? raw.month : '9999-12';
+  return {
+    id, month,
+    goal: str(raw.goal).slice(0, MONTH_NOTE_MAX),
+    result: str(raw.result).slice(0, MONTH_NOTE_MAX),
+    createdAt: str(raw.createdAt),
+    updatedAt: str(raw.updatedAt),
+  };
+}
+
+export function monthNoteToDoc(n: MonthNote): Raw {
+  return { month: n.month, goal: n.goal, result: n.result, createdAt: n.createdAt, updatedAt: n.updatedAt };
 }
 
 /** `users/{uid}` 문서의 `ledger` 필드. 없으면 1일 정산이다. */

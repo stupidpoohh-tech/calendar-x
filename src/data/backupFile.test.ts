@@ -689,6 +689,60 @@ describe('v7 — 정산 기간 메모', () => {
   });
 });
 
+describe('v13 — 월별 메모', () => {
+  const v13 = (over: Record<string, unknown> = {}) => ({
+    ...v3(), version: 13, budgets: [], reserves: [], categories: [], categoryBudgets: [], ledgerNotes: [],
+    annualBudgets: [], cards: [], monthNotes: [], ledger: { settleDay: 25 }, ...over,
+  });
+  const note = (over: Record<string, unknown> = {}) => ({
+    id: '2026-11', month: '2026-11', goal: '이사 준비', result: '계약 완료', createdAt: '', updatedAt: '', ...over,
+  });
+
+  it('두 칸을 그대로 읽는다', () => {
+    const r = read(v13({ monthNotes: [note()] }));
+    expect(r.ok).toBe(true);
+    if (r.ok) {
+      expect(r.file.format).toBe('v13');
+      expect(r.file.data.monthNotes).toEqual([note()]);
+    }
+  });
+
+  it('한 칸만 적은 메모가 정상이다 — 빈 문자열을 막지 않는다', () => {
+    const r = read(v13({ monthNotes: [note({ result: '' })] }));
+    expect(r.ok).toBe(true);
+    if (r.ok) expect(r.file.data.monthNotes[0]?.result).toBe('');
+  });
+
+  it('v13 에 monthNotes 가 없으면 잘린 파일로 본다', () => {
+    const obj = v13();
+    delete (obj as Record<string, unknown>).monthNotes;
+    expect(problemsOf(read(obj)).some((x) => x.startsWith('monthNotes') && x.includes('반드시'))).toBe(true);
+  });
+
+  it('v12 파일에 없는 것은 정상이다', () => {
+    const obj = v13({ version: 12 });
+    delete (obj as Record<string, unknown>).monthNotes;
+    const r = read(obj);
+    expect(r.ok).toBe(true);
+    if (r.ok) expect(r.file.data.monthNotes).toEqual([]);
+  });
+
+  it('v12 파일에 들어 있으면 검증은 한다 — 손으로 고친 파일이 그냥 지나가지 않는다', () => {
+    expect(problemsOf(read(v13({ version: 12, monthNotes: [note({ goal: 3 })] }))).length).toBeGreaterThan(0);
+  });
+
+  it('규칙이 거절할 모양은 미리 거른다 — id ≠ 달, 깨진 달, 문자열 아님, 너무 긴 글', () => {
+    expect(problemsOf(read(v13({ monthNotes: [note({ id: 'memo' })] })))[0]).toContain('달');
+    expect(problemsOf(read(v13({ monthNotes: [note({ id: '2026-13', month: '2026-13' })] })))[0]).toContain('YYYY-MM');
+    expect(problemsOf(read(v13({ monthNotes: [note({ result: null })] }))).length).toBeGreaterThan(0);
+    expect(problemsOf(read(v13({ monthNotes: [note({ goal: 'x'.repeat(5001) })] }))).length).toBeGreaterThan(0);
+  });
+
+  it('아직 모르는 버전은 거절한다', () => {
+    expect(problemsOf(read(v13({ version: 14 })))[0]).toContain('모르는 버전');
+  });
+});
+
 describe('생활비 외 지출(outsidePocket)', () => {
   const m = (outsidePocket: unknown) => ({ type: 'expense', amountMinor: 65_000, currency: 'KRW', linkedEntryId: null, outsidePocket });
   it('켜 둔 값은 그대로 읽는다', () => {

@@ -161,6 +161,12 @@ export function useDemoStore(): StoreState {
         text: '배달이 예산을 넘었다. 이번 달은 장 보기로 돌린다.', createdAt: '', updatedAt: '',
       }],
       ledgerNotesFeed: FEED_DEMO,
+      // 이번 달의 목표 · 결과 한 장. 노트 화면 맨 위가 어떻게 보이는지 미리 보여 준다.
+      monthNotes: [{
+        id: today.slice(0, 7), month: today.slice(0, 7),
+        goal: '이사 준비 끝내기\n주 3회 달리기', result: '', createdAt: '', updatedAt: '',
+      }],
+      monthNotesFeed: FEED_DEMO,
       // 메모리에서 만든 값이라 기다릴 것이 없다. 두 갈래 모두 받아 둔 상태다.
       display: FEED_DEMO, calc: FEED_DEMO,
       loading: false, error: null, rulesBlocked: false,

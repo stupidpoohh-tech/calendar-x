@@ -17,7 +17,7 @@ import { newEntry } from '../domain/entry';
 import type { SnapMeta } from '../data/repo';
 
 type Kind = 'entries' | 'recurring' | 'accounts' | 'debts' | 'pins' | 'budgets' | 'reserves' | 'reserveLinked' | 'cards' | 'cardLinked'
-  | 'categories' | 'categoryBudgets' | 'annualBudgets' | 'ledgerNotes' | 'ledger';
+  | 'categories' | 'categoryBudgets' | 'annualBudgets' | 'ledgerNotes' | 'monthNotes' | 'ledger';
 
 interface Sub {
   kind: Kind;
@@ -75,6 +75,8 @@ vi.mock('../data/repo', async (importOriginal) => {
       record('annualBudgets', uid, [], cb, onError),
     subscribeLedgerNotes: (_db: unknown, uid: string, cb: unknown, onError: unknown) =>
       record('ledgerNotes', uid, [], cb, onError),
+    subscribeMonthNotes: (_db: unknown, uid: string, cb: unknown, onError: unknown) =>
+      record('monthNotes', uid, [], cb, onError),
     subscribeLedgerSettings: (_db: unknown, uid: string, cb: unknown, onError: unknown) =>
       record('ledger', uid, [], cb, onError),
   };

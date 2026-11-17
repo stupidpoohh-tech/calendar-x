@@ -21,6 +21,8 @@ export const COL = {
   categoryBudgets: 'categoryBudgets',
   /** 정산 기간 메모. 문서 id = 기간 열쇠(YYYY-MM). */
   ledgerNotes: 'ledgerNotes',
+  /** 월별 메모(노트 화면). 문서 id = 달 열쇠(YYYY-MM). 목표 · 결과 두 칸. */
+  monthNotes: 'monthNotes',
   /** 연간 카테고리 예산. 문서 id = 카테고리id~연도. 소비 계획이고 한도에 들어가지 않는다. */
   annualBudgets: 'annualBudgets',
   cards: 'cards',

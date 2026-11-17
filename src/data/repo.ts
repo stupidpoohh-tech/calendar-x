@@ -18,11 +18,12 @@ import { normalizeDate, ymOf } from '../domain/date';
 import { describeFirestoreError } from './errors';
 import { layoutFrom, type Layout } from '../domain/layout';
 import type {
-  AnnualBudget, Account, Budget, Card, Category, CategoryBudget, Debt, Entry, LedgerNote, LedgerSettings, Pin, RecoveryRule, Reserve, YearMonth,
+  AnnualBudget, Account, Budget, Card, Category, CategoryBudget, Debt, Entry, LedgerNote, LedgerSettings, MonthNote, Pin, RecoveryRule, Reserve, YearMonth,
 } from '../domain/types';
 import {
   annualBudgetFromDoc, annualBudgetToDoc, accountFromDoc, accountToDoc, budgetFromDoc, budgetToDoc, cardFromDoc, cardToDoc,
   categoryBudgetFromDoc, categoryBudgetToDoc, categoryFromDoc, categoryToDoc, ledgerNoteFromDoc, ledgerNoteToDoc,
+  monthNoteFromDoc, monthNoteToDoc,
   debtFromDoc, debtToDoc, entryFromDoc, entryToDoc, ledgerSettingsFromDoc, ledgerSettingsToDoc,
   pinFromDoc, pinToDoc, recoveryRuleFromDoc, recoveryRuleToDoc, reserveFromDoc, reserveToDoc,
 } from './converters';
@@ -382,6 +383,18 @@ export function subscribeLedgerNotes(
   );
 }
 
+/** 월별 메모. 한 달에 한 장이라 작고 달과 무관하게 전량 받는다 — 커서를 옮겨도 다시 붙지 않는다. */
+export function subscribeMonthNotes(
+  db: Firestore, uid: string, cb: SnapSink<MonthNote>, onError: ErrorSink,
+): Unsubscribe {
+  if (uid === DEVICE_UID) return watchDevice(d => d.monthNotes, value => cb(value, deviceMeta), error => onError('기기 저장소', error));
+  return onSnapshot(
+    col(db, uid, COL.monthNotes), WITH_META,
+    keepingIdentity(monthNoteFromDoc, cb),
+    (err) => onError('monthNotes', err),
+  );
+}
+
 /** 가계부 설정(정산 시작일). 회복 규칙과 같은 사용자 문서의 다른 필드다. */
 export function subscribeLedgerSettings(
   db: Firestore, uid: string, cb: (s: LedgerSettings, meta: SnapMeta) => void, onError: ErrorSink,
@@ -632,10 +645,10 @@ export async function fetchAll(db: Firestore, uid: string): Promise<{
   entries: Entry[]; accounts: Account[]; debts: Debt[]; pins: Pin[];
   budgets: Budget[]; reserves: Reserve[];
   categories: Category[]; categoryBudgets: CategoryBudget[]; ledgerNotes: LedgerNote[];
-  annualBudgets: AnnualBudget[]; cards: Card[];
+  monthNotes: MonthNote[]; annualBudgets: AnnualBudget[]; cards: Card[];
 }> {
   if (uid === DEVICE_UID) return readDevice();
-  const [e, a, d, p, b, r, c, cb, ln, ab, cd] = await Promise.all([
+  const [e, a, d, p, b, r, c, cb, ln, mn, ab, cd] = await Promise.all([
     getDocs(col(db, uid, COL.entries)),
     getDocs(col(db, uid, COL.accounts)),
     getDocs(col(db, uid, COL.debts)),
@@ -645,6 +658,7 @@ export async function fetchAll(db: Firestore, uid: string): Promise<{
     getDocs(col(db, uid, COL.categories)),
     getDocs(col(db, uid, COL.categoryBudgets)),
     getDocs(col(db, uid, COL.ledgerNotes)),
+    getDocs(col(db, uid, COL.monthNotes)),
     getDocs(col(db, uid, COL.annualBudgets)),
     getDocs(col(db, uid, COL.cards)),
   ]);
@@ -658,6 +672,7 @@ export async function fetchAll(db: Firestore, uid: string): Promise<{
     categories: mapSnap(c, categoryFromDoc),
     categoryBudgets: mapSnap(cb, categoryBudgetFromDoc),
     ledgerNotes: mapSnap(ln, ledgerNoteFromDoc),
+    monthNotes: mapSnap(mn, monthNoteFromDoc),
     annualBudgets: mapSnap(ab, annualBudgetFromDoc),
     cards: mapSnap(cd, cardFromDoc),
   };
@@ -696,7 +711,7 @@ export async function writeMany(
   payload: {
     entries?: Entry[]; accounts?: Account[]; debts?: Debt[]; pins?: Pin[];
     budgets?: Budget[]; reserves?: Reserve[];
-    categories?: Category[]; categoryBudgets?: CategoryBudget[]; ledgerNotes?: LedgerNote[];
+    categories?: Category[]; categoryBudgets?: CategoryBudget[]; ledgerNotes?: LedgerNote[]; monthNotes?: MonthNote[];
     annualBudgets?: AnnualBudget[]; cards?: Card[];
   },
   onProgress?: (done: number, total: number) => void,
@@ -715,6 +730,7 @@ export async function writeMany(
       name: COL.categoryBudgets, id: x.id, data: categoryBudgetToDoc(x),
     })),
     ...(payload.ledgerNotes ?? []).map((x) => ({ name: COL.ledgerNotes, id: x.id, data: ledgerNoteToDoc(x) })),
+    ...(payload.monthNotes ?? []).map((x) => ({ name: COL.monthNotes, id: x.id, data: monthNoteToDoc(x) })),
     ...(payload.annualBudgets ?? []).map((x) => ({ name: COL.annualBudgets, id: x.id, data: annualBudgetToDoc(x) })),
     ...(payload.cards ?? []).map((x) => ({ name: COL.cards, id: x.id, data: cardToDoc(x) })),
   ];
@@ -774,7 +790,7 @@ export async function createManyIfAbsent(
   payload: {
     entries?: Entry[]; accounts?: Account[]; debts?: Debt[]; pins?: Pin[];
     budgets?: Budget[]; reserves?: Reserve[];
-    categories?: Category[]; categoryBudgets?: CategoryBudget[]; ledgerNotes?: LedgerNote[];
+    categories?: Category[]; categoryBudgets?: CategoryBudget[]; ledgerNotes?: LedgerNote[]; monthNotes?: MonthNote[];
     annualBudgets?: AnnualBudget[]; cards?: Card[];
   },
   onProgress?: (done: number, total: number) => void,
@@ -793,6 +809,7 @@ export async function createManyIfAbsent(
       name: COL.categoryBudgets, id: x.id, data: categoryBudgetToDoc(x),
     })),
     ...(payload.ledgerNotes ?? []).map((x) => ({ name: COL.ledgerNotes, id: x.id, data: ledgerNoteToDoc(x) })),
+    ...(payload.monthNotes ?? []).map((x) => ({ name: COL.monthNotes, id: x.id, data: monthNoteToDoc(x) })),
     ...(payload.annualBudgets ?? []).map((x) => ({ name: COL.annualBudgets, id: x.id, data: annualBudgetToDoc(x) })),
     ...(payload.cards ?? []).map((x) => ({ name: COL.cards, id: x.id, data: cardToDoc(x) })),
   ];

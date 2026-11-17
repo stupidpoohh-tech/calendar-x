@@ -29,6 +29,8 @@
  * | v9 | `version: 9` | v8 + `annualBudgets`(연간 카테고리 예산, P2) **필수** |
  * | v10 | `version: 10` | v9 와 같은 구조. 지출에 세이브 연결(`money.reserveId`, P3)이 실릴 수 있다 |
  * | v11 | `version: 11` | v10 + `cards`(신용카드, P4) **필수**. 거래에 카드 연결(`money.cardId` · `cardCycle`)이 실릴 수 있다 |
+ * | v12 | `version: 12` | v11 과 같은 구조. 회복의 OFF 항목 분류가 실릴 수 있다 |
+ * | v13 | `version: 13` | v12 + `monthNotes`(노트 화면의 월별 메모 — 목표 · 결과) **필수** |
  *
  * 없는 컬렉션을 빈 배열로 넘겨 짚지 않는다. v2·v3 파일에 `debts` 가 없다면 그건
  * 빈 백업이 아니라 깨진 파일이다.
@@ -45,14 +47,15 @@ import type { BackupCollection } from '../domain/types';
 import type { BackupData } from './backup';
 import {
   accountFromDoc, budgetFromDoc, categoryBudgetFromDoc, categoryFromDoc, debtFromDoc,
-  annualBudgetFromDoc, cardFromDoc, entryFromDoc, LEDGER_NOTE_MAX, ledgerNoteFromDoc, ledgerSettingsFromDoc, pinFromDoc, recoveryRuleFromDoc, reserveFromDoc,
+  annualBudgetFromDoc, cardFromDoc, entryFromDoc, LEDGER_NOTE_MAX, ledgerNoteFromDoc, ledgerSettingsFromDoc,
+  MONTH_NOTE_MAX, monthNoteFromDoc, pinFromDoc, recoveryRuleFromDoc, reserveFromDoc,
 } from './converters';
 import { convertLegacyItems } from './migrate';
 
-export const SUPPORTED_VERSIONS = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12] as const;
-export const LATEST_VERSION = 12;
+export const SUPPORTED_VERSIONS = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13] as const;
+export const LATEST_VERSION = 13;
 
-export type BackupFormat = 'legacy' | 'v2' | 'v3' | 'v4' | 'v5' | 'v6' | 'v7' | 'v8' | 'v9' | 'v10' | 'v11' | 'v12';
+export type BackupFormat = 'legacy' | 'v2' | 'v3' | 'v4' | 'v5' | 'v6' | 'v7' | 'v8' | 'v9' | 'v10' | 'v11' | 'v12' | 'v13';
 
 /** 파일 한 곳이 왜 들어갈 수 없는지. */
 export interface FileProblem {
@@ -537,6 +540,23 @@ function checkLedgerNoteRaw(c: Collector, where: string, r: Raw): void {
 }
 
 /**
+ * 월별 메모(v13). 목표 · 결과 두 칸 모두 문자열이고, 문서 id 가 곧 달이다 — 규칙이 받는 모양과 같다.
+ * 한 칸만 적은 메모가 정상이므로 빈 문자열을 막지 않는다.
+ */
+function checkMonthNoteRaw(c: Collector, where: string, r: Raw): void {
+  if (typeof r.month !== 'string' || !/^\d{4}-(0[1-9]|1[0-2])$/.test(r.month)) {
+    c.add(`${where}.month`, `달(YYYY-MM)이 아닙니다: ${describe(r.month)}`);
+  }
+  reqStr(c, `${where}.goal`, r.goal, MONTH_NOTE_MAX);
+  reqStr(c, `${where}.result`, r.result, MONTH_NOTE_MAX);
+  optStr(c, `${where}.createdAt`, r.createdAt, LIMITS.checkedAt);
+  optStr(c, `${where}.updatedAt`, r.updatedAt, LIMITS.checkedAt);
+  if (typeof r.id === 'string' && r.id !== r.month) {
+    c.add(`${where}.id`, `월별 메모의 id 는 달(${String(r.month)})과 같아야 합니다: ${r.id}`);
+  }
+}
+
+/**
  * 연간 카테고리 예산(v9). 규칙이 거절할 모양을 쓰기 전에 말한다 — id 는 `카테고리id~연도`, 금액 · 배분은
  * 0 이상 정수, 배분 열쇠는 '01' ~ '12', 배분 합은 연간 예산 이하.
  */
@@ -606,6 +626,7 @@ const CHECKERS: Record<BackupCollection, (c: Collector, where: string, v: Raw) =
   categories: checkCategoryRaw,
   categoryBudgets: checkCategoryBudgetRaw,
   ledgerNotes: checkLedgerNoteRaw,
+  monthNotes: checkMonthNoteRaw,
   annualBudgets: checkAnnualBudgetRaw,
   cards: checkCardRaw,
 };
@@ -716,13 +737,14 @@ export function readBackupFile(text: string): ReadResult {
     return { ok: false, problems: [{ where: 'version', reason: '버전이 없습니다. 백업 파일이 맞는지 확인해 주세요.' }] };
   }
 
-  const format: BackupFormat = version >= 12 ? 'v12' : version === 11 ? 'v11' : version === 10 ? 'v10' : version === 9 ? 'v9' : version === 8 ? 'v8' : version === 7 ? 'v7' : version === 6 ? 'v6' : version === 5 ? 'v5'
+  const format: BackupFormat = version >= 13 ? 'v13' : version === 12 ? 'v12' : version === 11 ? 'v11' : version === 10 ? 'v10' : version === 9 ? 'v9' : version === 8 ? 'v8' : version === 7 ? 'v7' : version === 6 ? 'v6' : version === 5 ? 'v5'
     : version === 4 ? 'v4' : version === 3 ? 'v3' : 'v2';
   const hasPockets = version >= 4;
   const hasCategories = version >= 6;
   const hasNotes = version >= 7;
   const hasAnnual = version >= 9;
   const hasCards = version >= 11;
+  const hasMonthNotes = version >= 13;
 
   // ---- 컬렉션 ----
   const entries = checkCollection(c, 'entries', obj.entries);
@@ -754,6 +776,10 @@ export function readBackupFile(text: string): ReadResult {
   const cards = hasCards
     ? checkCollection(c, 'cards', obj.cards)
     : checkOptionalCollection(c, 'cards', obj.cards);
+  // v13 부터 필수다. v12 까지는 월별 메모가 없던 시절이라 없는 것이 정상이다.
+  const monthNotes = hasMonthNotes
+    ? checkCollection(c, 'monthNotes', obj.monthNotes)
+    : checkOptionalCollection(c, 'monthNotes', obj.monthNotes);
   if (obj.ledger !== undefined && obj.ledger !== null) {
     if (!isObj(obj.ledger)) {
       c.add('ledger', `객체가 아닙니다: ${describe(obj.ledger)}`);
@@ -790,6 +816,7 @@ export function readBackupFile(text: string): ReadResult {
         categories: categories.map((r) => categoryFromDoc(r.id as string, r)),
         categoryBudgets: categoryBudgets.map((r) => categoryBudgetFromDoc(r.id as string, r)),
         ledgerNotes: ledgerNotes.map((r) => ledgerNoteFromDoc(r.id as string, r)),
+        monthNotes: monthNotes.map((r) => monthNoteFromDoc(r.id as string, r)),
         annualBudgets: annualBudgets.map((r) => annualBudgetFromDoc(r.id as string, r)),
         cards: cards.map((r) => cardFromDoc(r.id as string, r)),
         ledger: isObj(obj.ledger) ? ledgerSettingsFromDoc(obj.ledger) : null,
@@ -834,6 +861,7 @@ function readLegacy(c: Collector, items: unknown[]): ReadResult {
         categories: [],
         categoryBudgets: [],
         ledgerNotes: [],
+        monthNotes: [],
         annualBudgets: [],
         cards: [],
         ledger: null,

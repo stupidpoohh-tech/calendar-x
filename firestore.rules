@@ -424,6 +424,22 @@ service cloud.firestore {
           && data().updatedAt is string;
       }
 
+      /*
+        월별 메모(노트 화면) — 한 달에 한 장. 문서 id 가 곧 달이라 같은 달에 두 장이 생길 수 없다.
+        목표 · 결과 두 칸 모두 문자열이어야 한다 — 한 칸만 적은 메모가 정상이므로 빈 문자열은 받는다.
+      */
+      match /monthNotes/{month} {
+        allow read, delete: if isOwner(uid);
+        allow create, update: if isOwner(uid)
+          && withinSize()
+          && month.matches('^\\d{4}-(0[1-9]|1[0-2])$')
+          && data().month == month
+          && data().goal is string && data().goal.size() <= 5000
+          && data().result is string && data().result.size() <= 5000
+          && data().createdAt is string
+          && data().updatedAt is string;
+      }
+
       match /pins/{pinId} {
         allow read, delete: if isOwner(uid);
         allow create, update: if isOwner(uid)

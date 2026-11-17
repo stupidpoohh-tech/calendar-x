@@ -36,10 +36,10 @@ import { conflictingConfirmations } from '../domain/confirm';
 import { isValidDate, normalizeDate } from '../domain/date';
 import type {
   AnnualBudget, Card,
-  Account, BackupCollection, Budget, Category, CategoryBudget, Debt, Entry, LedgerNote, Pin, RecoveryRule, Reserve,
+  Account, BackupCollection, Budget, Category, CategoryBudget, Debt, Entry, LedgerNote, MonthNote, Pin, RecoveryRule, Reserve,
 } from '../domain/types';
 import type { BackupData } from './backup';
-import { LEDGER_NOTE_MAX } from './converters';
+import { LEDGER_NOTE_MAX, MONTH_NOTE_MAX } from './converters';
 import type { CreateManyResult } from './repo';
 
 /** 파일 한 건이 왜 들어갈 수 없는지. */
@@ -221,6 +221,14 @@ function checkLedgerNote(n: LedgerNote): string | null {
   return null;
 }
 
+function checkMonthNote(n: MonthNote): string | null {
+  if (!/^\d{4}-(0[1-9]|1[0-2])$/.test(n.month)) return `달이 YYYY-MM 이 아닙니다: ${n.month}`;
+  if (n.id !== n.month) return `id 가 달(${n.month})과 같지 않습니다.`;
+  if (n.goal.length > MONTH_NOTE_MAX) return `목표가 ${MONTH_NOTE_MAX}자를 넘습니다.`;
+  if (n.result.length > MONTH_NOTE_MAX) return `결과가 ${MONTH_NOTE_MAX}자를 넘습니다.`;
+  return null;
+}
+
 function checkAnnualBudget(b: AnnualBudget): string | null {
   if (!b.categoryId) return '카테고리가 비어 있습니다.';
   if (b.id !== annualBudgetId(b.categoryId, b.year)) return `id 가 '${annualBudgetId(b.categoryId, b.year)}' 가 아닙니다.`;
@@ -278,6 +286,7 @@ export function validateBackup(data: BackupData): BackupProblem[] {
   scan('categories', data.categories, checkCategory, out);
   scan('categoryBudgets', data.categoryBudgets, checkCategoryBudget, out);
   scan('ledgerNotes', data.ledgerNotes, checkLedgerNote, out);
+  scan('monthNotes', data.monthNotes, checkMonthNote, out);
   scan('annualBudgets', data.annualBudgets, checkAnnualBudget, out);
   scan('cards', data.cards, checkCard, out);
   return out;
@@ -310,6 +319,8 @@ export function planMerge(current: BackupData, incoming: BackupData): BackupData
     categoryBudgets: only(current.categoryBudgets, incoming.categoryBudgets),
     // 같은 기간의 메모가 이미 있으면 지금 글을 남긴다 — 다른 계정의 옛 글로 덮지 않는다.
     ledgerNotes: only(current.ledgerNotes, incoming.ledgerNotes),
+    // 같은 달의 월별 메모가 이미 있으면 지금 글을 남긴다 — 목표 · 결과를 파일 값으로 덮지 않는다.
+    monthNotes: only(current.monthNotes, incoming.monthNotes),
     // 같은 해 같은 카테고리의 연간 예산이 이미 있으면 지금 것을 남긴다 — 금액 · 배분을 파일 값으로 덮지 않는다.
     annualBudgets: only(current.annualBudgets, incoming.annualBudgets),
     // 같은 카드가 이미 있으면 지금 것을 남긴다 — 마감일 · 결제일을 파일 값으로 덮지 않는다.
@@ -371,7 +382,7 @@ export function mergeSkipsLedger(fileDay: number, currentDay: number): string {
 export function countDocs(d: Omit<BackupData, 'recovery' | 'ledger'>): number {
   return d.entries.length + d.accounts.length + d.debts.length + d.pins.length
     + d.budgets.length + d.reserves.length + d.categories.length + d.categoryBudgets.length
-    + d.ledgerNotes.length + d.annualBudgets.length + d.cards.length;
+    + d.ledgerNotes.length + d.monthNotes.length + d.annualBudgets.length + d.cards.length;
 }
 
 // ---------- 실행 순서 ----------

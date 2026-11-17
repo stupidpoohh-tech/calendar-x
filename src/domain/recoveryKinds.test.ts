@@ -49,9 +49,9 @@ describe('회복 항목의 끌 것 / 할 것', () => {
     const rule = addRecoveryOption(defaultRecoveryRule(), '사우나');
     const option = rule.options.find((o) => o.label === '사우나')!;
     const entry = buildRecoveryEntry(rule, '2026-10-17');
-    const data = { entries: [entry], accounts: [], debts: [], pins: [], budgets: [], reserves: [], categories: [], categoryBudgets: [], ledgerNotes: [], annualBudgets: [], cards: [], ledger: null, recovery: setRecoveryOptionKind(rule, option.id, 'do') };
+    const data = { entries: [entry], accounts: [], debts: [], pins: [], budgets: [], reserves: [], categories: [], categoryBudgets: [], ledgerNotes: [], monthNotes: [], annualBudgets: [], cards: [], ledger: null, recovery: setRecoveryOptionKind(rule, option.id, 'do') };
     const file = buildBackup(data);
-    expect(file.version).toBe(12);
+    expect(file.version).toBe(13);
     const result = readBackupFile(JSON.stringify(file));
     expect(result.ok).toBe(true);
     if (!result.ok) return;

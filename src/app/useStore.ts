@@ -4,14 +4,14 @@ import { describeFirestoreError, isPermissionDenied } from '../data/errors';
 import { getFirebase } from '../data/firebase';
 import {
   monthWindow, subscribeAccounts, subscribeBudgets, subscribeAnnualBudgets, subscribeCategories, subscribeCategoryBudgets,
-  subscribeDebts, subscribeEntriesForMonths, subscribeLedgerNotes, subscribeLedgerSettings,
+  subscribeDebts, subscribeEntriesForMonths, subscribeLedgerNotes, subscribeLedgerSettings, subscribeMonthNotes,
   subscribePins, subscribeRecurringEntries, subscribeReserveLinkedEntries, subscribeReserves, subscribeCards, subscribeCardLinkedEntries, tideWindow, tideWindowReaches,
   earliestAsOfOf,
   type SnapMeta,
 } from '../data/repo';
 import { DEFAULT_SETTLE_DAY } from '../domain/period';
 import type {
-  AnnualBudget, Account, Budget, Card, Category, CategoryBudget, Debt, Entry, LedgerNote, LedgerSettings, Pin, Reserve, YearMonth,
+  AnnualBudget, Account, Budget, Card, Category, CategoryBudget, Debt, Entry, LedgerNote, LedgerSettings, MonthNote, Pin, Reserve, YearMonth,
 } from '../domain/types';
 
 export interface StoreState {
@@ -73,6 +73,13 @@ export interface StoreState {
    */
   ledgerNotes: LedgerNote[];
   ledgerNotesFeed: FeedState;
+  /**
+   * 월별 메모(노트 화면). 기간 메모와 같은 이유로 상태를 따로 낸다 — 아직 안 온 글을 빈 글로
+   * 읽고 저장하면 적어 둔 목표 · 결과를 덮는다. 달과 무관하게 전량 받으므로 커서를 옮겨도
+   * 다시 붙지 않는다.
+   */
+  monthNotes: MonthNote[];
+  monthNotesFeed: FeedState;
   /**
    * 화면용 자료의 상태. `loading` 은 이 값에서 나온다.
    */
@@ -189,6 +196,7 @@ const EMPTY: StoreState = {
   accounts: [], debts: [], pins: [], budgets: [], reserves: [], reserveLinked: [], reserveUsage: new Map(), cards: [], cardLinked: [],
   categories: [], categoryBudgets: [], annualBudgets: [], ledger: DEFAULT_LEDGER, ledgerMeta: FEED_LOADING,
   ledgerNotes: [], ledgerNotesFeed: FEED_LOADING,
+  monthNotes: [], monthNotesFeed: FEED_LOADING,
   display: FEED_LOADING, calc: FEED_LOADING,
   loading: false, error: null, rulesBlocked: false,
 };
@@ -252,6 +260,8 @@ export function useStore(uid: string | null, cursorISO: string, todayISO: string
   const [annualBudgetsFeed, setAnnualBudgetsFeed] = useState<FeedState>(FEED_LOADING);
   const [ledgerNotes, setLedgerNotes] = useState<LedgerNote[]>([]);
   const [ledgerNotesFeed, setLedgerNotesFeed] = useState<FeedState>(FEED_LOADING);
+  const [monthNotes, setMonthNotes] = useState<MonthNote[]>([]);
+  const [monthNotesFeed, setMonthNotesFeed] = useState<FeedState>(FEED_LOADING);
   const [ledger, setLedger] = useState<LedgerSettings>(DEFAULT_LEDGER);
   const [ledgerFeed, setLedgerFeed] = useState<FeedState>(FEED_LOADING);
   const [error, setError] = useState<string | null>(null);
@@ -284,6 +294,7 @@ export function useStore(uid: string | null, cursorISO: string, todayISO: string
     setCategoryBudgets([]); setCategoryBudgetsFeed(FEED_LOADING);
     setAnnualBudgets([]); setAnnualBudgetsFeed(FEED_LOADING);
     setLedgerNotes([]); setLedgerNotesFeed(FEED_LOADING);
+    setMonthNotes([]); setMonthNotesFeed(FEED_LOADING);
     setLedger(DEFAULT_LEDGER); setLedgerFeed(FEED_LOADING);
     setError(null); setRulesBlocked(false);
   }
@@ -425,6 +436,11 @@ export function useStore(uid: string | null, cursorISO: string, todayISO: string
         own(uid, (items, meta) => { setLedgerNotes(items); setLedgerNotesFeed(feedFrom(items.length, meta)); }),
         own(uid, (scope, err) => failWith(setLedgerNotesFeed, scope, err)),
       ),
+      subscribeMonthNotes(
+        db, uid,
+        own(uid, (items, meta) => { setMonthNotes(items); setMonthNotesFeed(feedFrom(items.length, meta)); }),
+        own(uid, (scope, err) => failWith(setMonthNotesFeed, scope, err)),
+      ),
       subscribeLedgerSettings(
         db, uid,
         // 설정은 늘 값이 있다(없으면 1일). "비어 있다" 로 읽힐 것이 없으므로 1건으로 센다.
@@ -487,6 +503,7 @@ export function useStore(uid: string | null, cursorISO: string, todayISO: string
     entries, tideEntries, tideMonths,
     accounts, debts, pins, budgets, reserves, reserveLinked, reserveUsage, cards, cardLinked,
     categories, categoryBudgets, annualBudgets, ledger, ledgerMeta, ledgerNotes, ledgerNotesFeed,
+    monthNotes, monthNotesFeed,
     display, calc, dashboardFeed: combineFeeds([display, recurringFeed]),
     loading: !display.ready, error, rulesBlocked,
   };
