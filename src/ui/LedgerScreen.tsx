@@ -102,7 +102,7 @@ export interface LedgerScreenProps {
   /** 정산 기간 메모(돌아보기). 기간 하나에 한 장. */
   ledgerNotes: readonly LedgerNote[];
   notesFeed: FeedState;
-  onSaveLedgerNote: (n: LedgerNote) => void;
+  onSaveLedgerNote: (n: LedgerNote) => Promise<boolean> | void;
   subscribeAll: SubscribeAll;
   /** 현금흐름 본문 — 카드와 한도 달력, 달력의 월 이동. App 이 그린다. */
   cashflow?: ReactNode;
@@ -470,19 +470,24 @@ function LedgerHistory({
  * 그 사이 빈 칸으로 열어 저장하면 서버에 있는 글을 빈 글로 덮는다.
  */
 function PeriodNote({ period, note, feed, onSave }: {
-  period: Period; note: LedgerNote | null; feed: FeedState; onSave: (n: LedgerNote) => void;
+  period: Period; note: LedgerNote | null; feed: FeedState; onSave: (n: LedgerNote) => Promise<boolean> | void;
 }) {
   const [editing, setEditing] = useState(false);
   const [text, setText] = useState('');
+  const [saving, setSaving] = useState(false);
+  const [saveError, setSaveError] = useState(false);
   const known = feed.ready && !(feed.empty && feed.fromCache);
   const saved = note?.text ?? '';
   const open = () => { setText(saved); setEditing(true); };
-  const save = () => {
+  const save = async () => {
     const next = text.replace(/\s+$/, '');
-    setEditing(false);
-    if (next === saved) return;
+    if (saving) return; if (next === saved) { setEditing(false); return; }
     const now = new Date().toISOString();
-    onSave({ id: period.key, period: period.key, text: next, createdAt: note?.createdAt || now, updatedAt: now });
+    setSaving(true); setSaveError(false);
+    try {
+    const ok = await onSave({ id: period.key, period: period.key, text: next, createdAt: note?.createdAt || now, updatedAt: now });
+    if (ok !== false) setEditing(false); else setSaveError(true);
+    } catch { setSaveError(true); } finally { setSaving(false); }
   };
 
   return (
@@ -498,15 +503,15 @@ function PeriodNote({ period, note, feed, onSave }: {
       {editing ? (
         <>
           <textarea
-            className="mod-input led-memo-in" rows={4} autoFocus maxLength={LEDGER_NOTE_MAX}
+            className="mod-input led-memo-in" disabled={saving} rows={4} autoFocus maxLength={LEDGER_NOTE_MAX}
             aria-label={`${periodName(period.key)} 메모`}
             placeholder="이 기간에 무엇을 잘했고 무엇을 바꿀지 — 반성 · 다짐"
             value={text} onChange={(e) => setText(e.target.value)}
           />
-          <div className="led-memo-a">
+          <div className="led-memo-a">{saveError && <p role="alert">저장하지 못했습니다. 작성한 글은 유지됩니다. 다시 저장해 주세요.</p>}
             {text.length > LEDGER_NOTE_MAX - 500 && <span className="led-note num">{text.length} / {LEDGER_NOTE_MAX}</span>}
-            <button className="btn" onClick={() => setEditing(false)}>취소</button>
-            <button className="btn primary" onClick={save}>저장</button>
+            <button className="btn" disabled={saving} onClick={() => setEditing(false)}>취소</button>
+            <button className="btn primary" disabled={saving} onClick={save}>{saving ? '저장 중…' : '저장'}</button>
           </div>
         </>
       ) : !known ? (

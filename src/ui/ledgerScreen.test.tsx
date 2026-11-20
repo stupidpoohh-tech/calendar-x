@@ -512,6 +512,15 @@ describe('원형 차트 조각', () => {
 });
 
 describe('분석 · 기간 돌아보기', () => {
+  it('저장 실패 시 입력한 글을 유지한다', async () => {
+    mount({ tab: 'stats', onSaveLedgerNote: vi.fn().mockResolvedValue(false) });
+    fireEvent.click(screen.getByRole('button', { name: '적기' }));
+    fireEvent.change(screen.getByLabelText('2026년 10월 메모'), { target: { value: '다음 달 다짐' } });
+    fireEvent.click(screen.getByRole('button', { name: '저장' }));
+    expect(await screen.findByRole('alert')).toHaveTextContent('저장하지 못했습니다');
+    expect(screen.getByLabelText('2026년 10월 메모')).toHaveValue('다음 달 다짐');
+  });
+
   it('적은 글을 보여 주고, 고쳐 저장하면 그 기간 열쇠로 한 장을 쓴다', () => {
     const note = { id: '2026-10', period: '2026-10', text: '배달 줄이기', createdAt: 'c', updatedAt: 'u' };
     const p = mount({ tab: 'stats', ledgerNotes: [note] });

@@ -730,7 +730,7 @@ function Workspace({ uid, user, onSignOut }: WorkspaceProps) {
 
   const saveLedgerNote = useCallback((n: LedgerNote) => {
     if (isAnon || !uid) { void promptLogin(); return; }
-    commit({ kind: 'ledgerNote', label: '기간 메모', summary: n.period, payload: n });
+    return commit({ kind: 'ledgerNote', label: '기간 메모', summary: n.period, payload: n });
   }, [isAnon, uid, promptLogin, commit]);
 
   const saveMonthNote = useCallback((n: MonthNote) => {
