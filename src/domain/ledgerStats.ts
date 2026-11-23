@@ -219,6 +219,37 @@ export function periodSeries(entries: readonly Entry[], periods: readonly Period
   }));
 }
 
+/**
+ * 월별 추이 표 맨 아래의 월평균.
+ *
+ * **끝난 기간만** 센다 — 진행 중인 기간을 넣으면 아직 덜 쓴 달이 평균을 끌어내리고,
+ * 아직 오지 않은 기간을 넣으면 0 이 끌어내린다. 카테고리 월평균(`categoryTrends`)과 같은
+ * 기준이다. 끝난 기간 수는 그 기간에 거래가 있었는지와 무관하다(0원인 달도 한 기간이다).
+ *
+ * 수지는 평균을 따로 내지 않고 **반올림한 세 값에서 뺀다** — 그러지 않으면 화면의
+ * `수입 − 지출 − 대금` 이 적어 둔 수지와 1~2원 어긋나 보인다.
+ */
+export interface PeriodAverage {
+  income: number;
+  spending: number;
+  repayment: number;
+  net: number;
+  /** 평균을 낸 끝난 기간 수. */
+  periods: number;
+}
+
+/** 끝난 기간이 하나도 없으면 null — 숫자를 지어내지 않는다. */
+export function periodAverage(series: readonly PeriodSeries[]): PeriodAverage | null {
+  const done = series.filter((s) => s.phase === 'past');
+  if (done.length === 0) return null;
+  const mean = (pick: (t: LedgerTotals) => number) =>
+    Math.round(done.reduce((a, s) => a + pick(s.totals), 0) / done.length);
+  const income = mean((t) => t.income);
+  const spending = mean((t) => t.spending);
+  const repayment = mean((t) => t.repayment);
+  return { income, spending, repayment, net: income - spending - repayment, periods: done.length };
+}
+
 export interface CategoryTrend {
   categoryId: string;
   name: string;

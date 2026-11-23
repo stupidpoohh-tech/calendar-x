@@ -10,7 +10,7 @@
  */
 import { useMemo, useState } from 'react';
 import {
-  actualsIn, averagedPeriods, categoryTrends, onSide, periodSeries, pieSlices, totalsOf, UNCATEGORIZED,
+  actualsIn, averagedPeriods, categoryTrends, onSide, periodAverage, periodSeries, pieSlices, totalsOf, UNCATEGORIZED,
   type PeriodSeries, type PieSlice, type Side,
 } from '../domain/ledgerStats';
 import { compactAmount, formatAmount, formatSigned } from '../domain/money';
@@ -35,6 +35,8 @@ export function LedgerMonthly({ entries, settleDay, todayISO, period, onPick }: 
   );
   const series = useMemo(() => periodSeries(entries, periods, todayISO), [entries, periods, todayISO]);
   const hasAny = series.some((s) => s.totals.count > 0);
+  // 표 맨 아래 한 줄. 끝난 기간이 하나도 없으면 평균을 내지 않는다.
+  const avg = useMemo(() => periodAverage(series), [series]);
 
   return (
     <div className="led-body">
@@ -44,6 +46,7 @@ export function LedgerMonthly({ entries, settleDay, todayISO, period, onPick }: 
         <caption className="led-note">
           기간 이름은 날이 더 많이 든 달입니다. 지출 = 소비 + 대출 이자. 대금 = 대출 원금.
           수지 = 수입 − 지출 − 대금. 이체 · 카드 대금은 넣지 않습니다(카드는 쓴 날 지출로 셉니다).
+          {' '}월평균은 <b>끝난 기간만</b>의 합 ÷ 끝난 기간 수입니다 — 진행 중 · 아직 오지 않은 기간은 빼고 셉니다.
         </caption>
         <thead>
           <tr><th scope="col">기간</th><th scope="col">수입</th><th scope="col">지출</th><th scope="col">대금</th><th scope="col">수지</th></tr>
@@ -66,6 +69,20 @@ export function LedgerMonthly({ entries, settleDay, todayISO, period, onPick }: 
             </tr>
           ))}
         </tbody>
+        {avg && (
+          <tfoot>
+            <tr className="led-avg">
+              <th scope="row">
+                월평균
+                <span className="led-sub">끝난 {avg.periods}개 기간</span>
+              </th>
+              <td className="num plus">{formatAmount(avg.income)}</td>
+              <td className="num minus">{formatAmount(avg.spending)}</td>
+              <td className="num">{formatAmount(avg.repayment)}</td>
+              <td className={'num ' + (avg.net < 0 ? 'minus' : '')}>{formatSigned(avg.net)}</td>
+            </tr>
+          </tfoot>
+        )}
       </table>
     </div>
   );
