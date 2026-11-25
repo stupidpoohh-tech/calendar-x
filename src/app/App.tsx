@@ -2190,6 +2190,7 @@ function Workspace({ uid, user, onSignOut }: WorkspaceProps) {
             onToggleCollapsed={() => set('moneyCardCollapsed', !prefs.moneyCardCollapsed)}
             onOpenPockets={setPocketFocus}
             onOpenCards={() => setCardSheetOpen(true)}
+            headlineAmount={layout.headlineAmount}
           >
             <CardLine cards={store.cards} cardEntries={store.cardLinked} plans={store.tideEntries} todayISO={today} onOpen={() => setCardSheetOpen(true)} />
             <MoneyPanel

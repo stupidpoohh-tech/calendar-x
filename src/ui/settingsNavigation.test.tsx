@@ -54,7 +54,7 @@ describe('설정 화면 위계', () => {
     fireEvent.click(screen.getByRole('button', { name: /가계부 정산/ }));
     fireEvent.change(screen.getByLabelText('정산 시작일'), { target: { value: '10' } });
     expect(props.ledger.onSettleDay).toHaveBeenCalledWith(10);
-    fireEvent.click(screen.getByRole('radio', { name: /생활비 잔여/ }));
+    fireEvent.click(within(screen.getByRole('radiogroup', { name: '달력 칸의 금액' })).getByRole('radio', { name: /생활비 잔여/ }));
     expect(props.layout.onLayout).toHaveBeenCalledWith({ calendarAmount: 'pocket' });
   });
 

@@ -63,10 +63,23 @@ describe('내 캘린더 구성', () => {
     expect(screen.queryByText(/ON|OFF/)).toBeNull();
   });
 
+  it('카드 큰 숫자는 달력 칸과 따로 고른다 — 고른 것만 저장하고, 다시 눌러도 쓰지 않는다', () => {
+    const { onLayout } = settings(LEGACY_LAYOUT, { connected: true });
+    const cal = screen.getByRole('radiogroup', { name: '달력 칸의 금액' });
+    const head = screen.getByRole('radiogroup', { name: '카드의 큰 숫자' });
+    expect(within(cal).getByRole('radio', { name: /예상 잔고/ })).toHaveAttribute('aria-checked', 'true');
+    expect(within(head).getByRole('radio', { name: /가용 잔액/ })).toHaveAttribute('aria-checked', 'true');
+    fireEvent.click(within(head).getByRole('radio', { name: /전체 보유액/ }));
+    expect(onLayout).toHaveBeenLastCalledWith({ headlineAmount: 'balance' });
+    fireEvent.click(within(head).getByRole('radio', { name: /가용 잔액/ }));
+    expect(onLayout).toHaveBeenCalledTimes(1);
+  });
+
   it('가계부를 숨기면 자료가 남는다고 적고, 캘린더 표시(금액 기준) 그룹이 빠진다', () => {
     settings({ ...LEGACY_LAYOUT, ledger: false }, { connected: true });
     expect(within(rowOf('가계부')).getByText(/계산은 그대로 남아 있습니다/)).toBeInTheDocument();
     expect(screen.queryByText('캘린더 표시')).toBeNull();
+    expect(screen.queryByText('카드 큰 숫자')).toBeNull();
   });
 
   it('E — 연결이 있으면 공간 전환 표시 / 숨김과 공유 연결 관리. 숨겨도 연결은 그대로라고 적는다', () => {

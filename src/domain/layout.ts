@@ -32,9 +32,16 @@ export interface Layout {
   /** 👤 / 👥 공간 전환. 보드가 있을 때만 뜻이 있다. */
   sharedSwitcher: boolean;
   calendarAmount: CalendarAmount;
+  /**
+   * 현금흐름 카드('며칠 버티나')의 큰 숫자. 달력 칸과 같은 네 기준이고 따로 고른다 — 칸은 날마다 보는 값,
+   * 큰 숫자는 지금 한 번 보는 값이라 같은 것을 원하지 않을 수 있다. 없으면 지금까지처럼 가용 잔액이다.
+   */
+  headlineAmount: CalendarAmount;
 }
 
-export const LEGACY_LAYOUT: Layout = { ledger: true, notes: true, sharedSwitcher: true, calendarAmount: 'projected' };
+export const LEGACY_LAYOUT: Layout = {
+  ledger: true, notes: true, sharedSwitcher: true, calendarAmount: 'projected', headlineAmount: 'available',
+};
 export const NEW_USER_LAYOUT: Layout = { ...LEGACY_LAYOUT, calendarAmount: 'available' };
 
 export const CALENDAR_AMOUNTS: readonly { id: CalendarAmount; label: string; hint: string }[] = [
@@ -50,13 +57,16 @@ const AMOUNT_IDS = new Set<string>(CALENDAR_AMOUNTS.map((a) => a.id));
 export function layoutFrom(raw: unknown): Layout {
   const o = raw && typeof raw === 'object' ? raw as Record<string, unknown> : {};
   const bool = (k: keyof Layout) => (typeof o[k] === 'boolean' ? o[k] as boolean : LEGACY_LAYOUT[k] as boolean);
+  const amount = (k: 'calendarAmount' | 'headlineAmount'): CalendarAmount => {
+    const v = o[k];
+    return typeof v === 'string' && AMOUNT_IDS.has(v) ? v as CalendarAmount : LEGACY_LAYOUT[k];
+  };
   return {
     ledger: bool('ledger'),
     notes: bool('notes'),
     sharedSwitcher: bool('sharedSwitcher'),
-    calendarAmount: typeof o.calendarAmount === 'string' && AMOUNT_IDS.has(o.calendarAmount)
-      ? o.calendarAmount as CalendarAmount
-      : LEGACY_LAYOUT.calendarAmount,
+    calendarAmount: amount('calendarAmount'),
+    headlineAmount: amount('headlineAmount'),
   };
 }
 
@@ -76,6 +86,17 @@ export function calendarAmountCaption(mode: CalendarAmount): string {
     case 'pocket': return '칸의 숫자는 그 날을 품는 생활비의 남은 금액입니다';
   }
 }
+
+/**
+ * 카드 큰 숫자의 기준별 설명. 날짜가 붙는 두 기준(예상 잔고 · 가용 잔액)은 다음 입금 전날까지의 구간을 본다 —
+ * 가용은 그 구간에서 가장 작은 값(`headlineLimit`), 예상 잔고는 그 구간 끝(입금 전날)의 값이다.
+ */
+export const HEADLINE_AMOUNTS: readonly { id: CalendarAmount; label: string; hint: string }[] = [
+  { id: 'balance', label: '전체 보유액', hint: '계좌에 적은 잔고의 합(확인 잔고)' },
+  { id: 'projected', label: '예상 잔고', hint: '다음 입금 전날의 예상 잔고. 생활비 · 세이브는 빼지 않습니다' },
+  { id: 'available', label: '가용 잔액', hint: '다음 입금 전날까지 생활비 · 잠근 세이브를 빼고 쓸 수 있는 돈' },
+  { id: 'pocket', label: '생활비 잔여', hint: '오늘을 품는 생활비의 남은 금액(실제로 쓴 돈 기준)' },
+];
 
 /**
  * 고른 기준으로 그 날 칸에 적을 금액. 적을 것이 없으면 null.

@@ -13,11 +13,16 @@
  * 큰 숫자는 50,000 이고, 확인 잔고 250,000 은 그 아래 따로 적는다. 예전에는 큰 숫자를 누르면
  * 잔고를 고쳤는데, 그래서 한도를 잔고로 읽고 50,000 을 잔고로 고쳐 적을 수 있었다. 지금
  * 고치는 자리는 확인 잔고 줄 하나다. 생활비 · 세이브로 확보된 몫은 접힌 줄에서 펼쳐 본다.
+ *
+ * 큰 숫자의 기준은 설정에서 고른다(`headlineAmount` — 달력 칸과 같은 네 기준, 기본은 가용 잔액).
+ * 가용 잔액이 아닌 기준을 고르면 가용 · 버틸 날은 그 아래 한 줄로 내려간다 — 이 카드가 답하는
+ * "며칠 버티나" 를 지우지 않는다. 계산은 그대로이고 어느 숫자를 크게 적을지만 바뀐다.
  */
 import { useMemo, type ReactNode } from 'react';
 import { activeReserves, budgetEnded, budgetStates, reserveProtects, reserveRemaining } from '../domain/budget';
 import { MONEY_TYPE_BY_ID } from '../domain/constants';
 import { daysBetween, fmtDayShort } from '../domain/date';
+import { calendarAmountOn, type CalendarAmount } from '../domain/layout';
 import { formatAmount, formatSigned } from '../domain/money';
 import {
   balanceViewOn, calcScopeOf, cardDueEstimates, cardHeldOn, headlineDate, horizonOf, projectedBalanceOn, summarize, unsettledAfter, upcomingInHorizon,
@@ -70,6 +75,8 @@ interface Props {
   onOpenPockets?: (focus: PocketFocus) => void;
   /** 카드대금 창을 연다(P4). 예상 대금 줄 · 확보의 카드 미결제 줄이 누르는 자리가 된다. */
   onOpenCards?: () => void;
+  /** 큰 숫자의 기준(설정 '카드 큰 숫자'). 없으면 가용 잔액 — 지금까지와 같다. */
+  headlineAmount?: CalendarAmount;
 }
 
 const NO_BUDGETS: readonly Budget[] = [];
@@ -80,7 +87,7 @@ export function TideBar({
   todayISO, accounts, entries, budgets = NO_BUDGETS, reserves = NO_RESERVES, reserveUsage = NO_USAGE, cards, cardEntries,
   tideFrom, calcState = CALC_READY,
   hasBalance, onSaveAccount, onEntryClick,
-  collapsed, onToggleCollapsed, children, onOpenPockets, onOpenCards,
+  collapsed, onToggleCollapsed, children, onOpenPockets, onOpenCards, headlineAmount = 'available',
 }: Props) {
   const today = todayISO;
   const editor = useBalanceEditor(accounts, entries, onSaveAccount, tideFrom, todayISO);
@@ -215,26 +222,43 @@ export function TideBar({
   }
 
   const perDay = Math.floor(limit / daysLeft);
-  const negative = limit < 0;
+  // 큰 숫자. 가용 잔액이면 지금까지 그대로(구간 안 최솟값). 나머지는 달력 칸과 같은 함수로 잰다 —
+  // 예상 잔고는 다음 입금 전날, 생활비 잔여는 오늘을 품는 생활비(없으면 null).
+  const headline = headlineAmount === 'available' ? limit
+    : headlineAmount === 'balance' ? view.confirmed
+      : calendarAmountOn(headlineAmount, accounts, entries, headlineAmount === 'projected' ? horizon.end : today, today, res);
+  const isLimit = headlineAmount === 'available';
+  const negative = headline !== null && headline < 0;
+  const until = horizon.nextIncome
+    ? <>다음 입금(<b>{fmtDayShort(horizon.nextIncome)}</b>) 전날</>
+    : <>30일 뒤</>;
+  const headLabel = headlineAmount === 'available'
+    ? <>{horizon.nextIncome ? <>다음 입금(<b>{fmtDayShort(horizon.nextIncome)}</b>) 전날까지</> : '앞으로 30일'}{' · '}생활비 · 세이브 빼고 쓸 수 있는 돈</>
+    : headlineAmount === 'projected' ? <>{until} 예상 잔고 · 생활비 · 세이브는 빼지 않습니다</>
+      : headlineAmount === 'balance' ? <>전체 보유액 · 계좌에 적은 잔고의 합</>
+        : <>생활비 잔여 · 오늘을 품는 생활비의 남은 금액</>;
+  const headAria = { available: '생활비 외 가용', projected: '예상 잔고', balance: '전체 보유액', pocket: '생활비 잔여' }[headlineAmount];
 
   return (
     <section className={'tide' + (collapsed ? ' collapsed' : '')} aria-label="며칠 버티나">
-      {head(`₩ ${formatAmount(limit)} · ${daysLeft}일`)}
+      {head(`${headline === null ? '생활비 없음' : `₩ ${formatAmount(headline)}`} · ${daysLeft}일`)}
       {collapsed ? null : (
         <>
       <div className="tide-h">
-        <p className="tide-l">
-          {horizon.nextIncome
-            ? <>다음 입금(<b>{fmtDayShort(horizon.nextIncome)}</b>) 전날까지</>
-            : '앞으로 30일'}
-          {' · '}생활비 · 세이브 빼고 쓸 수 있는 돈
-        </p>
-        {/* 가용 한도는 잔고가 아니다 — 눌러서 고치는 숫자가 아니다. 고칠 대상은 아래 확인 잔고다. */}
-        <p className={'tide-v num' + (negative ? ' bad' : '')} aria-label={`생활비 외 가용 ${formatAmount(limit)}원`}>
-          ₩ {formatAmount(limit)}
-        </p>
+        <p className="tide-l">{headLabel}</p>
+        {/* 큰 숫자는 눌러서 고치는 자리가 아니다. 고칠 대상은 아래 확인 잔고다. */}
+        {headline === null ? (
+          <p className="tide-v num" aria-label="생활비 잔여 없음">—</p>
+        ) : (
+          <p className={'tide-v num' + (negative ? ' bad' : '')} aria-label={`${headAria} ${formatAmount(headline)}원`}>
+            ₩ {formatAmount(headline)}
+          </p>
+        )}
+        {headline === null && <p className="tide-sub">오늘을 품는 생활비가 없습니다</p>}
         <p className="tide-sub num">
-          이 돈으로 <b>{daysLeft}일</b> 버티기
+          {/* 큰 숫자가 가용이 아니면 가용을 이 줄에 적는다 — 버틸 날은 가용으로 센다. */}
+          {!isLimit && <>쓸 수 있는 돈 <b className={limit < 0 ? 'bad' : undefined} aria-label={`생활비 외 가용 ${formatAmount(limit)}원`}>₩ {formatAmount(limit)}</b> · </>}
+          {isLimit ? '이 돈으로' : '그 돈으로'} <b>{daysLeft}일</b> 버티기
           {/* 남은 날이 하루면 하루 몫이 위 숫자와 같다. 같은 금액을 두 번 적지 않는다. */}
           {daysLeft > 1 && <> · 하루 <b>{formatAmount(perDay)}원</b></>}
         </p>

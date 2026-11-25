@@ -246,12 +246,14 @@ service cloud.firestore {
     function validLayout(d) {
       return !('layout' in d) || (
         d.layout is map
-        && d.layout.keys().hasOnly(['ledger', 'notes', 'sharedSwitcher', 'calendarAmount'])
+        && d.layout.keys().hasOnly(['ledger', 'notes', 'sharedSwitcher', 'calendarAmount', 'headlineAmount'])
         && (!('ledger' in d.layout) || d.layout.ledger is bool)
         && (!('notes' in d.layout) || d.layout.notes is bool)
         && (!('sharedSwitcher' in d.layout) || d.layout.sharedSwitcher is bool)
         && (!('calendarAmount' in d.layout)
             || d.layout.calendarAmount in ['balance', 'projected', 'available', 'pocket'])
+        && (!('headlineAmount' in d.layout)
+            || d.layout.headlineAmount in ['balance', 'projected', 'available', 'pocket'])
       );
     }
 

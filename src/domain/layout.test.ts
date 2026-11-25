@@ -10,7 +10,7 @@ import type { Account, Entry } from './types';
 
 describe('내 캘린더 구성', () => {
   it('필드가 없으면 지금까지 보던 그대로 — 네 렌즈 · 스위처 · 예상 잔고', () => {
-    expect(layoutFrom(undefined)).toEqual({ ledger: true, notes: true, sharedSwitcher: true, calendarAmount: 'projected' });
+    expect(layoutFrom(undefined)).toEqual({ ledger: true, notes: true, sharedSwitcher: true, calendarAmount: 'projected', headlineAmount: 'available' });
     expect(layoutFrom(null)).toEqual(LEGACY_LAYOUT);
   });
 
@@ -18,6 +18,14 @@ describe('내 캘린더 구성', () => {
     expect(layoutFrom({ ledger: false })).toEqual({ ...LEGACY_LAYOUT, ledger: false });
     expect(layoutFrom({ notes: 'no', calendarAmount: 'weird' })).toEqual(LEGACY_LAYOUT);
     expect(layoutFrom({ calendarAmount: 'pocket' }).calendarAmount).toBe('pocket');
+  });
+
+  it('카드 큰 숫자는 달력 칸과 따로 고른다 — 없으면 가용 잔액(지금까지 그대로), 모르는 값은 버린다', () => {
+    expect(LEGACY_LAYOUT.headlineAmount).toBe('available');
+    expect(NEW_USER_LAYOUT.headlineAmount).toBe('available');
+    expect(layoutFrom({ headlineAmount: 'projected' })).toEqual({ ...LEGACY_LAYOUT, headlineAmount: 'projected' });
+    expect(layoutFrom({ calendarAmount: 'pocket', headlineAmount: 'limit' }))
+      .toEqual({ ...LEGACY_LAYOUT, calendarAmount: 'pocket' });
   });
 
   it('새 사용자는 가용 잔액이 기본', () => {

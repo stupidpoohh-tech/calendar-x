@@ -804,7 +804,7 @@ describe('가계부 결산 — 카테고리 · 카테고리 예산 · 정산 시
     expect(snap.data()?.recovery?.intervalDays).toBe(3);
   });
 
-  it('내 캘린더 구성(layout)은 네 칸만, 정한 모양으로. 이웃 필드는 그대로 남는다', async () => {
+  it('내 캘린더 구성(layout)은 다섯 칸만, 정한 모양으로. 이웃 필드는 그대로 남는다', async () => {
     const me = doc(db(ME), `users/${ME}`);
     await assertSucceeds(setDoc(me, { ledger: { settleDay: 25 } }, { merge: true }));
     await assertSucceeds(setDoc(me, {
@@ -812,13 +812,17 @@ describe('가계부 결산 — 카테고리 · 카테고리 예산 · 정산 시
     }, { merge: true }));
     await assertSucceeds(setDoc(me, { layout: { calendarAmount: 'available' } }, { merge: true }));
     await assertFails(setDoc(me, { layout: { calendarAmount: 'limit' } }, { merge: true }));
+    await assertSucceeds(setDoc(me, { layout: { headlineAmount: 'balance' } }, { merge: true }));
+    await assertFails(setDoc(me, { layout: { headlineAmount: 'limit' } }, { merge: true }));
     await assertFails(setDoc(me, { layout: { ledger: 'no' } }, { merge: true }));
     await assertFails(setDoc(me, { layout: { ledger: true, extra: 1 } }, { merge: true }));
     await assertFails(setDoc(me, { layout: 'all' }, { merge: true }));
     await assertFails(setDoc(doc(db(OTHER), `users/${ME}`), { layout: { ledger: true } }, { merge: true }));
     const snap = await getDoc(me);
     expect(snap.data()?.ledger?.settleDay).toBe(25);
-    expect(snap.data()?.layout).toEqual({ ledger: false, notes: true, sharedSwitcher: false, calendarAmount: 'available' });
+    expect(snap.data()?.layout).toEqual({
+      ledger: false, notes: true, sharedSwitcher: false, calendarAmount: 'available', headlineAmount: 'balance',
+    });
   });
 });
 

@@ -12,7 +12,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { getFirebase } from '../data/firebase';
 import { subscribeLayout } from '../data/repo';
-import { CALENDAR_AMOUNTS, LEGACY_LAYOUT, layoutFrom, type Layout } from '../domain/layout';
+import { CALENDAR_AMOUNTS, HEADLINE_AMOUNTS, LEGACY_LAYOUT, layoutFrom, type Layout } from '../domain/layout';
 import type { Commit } from './useWriteQueue';
 
 const keyOf = (uid: string) => `calendarx.layout.${uid}`;
@@ -78,5 +78,6 @@ function describe(p: Partial<Layout>): string {
   if (p.notes !== undefined) parts.push(`노트 ${p.notes ? '표시' : '숨김'}`);
   if (p.sharedSwitcher !== undefined) parts.push(`공간 전환 ${p.sharedSwitcher ? '표시' : '숨김'}`);
   if (p.calendarAmount !== undefined) parts.push(`달력 금액 ${CALENDAR_AMOUNTS.find((a) => a.id === p.calendarAmount)?.label ?? p.calendarAmount}`);
+  if (p.headlineAmount !== undefined) parts.push(`카드 큰 숫자 ${HEADLINE_AMOUNTS.find((a) => a.id === p.headlineAmount)?.label ?? p.headlineAmount}`);
   return parts.join(' · ') || '구성';
 }

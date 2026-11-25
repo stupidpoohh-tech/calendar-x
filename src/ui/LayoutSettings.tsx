@@ -9,7 +9,7 @@
  * 관리' 에서만 끊는다 — 숨기기를 공유 해제로 쓰지 않는다. 연결이 없으면 고를 것이 없으므로
  * 토글 대신 시작하는 길을 둔다.
  */
-import { CALENDAR_AMOUNTS, type Layout } from '../domain/layout';
+import { CALENDAR_AMOUNTS, HEADLINE_AMOUNTS, type CalendarAmount, type Layout } from '../domain/layout';
 
 export interface LayoutSettingsProps {
   /** The settings hub places these groups on separate detail screens. */
@@ -120,25 +120,51 @@ export function LayoutSettings({ layout, onLayout, shared, section }: LayoutSett
         <div className="set-grp">
           <h3 className="set-gt">캘린더 표시</h3>
           <p className="set-note">현금흐름 달력 칸에 적을 금액입니다. 계산은 그대로이고 보여 줄 숫자만 고릅니다.</p>
-          <div className="set-choices" role="radiogroup" aria-label="달력 칸의 금액">
-            {CALENDAR_AMOUNTS.map((a) => (
-              <button
-                key={a.id}
-                role="radio"
-                aria-checked={layout.calendarAmount === a.id}
-                className={'set-choice' + (layout.calendarAmount === a.id ? ' on' : '')}
-                onClick={() => { if (layout.calendarAmount !== a.id) onLayout({ calendarAmount: a.id }); }}
-              >
-                <span className="set-choice-dot" aria-hidden="true" />
-                <span className="set-row-b">
-                  <span className="set-row-t">{a.label}</span>
-                  <span className="set-row-s">{a.hint}</span>
-                </span>
-              </button>
-            ))}
-          </div>
+          <AmountChoices
+            label="달력 칸의 금액" options={CALENDAR_AMOUNTS} value={layout.calendarAmount}
+            onPick={(id) => onLayout({ calendarAmount: id })}
+          />
+        </div>
+      )}
+
+      {layout.ledger && (!section || section === 'calendar') && (
+        <div className="set-grp">
+          <h3 className="set-gt">카드 큰 숫자</h3>
+          <p className="set-note">현금흐름 '며칠 버티나' 카드에 크게 적을 금액입니다. 가용 잔액이 아니면 쓸 수 있는 돈 · 버틸 날은 그 아래 한 줄에 남습니다.</p>
+          <AmountChoices
+            label="카드의 큰 숫자" options={HEADLINE_AMOUNTS} value={layout.headlineAmount}
+            onPick={(id) => onLayout({ headlineAmount: id })}
+          />
         </div>
       )}
     </>
+  );
+}
+
+/** 네 기준 가운데 하나를 고르는 줄. 달력 칸 · 카드 큰 숫자가 같은 모양을 쓴다. */
+function AmountChoices({ label, options, value, onPick }: {
+  label: string;
+  options: readonly { id: CalendarAmount; label: string; hint: string }[];
+  value: CalendarAmount;
+  onPick: (id: CalendarAmount) => void;
+}) {
+  return (
+    <div className="set-choices" role="radiogroup" aria-label={label}>
+      {options.map((a) => (
+        <button
+          key={a.id}
+          role="radio"
+          aria-checked={value === a.id}
+          className={'set-choice' + (value === a.id ? ' on' : '')}
+          onClick={() => { if (value !== a.id) onPick(a.id); }}
+        >
+          <span className="set-choice-dot" aria-hidden="true" />
+          <span className="set-row-b">
+            <span className="set-row-t">{a.label}</span>
+            <span className="set-row-s">{a.hint}</span>
+          </span>
+        </button>
+      ))}
+    </div>
   );
 }
