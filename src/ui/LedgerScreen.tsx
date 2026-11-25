@@ -72,6 +72,9 @@ const VIEWS: readonly { id: LedgerTabId; label: string }[] = [
 export type SubscribeAll = (cb: (items: Entry[]) => void, onError: () => void) => () => void;
 
 export interface LedgerScreenProps {
+  /** 예산 보기에서 체크를 끈 카테고리(기기 설정). 요약 · 합계에서 뺀다. */
+  budgetExcluded?: readonly string[];
+  onBudgetExcluded?: (ids: string[]) => void;
   todayISO: string;
   settleDay: number;
   tab: LedgerTabId;
@@ -538,6 +541,7 @@ function LedgerBudget({
   entries, period, todayISO, settleDay, categories, categoryBudgets, categoriesReady,
   onSeedCategories, onSaveCategoryBudget, onEntryClick,
   annualBudgets = NO_ANNUAL, onSaveAnnualBudget, onDeleteAnnualBudget,
+  budgetExcluded = NO_EXCLUDED, onBudgetExcluded,
 }: LedgerScreenProps & { period: Period }) {
   /*
     카테고리 줄을 누르면 그 아래 이 기간의 거래 카드가 펼쳐진다(분석의 카테고리와 같은 조각). 예산을
@@ -568,14 +572,25 @@ function LedgerBudget({
     () => [...rows.filter((r) => r.budget.amountMinor != null), ...rows.filter((r) => r.budget.amountMinor == null)],
     [rows],
   );
-  const sum = budgetSummary(rows);
+  /*
+    체크를 끈 카테고리는 줄은 그대로 두고 요약 · 합계에서 뺀다(보는 방식 — 예산 문서 · 결산은 그대로).
+    위 요약과 아래 합계가 같은 범위를 보도록 둘 다 같은 목록으로 센다.
+  */
+  const excluded = useMemo(() => new Set(budgetExcluded), [budgetExcluded]);
+  const included = useMemo(() => rows.filter((r) => !excluded.has(r.categoryId)), [rows, excluded]);
+  const excludedCount = rows.length - included.length;
+  const toggleIncluded = (id: string, on: boolean) => {
+    if (!onBudgetExcluded) return;
+    onBudgetExcluded(on ? budgetExcluded.filter((x) => x !== id) : [...budgetExcluded.filter((x) => x !== id), id]);
+  };
+  const sum = budgetSummary(included);
   const phase = phaseOf(period, todayISO);
   const currentKey = periodOf(todayISO, settleDay).key;
   // 기본 예산은 지난 기간부터 바꾸지 않는다 — 소급되면 지난 결산이 바뀐다.
   const defaultFrom = period.key > currentKey ? period.key : currentKey;
   const left = sum.budgeted - sum.actualInBudgeted;
   const outside = sum.actual - sum.actualInBudgeted;
-  const outsideNames = rows.filter((r) => r.budget.amountMinor == null && r.actual > 0).map((r) => r.name);
+  const outsideNames = included.filter((r) => r.budget.amountMinor == null && r.actual > 0).map((r) => r.name);
   const ratio = sum.budgeted > 0 ? sum.actualInBudgeted / sum.budgeted : 0;
 
   if (categoriesReady && categories.length === 0) {
@@ -621,6 +636,9 @@ function LedgerBudget({
           사용 = 실제로 쓴 지출(소비 + 대출 이자)
           {phase === 'current' && ' · 진행 중인 기간입니다'}
         </p>
+        {excludedCount > 0 && (
+          <p className="led-note">체크를 끈 카테고리 {excludedCount}개는 요약 · 합계에 넣지 않습니다</p>
+        )}
         {annual.length > 0 && (
           <p className="led-note">
             연간으로 관리하는 카테고리 {annual.length}개({annual.slice(0, 3).map((r) => r.name).join(' · ')}{annual.length > 3 ? ' 외' : ''})는
@@ -629,8 +647,11 @@ function LedgerBudget({
         )}
       </div>
 
-      <div className="led-bl-cols" aria-hidden="true">
-        <span>카테고리</span><span>예산</span><span>사용</span><span>남음</span><span>사용률</span>
+      <div className="led-bl-hd" aria-hidden="true">
+        {onBudgetExcluded && <span className="led-bl-chk" />}
+        <div className="led-bl-cols">
+          <span>카테고리</span><span>예산</span><span>사용</span><span>남음</span><span>사용률</span>
+        </div>
       </div>
       <ul className="led-budgets" aria-label="카테고리별 예산">
         {ordered.map((r) => (
@@ -651,9 +672,38 @@ function LedgerBudget({
                 : setDefaultBudget(r.categoryId, defaultFrom, amount));
             }}
             annual={onSaveAnnualBudget ? { year, changeable: cycleChangeable, onSave: onSaveAnnualBudget } : undefined}
+            included={onBudgetExcluded ? !excluded.has(r.categoryId) : undefined}
+            onIncluded={(on) => toggleIncluded(r.categoryId, on)}
           />
         ))}
       </ul>
+      {ordered.length > 0 && (
+        <div className="led-bl-hd led-bl-total" role="group" aria-label="예산 합계">
+          {onBudgetExcluded && <span className="led-bl-chk" />}
+          <div className="led-bl-main cols static">
+            <span className="led-bl-n">
+              합계
+              {excludedCount > 0 && <span className="led-bl-s">{excludedCount}개 제외</span>}
+            </span>
+            <span className="led-bl-c num" aria-label={`예산 합계 ${formatAmount(sum.budgeted)}`}>{formatAmount(sum.budgeted)}</span>
+            <span className="led-bl-c num" aria-label={`사용 합계 ${formatAmount(sum.actual)}`}>{formatAmount(sum.actual)}</span>
+            <span
+              className={'led-bl-c num' + (left < 0 ? ' minus' : '')}
+              aria-label={left < 0 ? `초과 합계 ${formatAmount(-left)}` : `남음 합계 ${formatAmount(left)}`}
+            >
+              {left < 0
+                ? <><span className="led-bl-ovw">초과 </span><span className="led-bl-ovs">−</span>{formatAmount(-left)}</>
+                : formatAmount(left)}
+            </span>
+            {sum.budgeted > 0
+              ? <UsageBar used={sum.actualInBudgeted} budget={sum.budgeted} />
+              : <span className="led-bl-c led-bl-none" aria-label="사용률 없음">—</span>}
+          </div>
+        </div>
+      )}
+      {outside > 0 && ordered.length > 0 && (
+        <p className="led-note num">사용 합계에는 예산 없는 카테고리 · 미분류 {formatAmount(outside)}이 들어 있고, 남음은 예산을 정한 카테고리만 견줍니다</p>
+      )}
 
       {onSaveAnnualBudget && onDeleteAnnualBudget && (
         <AnnualBudgetSection
@@ -667,9 +717,13 @@ function LedgerBudget({
 }
 
 const NO_ANNUAL: readonly AnnualBudget[] = [];
+const NO_EXCLUDED: readonly string[] = [];
 
-function BudgetLine({ row, open, onToggle, entries, onEntryClick, canDefault, defaultFrom, onSave, annual }: {
+function BudgetLine({ row, open, onToggle, entries, onEntryClick, canDefault, defaultFrom, onSave, annual, included, onIncluded }: {
   row: BudgetRow; open: boolean; onToggle: () => void;
+  /** 요약 · 합계에 넣는가(체크). 없으면 체크 칸을 그리지 않는다. */
+  included?: boolean;
+  onIncluded?: (on: boolean) => void;
   /** 연간으로 바꾸는 자리(P2). 그 해 · 바꿀 수 있는 해인가 · 저장. 없으면 월간만 고친다. */
   annual?: { year: number; changeable: boolean; onSave: (b: AnnualBudget) => void };
   /** 펼쳤을 때만 채운다 — 이 기간 이 카테고리의 실제 지출. */
@@ -692,7 +746,16 @@ function BudgetLine({ row, open, onToggle, entries, onEntryClick, canDefault, de
   const save = (scope: 'period' | 'default') => { setEditing(false); onSave(scope, parsed); };
 
   return (
-    <li className={'led-bl' + (open ? ' open' : '')}>
+    <li className={'led-bl' + (open ? ' open' : '') + (included === false ? ' off' : '')}>
+      <div className="led-bl-r">
+      {included !== undefined && (
+        <label className="led-bl-chk">
+          <input
+            type="checkbox" checked={included} onChange={(e) => onIncluded?.(e.target.checked)}
+            aria-label={`${row.name} 합계에 넣기`}
+          />
+        </label>
+      )}
       <button className="led-bl-main cols" onClick={onToggle} aria-expanded={open}>
         <span className="led-bl-n">
           {row.name}{row.archived && ' (보관)'}
@@ -717,6 +780,7 @@ function BudgetLine({ row, open, onToggle, entries, onEntryClick, canDefault, de
           ? <UsageBar used={row.actual} budget={budget} />
           : <span className="led-bl-c led-bl-none" aria-label="사용률 없음">—</span>}
       </button>
+      </div>
       {open && (
         <TxCard label={`${row.name} 거래`} entries={entries} fallbackTitle={row.name} onEntryClick={onEntryClick}>
           {editable && !editing && (

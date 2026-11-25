@@ -257,6 +257,16 @@ button.led-cat-n:hover svg { color: var(--accent); }
 .led-bl-cols span:not(:first-child) { text-align: right; }
 .led-bl-main.cols .led-bl-n { flex-direction: column; align-items: flex-start; gap: 2px; overflow-wrap: anywhere; }
 .led-bl-main.cols .led-bl-s { grid-column: auto; }
+/* 체크 칸(합계에 넣기) — 줄 · 머리 · 합계가 같은 너비를 비워 칸이 어긋나지 않는다. */
+.led-bl-r, .led-bl-hd { display: flex; align-items: center; }
+.led-bl-r > .led-bl-main, .led-bl-hd > .led-bl-cols, .led-bl-hd > .led-bl-main { flex: 1; min-width: 0; }
+.led-bl-hd { border-bottom: 1px solid var(--line); }
+.led-bl-hd > .led-bl-cols { border-bottom: 0; }
+.led-bl-chk { flex: none; width: 28px; align-self: stretch; display: flex; align-items: center; justify-content: center; cursor: pointer; }
+.led-bl-chk input { width: 16px; height: 16px; margin: 0; accent-color: var(--lens-money); cursor: pointer; }
+.led-bl.off .led-bl-main { opacity: 0.45; }
+.led-bl-total { border-bottom: 0; border-top: 2px solid var(--line); }
+.led-bl-total .led-bl-n, .led-bl-total .led-bl-c { font-weight: 700; }
 .led-bl-c { font-size: 0.8125rem; color: var(--ink); text-align: right; align-self: start; overflow-wrap: anywhere; }
 .led-bl-c.minus { color: var(--bad); }
 .led-bl-none { color: var(--ink-4); }
@@ -343,6 +353,7 @@ button.led-cat-n:hover svg { color: var(--accent); }
 @media (max-width: 480px) {
   .led-bl-cols, .led-bl-main.cols { grid-template-columns: minmax(0, 1.2fr) repeat(3, minmax(0, 1fr)) 44px; gap: 4px 6px; }
   .led-bl-ovw { display: none; }
+  .led-bl-chk { width: 24px; }
   .led-bl-ovs { display: inline; }
   .led-totals b { font-size: 0.875rem; }
   .led-stat { grid-template-columns: 1fr 84px; }

@@ -286,6 +286,35 @@ describe('예산', () => {
     expect(sum.textContent).toContain('예산 밖 지출 9,000 (카페) — 남은 예산에는 넣지 않습니다');
   });
 
+  it('아래 합계 줄 — 예산 · 사용(예산 없는 카테고리 포함) · 남음을 칸마다 더한다', () => {
+    mount({ tab: 'budget', entries, categoryBudgets: budgets, onBudgetExcluded: vi.fn() });
+    const total = screen.getByRole('group', { name: '예산 합계' });
+    expect(within(total).getByLabelText('예산 합계 300,000')).toBeInTheDocument();
+    expect(within(total).getByLabelText('사용 합계 329,000')).toBeInTheDocument();
+    expect(within(total).getByLabelText('초과 합계 20,000')).toBeInTheDocument();
+    expect(screen.getByText(/사용 합계에는 예산 없는 카테고리 · 미분류 9,000이 들어 있고/)).toBeInTheDocument();
+  });
+
+  it('체크를 끄면 그 카테고리를 요약 · 합계에서 뺀다 — 줄은 남고, 다시 켜면 돌아온다', () => {
+    const onBudgetExcluded = vi.fn();
+    mount({ tab: 'budget', entries, categoryBudgets: budgets, onBudgetExcluded });
+    fireEvent.click(screen.getByRole('checkbox', { name: '식비 합계에 넣기' }));
+    expect(onBudgetExcluded).toHaveBeenLastCalledWith(['food']);
+    cleanup();
+    mount({ tab: 'budget', entries, categoryBudgets: budgets, onBudgetExcluded, budgetExcluded: ['food'] });
+    const box = screen.getByRole('checkbox', { name: '식비 합계에 넣기' });
+    expect(box).not.toBeChecked();
+    const total = screen.getByRole('group', { name: '예산 합계' });
+    expect(within(total).getByLabelText('예산 합계 0')).toBeInTheDocument();
+    expect(within(total).getByLabelText('사용 합계 9,000')).toBeInTheDocument();
+    expect(total.textContent).toContain('1개 제외');
+    expect(screen.getByRole('group', { name: '예산 요약' }).textContent).toContain('체크를 끈 카테고리 1개는 요약 · 합계에 넣지 않습니다');
+    // 줄은 그대로 보인다.
+    expect(within(screen.getByRole('list', { name: '카테고리별 예산' })).getByText('식비')).toBeInTheDocument();
+    fireEvent.click(box);
+    expect(onBudgetExcluded).toHaveBeenLastCalledWith([]);
+  });
+
   it('남으면 "남은 예산" 으로, 예산이 하나도 없으면 정하라고 적는다', () => {
     mount({ tab: 'budget', entries: entries.slice(1), categoryBudgets: budgets });
     const sum = screen.getByRole('group', { name: '예산 요약' });

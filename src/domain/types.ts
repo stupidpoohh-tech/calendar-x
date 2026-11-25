@@ -720,6 +720,11 @@ export interface Prefs {
   todayCollapsed: boolean;
   todayMoneyCollapsed: boolean;
   moneyCardCollapsed: boolean;
+  /**
+   * 예산 보기에서 체크를 끈 카테고리 id. 끈 줄은 그대로 보이되 요약 · 합계에서 빠진다.
+   * 보는 방식이라 기기 설정이다 — 예산 문서 · 계산은 그대로다.
+   */
+  budgetExcluded: string[];
 }
 
 /**

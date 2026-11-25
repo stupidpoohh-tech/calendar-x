@@ -22,6 +22,7 @@ const DEFAULTS: Prefs = {
   todayCollapsed: true,
   todayMoneyCollapsed: false,
   moneyCardCollapsed: false,
+  budgetExcluded: [],
 };
 
 function read(): Prefs {
@@ -33,7 +34,12 @@ function read(): Prefs {
     const compact = parsed.summaryLayoutVersion === 1 ? {} : { todayCollapsed: true, budgetsCollapsed: true, debtsCollapsed: true };
     // Switch existing devices once; later explicit list/calendar choices remain independent.
     const calendar = parsed.calendarDefaultVersion === 1 ? {} : { view: 'calendar' as const, sharedView: 'calendar' as const };
-    return { ...DEFAULTS, ...parsed, ...compact, ...calendar, pinCollapsed: { ...(parsed.pinCollapsed ?? {}) } };
+    const excluded = Array.isArray(parsed.budgetExcluded)
+      ? parsed.budgetExcluded.filter((x): x is string => typeof x === 'string') : [];
+    return {
+      ...DEFAULTS, ...parsed, ...compact, ...calendar,
+      pinCollapsed: { ...(parsed.pinCollapsed ?? {}) }, budgetExcluded: excluded,
+    };
   } catch {
     return DEFAULTS;
   }

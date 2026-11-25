@@ -2127,6 +2127,8 @@ function Workspace({ uid, user, onSignOut }: WorkspaceProps) {
           </>
         ) : ledgerOn ? (
           <LedgerScreen
+            budgetExcluded={prefs.budgetExcluded}
+            onBudgetExcluded={(ids) => set('budgetExcluded', ids)}
             todayISO={today}
             settleDay={settleDay}
             tab={ledgerTab}
