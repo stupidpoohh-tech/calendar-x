@@ -11,7 +11,7 @@
  */
 import { describe, expect, it } from 'vitest';
 import {
-  budgetState, inBudget, newBudget, newReserve, reservedOn, reservedTotal, spendingIn,
+  budgetState, inBudget, newBudget, newReserve, reservedOn, reservedTotal, spendingIn, pocketSegments,
 } from './budget';
 import { localDateOf } from './date';
 import { newEntry, newMoney, setRecurrence } from './entry';
@@ -329,5 +329,39 @@ describe('옛 데이터', () => {
     const entries = [legacySave, spend('점심', 12_000, '2026-09-15')];
     expect(limitOn(accounts, entries, '2026-09-30', TODAY, { budgets: [budget()] }))
       .toBe(2_300_000);
+  });
+});
+
+describe('pocketSegments — 달력 생활비 막대의 조각', () => {
+  const b = newBudget({ id: 'p', startDate: '2026-10-01', endDate: '2026-10-10', amountMinor: 100_000 });
+  const spend = (id: string, date: string, amount: number, status: 'actual' | 'planned', budgetId = 'p') => newEntry('money', {
+    id, title: id, startDate: date, money: newMoney({ type: 'expense', amountMinor: amount, status, budgetId }),
+  });
+
+  it('지출이 없으면 지난 날 · 오늘부터 두 조각, 금액은 총 예산 그대로', () => {
+    expect(pocketSegments(b, [], '2026-10-05').map((s) => [s.start, s.end, s.remainingMinor, s.past])).toEqual([
+      ['2026-10-01', '2026-10-04', 100_000, true],
+      ['2026-10-05', '2026-10-10', 100_000, false],
+    ]);
+  });
+
+  it('지난 날은 실제 지출만, 오늘부터는 예정까지 그 날 끝의 남은 금액으로 끊는다', () => {
+    const list = [
+      spend('a', '2026-10-02', 10_000, 'actual'),
+      spend('old', '2026-10-03', 5_000, 'planned'), // 지난 미확정 예정 — 오늘부터 센다
+      spend('b', '2026-10-07', 30_000, 'planned'),
+      spend('other', '2026-10-08', 99_000, 'actual', 'x'), // 다른 주머니
+    ];
+    expect(pocketSegments(b, list, '2026-10-05').map((s) => [s.start, s.end, s.remainingMinor, s.past])).toEqual([
+      ['2026-10-01', '2026-10-01', 100_000, true],
+      ['2026-10-02', '2026-10-04', 90_000, true],
+      ['2026-10-05', '2026-10-06', 85_000, false],
+      ['2026-10-07', '2026-10-10', 55_000, false],
+    ]);
+  });
+
+  it('넘게 쓰면 음수 그대로 적는다', () => {
+    const segs = pocketSegments(b, [spend('a', '2026-10-06', 120_000, 'planned')], '2026-10-01');
+    expect(segs.at(-1)?.remainingMinor).toBe(-20_000);
   });
 });

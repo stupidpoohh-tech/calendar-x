@@ -620,6 +620,11 @@
 .debt-add:hover { border-color: var(--ink-4); color: var(--ink); }
 .debt-f { display: flex; flex-direction: column; gap: 8px; padding: 12px; background: var(--bg-soft); border-radius: var(--radius-sm); }
 .debt-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.bp-color { display: flex; align-items: center; gap: 10px; }
+.bp-color-l { flex: none; font-size: 0.75rem; color: var(--ink-3); }
+/* '기본' — 색을 고르지 않은 점선 막대를 그대로 보여 준다. */
+.mod-color.bp-color-none { background: var(--bg); border: 2px dashed var(--lens-money); }
+.mod-color.bp-color-none.on { border-style: solid; border-color: var(--ink); }
 @media (max-width: 520px) { .debt-grid { grid-template-columns: 1fr; } }
 .debt-grid label { display: flex; flex-direction: column; gap: 4px; font-size: 0.6875rem; color: var(--ink-3); font-weight: 500; }
 .debt-round { display: flex; align-items: center; gap: 5px; }

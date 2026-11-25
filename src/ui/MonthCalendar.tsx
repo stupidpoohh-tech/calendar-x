@@ -10,6 +10,7 @@ import { Icon } from './Icon';
 import { isRecoveryEntry } from '../domain/recovery';
 import { daySummary, type DaySummary } from '../domain/daySummary';
 import { isActual } from '../domain/ledger';
+import { pocketSegments, type PocketSegment } from '../domain/budget';
 import { CalendarDaySummary } from './CalendarDaySummary';
 import { SUMMARY_HEIGHT } from './ledgerView';
 
@@ -69,7 +70,7 @@ const AMOUNT_NAME: Record<CalendarAmount, string> = {
 /** 한 주에 놓는 막대 하나 — 입출금 · 할 일(`Entry`) 또는 생활비 주머니(`Budget`). */
 type BarItem =
   | { kind: 'entry'; entry: Entry }
-  | { kind: 'pocket'; budget: Budget };
+  | { kind: 'pocket'; seg: PocketSegment };
 
 interface Placed {
   item: BarItem;
@@ -80,14 +81,15 @@ interface Placed {
   continuesRight: boolean;
 }
 
-const itemStart = (it: BarItem) => normalizeDate(it.kind === 'entry' ? it.entry.startDate : it.budget.startDate);
-const itemEnd = (it: BarItem) => (it.kind === 'entry' ? effectiveEndDate(it.entry) : normalizeDate(it.budget.endDate));
+const itemStart = (it: BarItem) => normalizeDate(it.kind === 'entry' ? it.entry.startDate : it.seg.start);
+const itemEnd = (it: BarItem) => (it.kind === 'entry' ? effectiveEndDate(it.entry) : normalizeDate(it.seg.end));
 
 /**
  * 겹치지 않는 가장 위쪽 레인에 배치한다.
  *
  * `floor` 를 주면 그 날 앞으로는 막대를 그리지 않는다(가계부 요약 모드 — 지난 날은 요약 칸이
- * 차지한다). 그 날에 걸친 기간 항목은 그 날부터 그린다.
+ * 차지한다). 그 날에 걸친 기간 항목은 그 날부터 그린다. 생활비 막대만 예외다 — 지난 날은 회색 조각으로
+ * 그린다(조각은 `pocketSegments` 가 이미 나눠 두었다).
  */
 function placeWeek(
   items: readonly BarItem[], weekISO: readonly string[], floor?: string,
@@ -96,7 +98,7 @@ function placeWeek(
   const last = weekISO[6] ?? '';
   const startOf = (it: BarItem) => {
     const start = itemStart(it);
-    return floor && start < floor ? floor : start;
+    return floor && it.kind === 'entry' && start < floor ? floor : start;
   };
 
   const visible = items.filter((it) => {
@@ -219,10 +221,24 @@ export function MonthCalendar({
       return effectiveEndDate(e) >= todayISO;
     })
     : entries), [summaryMode, entries, todayISO]);
+  /*
+    생활비 막대는 남은 금액이 바뀌는 날마다 끊는다(`pocketSegments`) — 지난 날은 실제로 쓴 돈, 오늘부터는
+    걸어 둔 예정까지 뺀 금액. 재료는 계산용 원본과 화면용 원본을 합친 것이다: 계산 창은 잔고 기준일의 달부터라
+    그보다 앞선 이 달의 지출을, 화면 창은 보고 있는 달 ±1 이라 먼 앞날의 예정을 못 받을 수 있다.
+  */
+  const pocketSource = useMemo(() => {
+    const byId = new Map<string, Entry>();
+    for (const e of tideEntries) byId.set(e.id, e);
+    for (const e of ledgerSummary?.entries ?? []) byId.set(e.id, e);
+    return [...byId.values()];
+  }, [tideEntries, ledgerSummary?.entries]);
   const barItems = useMemo<BarItem[]>(() => [
-    ...(pockets ?? []).map((budget) => ({ kind: 'pocket' as const, budget })),
+    ...(pockets ?? []).flatMap((b) => pocketSegments(b, pocketSource, todayISO))
+      .map((seg) => ({ kind: 'pocket' as const, seg })),
     ...barEntries.map((entry) => ({ kind: 'entry' as const, entry })),
-  ], [pockets, barEntries]);
+  ], [pockets, pocketSource, todayISO, barEntries]);
+  // 금액은 두 자료가 다 왔을 때만 적는다 — 덜 받은 목록으로 남은 금액을 지어내지 않는다.
+  const pocketAmounts = (ledgerSummary?.ready ?? false) && tideMonths.length > 0;
   const placedWeeks = useMemo(() => weeks.map(week =>
     placeWeek(barItems, week.map(toISO), summaryMode ? todayISO : undefined)),
   [weeks, barItems, summaryMode, todayISO]);
@@ -349,25 +365,33 @@ export function MonthCalendar({
             <div className="cal-bars" style={{ top: topOffset }}>
               {placed.map(({ item, lane, from, to, continuesLeft, continuesRight }) => {
                 if (item.kind === 'pocket') {
-                  const b = item.budget;
-                  const label = b.name.includes('생활비') ? b.name : `생활비 · ${b.name}`;
+                  const { budget: b, start, past, remainingMinor } = item.seg;
+                  const amounts = `${formatAmount(remainingMinor)}원/${formatAmount(b.amountMinor)}원`;
+                  const label = b.name.trim() || '생활비';
                   return (
                     <button
-                      key={`pocket:${b.id}`}
-                      className={'cal-bar pocket' + (continuesLeft ? ' cont-l' : '') + (continuesRight ? ' cont-r' : '')}
+                      key={`pocket:${b.id}:${start}`}
+                      className={
+                        'cal-bar pocket'
+                        + (b.color ? ' tinted' : '')
+                        + (past ? ' past' : '')
+                        + (remainingMinor < 0 ? ' over' : '')
+                        + (continuesLeft ? ' cont-l' : '') + (continuesRight ? ' cont-r' : '')
+                      }
                       style={{
                         top: laneOffsets[lane],
                         height,
                         left: `calc(${(from / 7) * 100}% + 3px)`,
                         width: `calc(${((to - from + 1) / 7) * 100}% - 6px)`,
+                        ...(b.color ? { ['--bar' as string]: colorHex(b.color) } : {}),
                       }}
-                      title={`${label} · ${formatAmount(b.amountMinor)} · ${b.startDate} ~ ${b.endDate}`}
-                      aria-label={`생활비 ${b.name} ${formatAmount(b.amountMinor)}원 열기`}
+                      title={`${label} · ${pocketAmounts ? `${amounts} · ` : ''}${b.startDate} ~ ${b.endDate}`}
+                      aria-label={`생활비 ${label}${pocketAmounts ? ` 남은 ${formatAmount(remainingMinor)}원 / ${formatAmount(b.amountMinor)}원` : ''} 열기`}
                       onClick={(e) => { e.stopPropagation(); onPocketClick?.(b.id); }}
                     >
                       {showText && (
                         <span className="cal-bar-in">
-                          <span className="cal-bar-x">{label} {formatAmount(b.amountMinor)}</span>
+                          <span className="cal-bar-x">{label}{pocketAmounts && <> <span className="num">{amounts}</span></>}</span>
                         </span>
                       )}
                     </button>

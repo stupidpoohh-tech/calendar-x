@@ -32,16 +32,17 @@ const lunch = newEntry('money', {
   money: newMoney({ type: 'expense', amountMinor: 12_000 }),
 });
 
-function calendar(over: { pockets?: typeof pocket[]; summary?: boolean } = {}) {
+function calendar(over: { pockets?: typeof pocket[]; summary?: boolean; entries?: Entry[]; ready?: boolean } = {}) {
+  const list = over.entries ?? [lunch];
   const onPocketClick = vi.fn();
   const onEntryClick = vi.fn();
   render(
     <MonthCalendar
       cursor={new Date(2026, 9, 1)} onCursorChange={vi.fn()}
-      entries={[lunch]} tideEntries={[lunch]} tideMonths={['2026-10', '2026-11']} accounts={[acct(250_000)]} hasBalance
+      entries={list} tideEntries={list} tideMonths={['2026-10', '2026-11']} accounts={[acct(250_000)]} hasBalance
       lens="money" weekStart="mon" todayISO={TODAY}
       onEntryClick={onEntryClick} onDayOpen={vi.fn()} onDayCreate={vi.fn()}
-      ledgerSummary={over.summary === false ? undefined : { entries: [lunch], ready: true }}
+      ledgerSummary={over.summary === false ? undefined : { entries: list, ready: over.ready ?? true }}
       pockets={over.pockets ?? [pocket]} onPocketClick={onPocketClick}
     />,
   );
@@ -51,13 +52,14 @@ function calendar(over: { pockets?: typeof pocket[]; summary?: boolean } = {}) {
 describe('달력의 생활비 막대 — Budget 에서', () => {
   it('여러 주에 걸친 막대의 조각마다 같은 생활비를 연다. 거래 창으로 가지 않는다', () => {
     const { onPocketClick, onEntryClick } = calendar();
-    const bars = screen.getAllByRole('button', { name: '생활비 10월 생활비 200,000원 열기' });
+    const bars = screen.getAllByRole('button', { name: '생활비 10월 생활비 남은 200,000원 / 200,000원 열기' });
     expect(bars).toHaveLength(2);
     for (const b of bars) fireEvent.click(b);
     expect(onPocketClick.mock.calls).toEqual([['b1'], ['b1']]);
     expect(onEntryClick).not.toHaveBeenCalled();
     expect(bars[0]!.className).toContain('pocket');
-    expect(bars[0]!.textContent).toBe('10월 생활비 200,000');
+    // 남은 금액 / 총 예산
+    expect(bars[0]!.textContent).toBe('10월 생활비 200,000원/200,000원');
   });
 
   it('예상 잔고 숫자는 생활비 막대와 무관하다 — 출금이 아니다', () => {
@@ -72,17 +74,50 @@ describe('달력의 생활비 막대 — Budget 에서', () => {
 
   it('겹친 생활비는 각자 막대 하나씩, 맨 위 줄부터', () => {
     const { onPocketClick } = calendar({ pockets: [pocket, newBudget({ id: 'b2', name: '여행', startDate: '2026-10-15', endDate: '2026-10-16', amountMinor: 100_000 })] });
-    fireEvent.click(screen.getByRole('button', { name: '생활비 여행 100,000원 열기' }));
+    fireEvent.click(screen.getByRole('button', { name: /^생활비 여행 / }));
     expect(onPocketClick).toHaveBeenCalledWith('b2');
-    const travel = screen.getByRole('button', { name: '생활비 여행 100,000원 열기' });
+    const travel = screen.getByRole('button', { name: /^생활비 여행 / });
     const main = screen.getAllByRole('button', { name: /10월 생활비/ })[0]!;
     expect(parseFloat(main.style.top)).toBe(0);
     expect(parseFloat(travel.style.top)).toBeGreaterThan(0);
   });
 
-  it('지난 주머니는 그리지 않는다 — 지난 날은 요약 칸 자리다', () => {
-    calendar({ pockets: [newBudget({ id: 'old', name: '9월', startDate: '2026-09-01', endDate: '2026-10-12', amountMinor: 1 })] });
-    expect(screen.queryByRole('button', { name: /생활비 9월/ })).toBeNull();
+  it('지난 날은 회색 조각으로 그리고, 오늘부터 고른 색이다', () => {
+    calendar({ pockets: [newBudget({ id: 'b3', name: '꿀단지', startDate: '2026-10-08', endDate: '2026-10-16', amountMinor: 500_000, color: 'violet' })] });
+    const bars = screen.getAllByRole('button', { name: /^생활비 꿀단지/ });
+    const past = bars.filter((b) => b.className.includes('past'));
+    const now = bars.filter((b) => !b.className.includes('past'));
+    // 10/8~11(첫 주) · 10/12(둘째 주 월) 은 지난 날, 10/13~16 은 오늘부터.
+    expect(past).toHaveLength(2);
+    expect(now).toHaveLength(1);
+    for (const b of bars) expect(b.className).toContain('tinted');
+    expect(now[0]!.style.getPropertyValue('--bar')).toBe('#8b5cf6');
+  });
+
+  it('남은 금액이 바뀌는 날 막대가 끊긴다 — 지난 날은 실제 지출, 앞날은 걸어 둔 예정까지', () => {
+    const spend = (id: string, date: string, amount: number, status: 'actual' | 'planned') => newEntry('money', {
+      id, title: id, startDate: date,
+      money: newMoney({ type: 'expense', amountMinor: amount, status, budgetId: 'b4' }),
+    });
+    calendar({
+      pockets: [newBudget({ id: 'b4', name: '꿀단지', startDate: '2026-10-08', endDate: '2026-10-21', amountMinor: 500_000 })],
+      entries: [spend('밥', '2026-10-09', 50_000, 'actual'), spend('여행', '2026-10-16', 200_000, 'planned')],
+    });
+    const labels = screen.getAllByRole('button', { name: /^생활비 꿀단지/ }).map((b) => b.textContent);
+    expect(labels).toEqual([
+      '꿀단지 500,000원/500,000원', // 10/8 (지난 날)
+      '꿀단지 450,000원/500,000원', // 10/9~11 — 10/9 에 50,000 실제 지출
+      '꿀단지 450,000원/500,000원', // 10/12 (지난 날, 다음 주)
+      '꿀단지 450,000원/500,000원', // 10/13~15 — 오늘부터 색
+      '꿀단지 250,000원/500,000원', // 10/16~18 — 10/16 에 200,000 예정
+      '꿀단지 250,000원/500,000원', // 10/19~21
+    ]);
+  });
+
+  it('자료를 다 받기 전에는 금액을 적지 않는다 — 막대는 그대로다', () => {
+    calendar({ ready: false });
+    const bars = screen.getAllByRole('button', { name: '생활비 10월 생활비 열기' });
+    expect(bars[0]!.textContent).toBe('10월 생활비');
   });
 });
 

@@ -428,6 +428,8 @@ export function budgetFromDoc(id: string, raw: Raw): Budget {
     endDate: endRaw && endRaw >= startDate ? endRaw : startDate,
     amountMinor: Math.trunc(num(raw.amountMinor)),
     currency: str(raw.currency, DEFAULT_CURRENCY),
+    // 모르는 색은 버린다 — 막대가 기본 모양으로 돌아갈 뿐 계산은 그대로다.
+    color: typeof raw.color === 'string' && raw.color in COLOR_BY_ID ? raw.color as ColorId : null,
     createdAt: str(raw.createdAt),
     updatedAt: str(raw.updatedAt),
   };
@@ -440,6 +442,7 @@ export function budgetToDoc(b: Budget): Raw {
     endDate: b.endDate,
     amountMinor: b.amountMinor,
     currency: b.currency,
+    color: b.color ?? null,
     createdAt: b.createdAt,
     updatedAt: b.updatedAt,
   };

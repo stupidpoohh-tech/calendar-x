@@ -2212,7 +2212,7 @@ function Workspace({ uid, user, onSignOut }: WorkspaceProps) {
           </TideBar>
           <p className="led-note cal-legend">
             {hasBalance && <>{calendarAmountCaption(layout.calendarAmount)}. </>}
-            날짜 숫자 → 그 날 상세 · 빈 칸 → 그 날짜로 거래 입력 · 점선 막대 → 생활비.
+            날짜 숫자 → 그 날 상세 · 빈 칸 → 그 날짜로 거래 입력 · 생활비 막대(남은 금액/총 예산) → 생활비 창.
           </p>
           <MonthCalendar
             cursor={cursor}

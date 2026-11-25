@@ -230,3 +230,18 @@
   border: 1px dashed var(--bar); border-left: 3px solid var(--bar);
 }
 .cal-bar.pocket.cont-l { border-left-width: 1px; border-left-style: dashed; }
+/* 색을 고른 생활비 — 채운 막대. 점선은 색을 고르지 않은 주머니의 모양으로 남긴다. */
+.cal-bar.pocket.tinted {
+  background: color-mix(in oklab, var(--bar) 22%, var(--bg));
+  border: 1px solid color-mix(in oklab, var(--bar) 55%, var(--bg)); border-left: 3px solid var(--bar);
+}
+.cal-bar.pocket.tinted.cont-l { border-left-width: 1px; border-left-style: solid; }
+/* 지난 날의 조각 — 색과 무관하게 회색 반투명. 오늘부터 고른 색이 된다. */
+.cal-bar.pocket.past {
+  --bar: var(--ink-4);
+  background: color-mix(in oklab, var(--ink-4) 14%, var(--bg));
+  border-style: solid; border-color: color-mix(in oklab, var(--ink-4) 45%, var(--bg));
+  border-left-color: var(--ink-4);
+  opacity: 0.6;
+}
+.cal-bar.pocket.over .num { color: var(--bad); font-weight: 600; }

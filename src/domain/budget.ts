@@ -54,7 +54,7 @@
  * 잔고 자체는 건드리지 않는다 — 통장에는 그대로 있기 때문이다.
  */
 import { DEFAULT_CURRENCY } from './constants';
-import { endOfMonth, parseDate, startOfMonth, todayISO, toISO } from './date';
+import { addDaysISO, endOfMonth, parseDate, startOfMonth, todayISO, toISO } from './date';
 import { uid } from './entry';
 import {
   balanceInclusion, confirmedKey, confirmedSetOf, isActual, moneyFlowOf,
@@ -580,10 +580,66 @@ export function newBudget(patch: Partial<Budget> = {}): Budget {
     endDate: monthBound(today, 'end'),
     amountMinor: 0,
     currency: DEFAULT_CURRENCY,
+    color: null,
     createdAt: now,
     updatedAt: now,
     ...patch,
   };
+}
+
+/**
+ * 현금흐름 달력의 생활비 막대 한 조각 — 같은 남은 금액 · 같은 때(지난 날 / 오늘부터)인 연속된 날.
+ * 표시값이다. 한도 · 예상 잔고 · 주머니 숫자를 바꾸지 않는다.
+ */
+export interface PocketSegment {
+  budget: Budget;
+  start: DateISO;
+  end: DateISO;
+  /** 그 날이 끝날 때의 남은 금액(총 예산 − 그때까지 쓴 돈). 넘게 쓰면 음수 그대로다. */
+  remainingMinor: number;
+  /** 오늘 앞의 날 — 막대를 회색으로 그린다. */
+  past: boolean;
+}
+
+/** 막대를 날마다 나눌 수 있는 기간의 상한. 그보다 긴 주머니는 쪼개지 않고 기간 끝의 숫자 하나로 그린다. */
+const SEGMENT_DAYS_MAX = 400;
+
+/**
+ * 생활비 막대를 금액이 바뀌는 날마다 나눈다.
+ *
+ * 그 날의 남은 금액 = 총 예산 − (그 날까지의 **실제** 사용) − (오늘부터는 그 날까지의 예정 사용). 지난 날은
+ * 실제로 쓴 돈만 보고, 오늘부터는 걸어 둔 예정까지 뺀 '예정 반영 시 남음' 을 본다 — `budgetState` 의
+ * `remainingMinor` · `remainingWithPlannedMinor` 와 같은 재료(`spendingIn`, 확정한 예정은 실제가 대신 센다)다.
+ * 지난 날에 남은 확정하지 않은 예정은 오늘에 넣는다. 조각은 금액이 바뀌는 날, 그리고 오늘에서 끊긴다.
+ */
+export function pocketSegments(
+  budget: Budget, entries: readonly Entry[], today: DateISO,
+  confirmed: ReadonlySet<string> = confirmedSetOf(entries),
+): PocketSegment[] {
+  const linked = spendingIn(budget, entries, confirmed);
+  const actual = linked.filter((e) => isActual(e));
+  const planned = linked.filter((e) => !isActual(e));
+  const spentBy = (d: DateISO) => actual.filter((e) => e.startDate <= d).reduce((t, e) => t + amt(e), 0)
+    + (d >= today ? planned.filter((e) => e.startDate <= d).reduce((t, e) => t + amt(e), 0) : 0);
+
+  const { startDate: start, endDate: end } = budget;
+  const out: PocketSegment[] = [];
+  let d = start;
+  for (let i = 0; d <= end && i < SEGMENT_DAYS_MAX; i++, d = addDaysISO(d, 1)) {
+    const remainingMinor = budget.amountMinor - spentBy(d);
+    const past = d < today;
+    const last = out[out.length - 1];
+    if (last && last.remainingMinor === remainingMinor && last.past === past) last.end = d;
+    else out.push({ budget, start: d, end: d, remainingMinor, past });
+  }
+  const tail = out[out.length - 1];
+  // 너무 긴 기간 — 남은 날은 마지막 조각을 끝까지 늘리고 기간 끝의 숫자를 적는다.
+  if (tail && tail.end < end) {
+    tail.end = end;
+    tail.remainingMinor = budget.amountMinor - spentBy(end);
+    tail.past = end < today;
+  }
+  return out;
 }
 
 /** 그 날이 든 달의 첫날 · 마지막날. 날짜를 못 읽으면 그 날 자체를 쓴다. */

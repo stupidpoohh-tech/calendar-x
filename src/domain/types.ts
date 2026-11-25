@@ -381,6 +381,11 @@ export interface Budget {
   /** 이 기간에 쓰기로 확보한 총액. 최소 단위 정수. */
   amountMinor: number;
   currency: string;
+  /**
+   * 현금흐름 달력 막대의 색(사용자가 고른다). 없으면 가계부 색의 점선 막대 — 지금까지 그대로다.
+   * 표시값이라 계산에 쓰지 않는다.
+   */
+  color?: ColorId | null;
   createdAt: string;
   updatedAt: string;
 }

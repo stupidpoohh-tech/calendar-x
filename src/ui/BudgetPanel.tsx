@@ -25,6 +25,7 @@ import {
   activeReserves, archivedReserves, budgetEnded, budgetStates, newBudget, newReserve, reservedTotal,
   reserveLinkedEntries, reserveProtects, reserveRemaining, spendingIn, unlinkedSpendingFor, type BudgetState,
 } from '../domain/budget';
+import { COLORS } from '../domain/constants';
 import { fmtDayShort } from '../domain/date';
 import { formatAmount, minorToInput, parseAmountToMinor } from '../domain/money';
 import type { Account, Budget, Entry, Reserve } from '../domain/types';
@@ -511,6 +512,25 @@ function BudgetForm({
             onKeyDown={(e) => { if (!e.nativeEvent.isComposing && e.key === 'Enter') onSave(); }}
           />
         </label>
+      </div>
+      {/* 달력 막대의 색. 고르지 않으면 점선 막대 그대로다 — 표시만 바뀌고 계산은 그대로다. */}
+      <div className="bp-color" role="radiogroup" aria-label="달력 막대 색">
+        <span className="bp-color-l">막대 색</span>
+        <div className="mod-colors">
+          <button
+            type="button" role="radio" aria-checked={!draft.color} aria-label="기본(점선)"
+            className={'mod-color bp-color-none' + (!draft.color ? ' on' : '')}
+            onClick={() => onDraft({ ...draft, color: null })}
+          />
+          {COLORS.map((c) => (
+            <button
+              key={c.id} type="button" role="radio" aria-checked={draft.color === c.id} aria-label={c.label}
+              className={'mod-color' + (draft.color === c.id ? ' on' : '')}
+              style={{ background: c.hex }}
+              onClick={() => onDraft({ ...draft, color: c.id })}
+            />
+          ))}
+        </div>
       </div>
       <div className="debt-f-a">
         <button className="btn" onClick={onCancel}>취소</button>

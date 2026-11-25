@@ -454,6 +454,8 @@ function checkBudgetRaw(c: Collector, where: string, b: Raw): void {
       && isValidDate(b.startDate) && isValidDate(b.endDate) && b.endDate < b.startDate) {
     c.add(`${where}.endDate`, `종료일이 시작일보다 앞섭니다: ${b.endDate} < ${b.startDate}`);
   }
+  // 막대 색은 표시값이다. 모양만 본다 — 모르는 색 이름은 읽을 때 기본으로 돌아간다.
+  if (b.color != null && typeof b.color !== 'string') c.add(`${where}.color`, '색은 글자여야 합니다.');
   optStr(c, `${where}.createdAt`, b.createdAt, LIMITS.checkedAt);
   optStr(c, `${where}.updatedAt`, b.updatedAt, LIMITS.checkedAt);
 }
