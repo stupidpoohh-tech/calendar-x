@@ -12,7 +12,7 @@
 import { useState } from 'react';
 import { cleanup, fireEvent, render, screen, within } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { applyOverrides, newLocalItem, sharedView, sourceOf, withSource } from '../domain/shared';
+import { applyOverrides, newLocalItem, setToPersonal, sharedView, sourceOf, withSource } from '../domain/shared';
 import { newEntry } from '../domain/entry';
 import type { Entry, SharedBoard, SharedTodoItem } from '../domain/types';
 import { SharedScreen } from './SharedScreen';
@@ -243,6 +243,63 @@ describe('목록', () => {
     const saved = onSaveItem.mock.calls[0]![0] as SharedTodoItem;
     expect(sharedView(saved).status).toBe('planned');
     expect('status' in saved.overrides).toBe(false);
+  });
+});
+
+describe('서로 일정에도 등록하기', () => {
+  function open(title: string) {
+    fireEvent.click(screen.getByText(title));
+    return screen.getByRole('dialog', { name: '같이 보기 항목' });
+  }
+  const chip = (d: HTMLElement) => within(d).getByRole('button', { name: /서로 일정에도 등록하기/ });
+
+  it('켜서 저장하면 표식만 바뀌고, 저장 콜백은 여전히 공유 항목만 받는다', () => {
+    const onSaveItem = vi.fn();
+    mount({ items: [mirrored(task())], onSaveItem });
+    const d = open('병원 예약');
+    expect(chip(d)).toHaveAttribute('aria-pressed', 'false');
+    fireEvent.click(chip(d));
+    fireEvent.click(within(d).getByRole('button', { name: '저장' }));
+    const saved = onSaveItem.mock.calls[0]![0] as SharedTodoItem;
+    expect(saved.toPersonal).toBe(true);
+    // 원본으로 가는 길이 없다 — 넘어오는 것은 언제나 공유 항목이다.
+    expect(saved.sourceEntryId).toBe('task-a');
+    expect('kind' in saved).toBe(false);
+  });
+
+  it('끄면 꺼진 채로 저장된다', () => {
+    const onSaveItem = vi.fn();
+    mount({ items: [setToPersonal(mirrored(task()), true)], onSaveItem });
+    const d = open('병원 예약');
+    expect(chip(d)).toHaveAttribute('aria-pressed', 'true');
+    fireEvent.click(chip(d));
+    fireEvent.click(within(d).getByRole('button', { name: '저장' }));
+    expect((onSaveItem.mock.calls[0]![0] as SharedTodoItem).toPersonal).toBe(false);
+  });
+
+  it('무엇이 일어나는지 · 상대 쪽은 언제 서는지 적는다', () => {
+    mount({ items: [setToPersonal(mirrored(task()), true)] });
+    const d = open('병원 예약');
+    expect(within(d).getByText(/상대가 같이 보기를 열 때 만들어집니다/)).toBeInTheDocument();
+    expect(within(d).getByText(/끄면 그 사본은 지워집니다/)).toBeInTheDocument();
+  });
+
+  it('반복 항목은 고를 수 없고 이유를 적는다', () => {
+    const repeating = task({ recurrence: { freq: 'weekly', interval: 1, until: null, count: null } });
+    mount({ items: [mirrored(repeating)] });
+    const d = open('병원 예약');
+    expect(chip(d)).toBeDisabled();
+    expect(within(d).getByText(/반복 규칙을 옮길 수 없어/)).toBeInTheDocument();
+  });
+
+  it('켜 둔 항목은 목록에서도 표시가 붙는다', () => {
+    mount({ items: [setToPersonal(mirrored(task()), true)] });
+    expect(screen.getByText('내 공간에도')).toBeInTheDocument();
+  });
+
+  it('켜 두지 않은 항목에는 표시가 없다', () => {
+    mount({ items: [mirrored(task())] });
+    expect(screen.queryByText('내 공간에도')).toBeNull();
   });
 });
 

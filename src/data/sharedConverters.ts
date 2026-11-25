@@ -206,6 +206,8 @@ export function sharedItemFromDoc(id: string, raw: Raw): SharedTodoItem {
     // 고친 자리가 없으면 고친 사람도 없다 — 옛 문서에 남은 값을 그대로 믿지 않는다.
     overriddenBy: Object.keys(overrides).length > 0 ? str(raw.overriddenBy) : '',
     localOnly: bool(raw.localOnly, sourceEntryId === null && source === null),
+    // 갱신 쓰기(merge)가 담지 않는 칸이다. 없으면 꺼진 것으로 읽는다.
+    toPersonal: bool(raw.toPersonal),
     /*
       감추기는 사람별이다. 보드 값 하나였던 옛 `hidden` 은 **누가 감췄는지가 없어**
       옮길 곳이 없다 — 아무에게나 씌우느니 다시 보이게 둔다. 자료가 사라지는 것이
@@ -241,6 +243,7 @@ export function sharedItemToDoc(item: SharedTodoItem): Raw {
     overrides: { ...item.overrides },
     overriddenBy: item.overriddenBy,
     localOnly: item.localOnly,
+    toPersonal: item.toPersonal,
     hiddenBy: item.hiddenBy,
     createdBy: item.createdBy,
     createdAt: item.createdAt,
