@@ -1870,7 +1870,7 @@ function Workspace({ uid, user, onSignOut }: WorkspaceProps) {
     if (next === 'task') set('view', 'calendar');
     setFilters(emptyFilters());
     setShowFilters(false);
-    if (next === 'money') { setLedgerTab('history'); setLedgerPeriod(cursorISO.slice(0, 7)); }
+    if (next === 'money') { setLedgerTab('cashflow'); setLedgerPeriod(cursorISO.slice(0, 7)); }
   };
   const quickActions = (
         <div className="mobile-actions">
