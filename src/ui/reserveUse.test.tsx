@@ -159,6 +159,57 @@ describe('세이브 상세 — 확보 · 사용 · 남음 · 연결 거래', () 
     return { onEntryClick };
   }
 
+  it('기간 세이브(연간 예산)는 "쓸 수 있음 / 예산" 과 기간을 적는다 — 가용 한도에서 빠지는 몫은 기간과 무관하다', () => {
+    const yearly = newReserve({ id: 'r1', name: '여행 · 경조사', amountMinor: 3_000_000, periodStart: '2026-01-01', periodEnd: '2026-12-31' });
+    const used = spend('제주', 700_000, { reserveId: 'r1' }, '2026-09-10');
+    sheet([yearly], [used]);
+    const row = screen.getByRole('button', { name: /^여행 · 경조사.*쓸 수 있음/ });
+    expect(row.textContent).toContain('2,300,000원 쓸 수 있음 / 3,000,000원 예산 · 가용 한도에서 제외');
+    expect(row.textContent).toContain('1/1–12/31 · 진행 중');
+    cleanup();
+    // 카드의 확보 줄도 같은 모양이고, 가용 한도는 기간이 없는 같은 세이브와 같다.
+    const limitOf = (r: Reserve) => {
+      render(
+        <DialogHost>
+          <TideBar
+            todayISO={TODAY} accounts={[account(5_000_000)]} entries={[]} reserves={[r]} reserveUsage={reserveUsageOf([used])}
+            hasBalance onSaveAccount={vi.fn()} collapsed={false} onToggleCollapsed={vi.fn()} onOpenPockets={vi.fn()}
+          />
+        </DialogHost>,
+      );
+      const card = screen.getByLabelText('며칠 버티나');
+      const out = { limit: within(card).getByLabelText(/^생활비 외 가용/).textContent, text: card.textContent };
+      cleanup();
+      return out;
+    };
+    const withPeriod = limitOf(yearly);
+    expect(withPeriod.text).toContain('2,300,000 / 3,000,000');
+    expect(withPeriod.limit).toBe(limitOf({ ...yearly, periodStart: null, periodEnd: null }).limit);
+    expect(withPeriod.limit).toContain('2,700,000');
+  });
+
+  it('기간은 시작 · 끝을 함께 정한다 — 하나만 있거나 뒤집혔으면 저장하지 않는다', () => {
+    const onSaveReserve = vi.fn();
+    render(
+      <PocketSheet
+        focus={{ kind: 'reserve', id: 'r1' }} budgets={[]} reserves={[trip]} entries={[]}
+        accounts={[account()]} todayISO={TODAY} reserveLinked={[]} reserveUsage={new Map()}
+        onClose={vi.fn()} onSaveBudget={vi.fn()} onDeleteBudget={vi.fn()} onSaveReserve={onSaveReserve} onDeleteReserve={vi.fn()}
+      />,
+    );
+    fireEvent.click(screen.getByRole('button', { name: '여행 고치기' }));
+    const start = screen.getByLabelText('쓰는 기간 시작 (선택)');
+    const end = screen.getByLabelText('쓰는 기간 끝 (선택)');
+    fireEvent.change(start, { target: { value: '2026-12-01' } });
+    expect(screen.getByRole('alert')).toHaveTextContent('시작일과 종료일을 함께');
+    expect(screen.getByRole('button', { name: '저장' })).toBeDisabled();
+    fireEvent.change(end, { target: { value: '2026-11-01' } });
+    expect(screen.getByRole('alert')).toHaveTextContent('종료일이 시작일보다 앞섭니다');
+    fireEvent.change(end, { target: { value: '2026-12-31' } });
+    fireEvent.click(screen.getByRole('button', { name: '저장' }));
+    expect(onSaveReserve.mock.calls[0]![0]).toMatchObject({ periodStart: '2026-12-01', periodEnd: '2026-12-31' });
+  });
+
   it('목록에는 남은 금액, 펼치면 확보 · 사용 · 남음과 연결 거래 — 예정은 사용에 넣지 않는다', () => {
     const air = spend('항공권', 120_000, { reserveId: 'r1' }, '2026-10-05');
     const hotel = newEntry('money', {
@@ -191,7 +242,7 @@ describe('세이브 상세 — 확보 · 사용 · 남음 · 연결 거래', () 
   it('쓴 거래가 없으면 비어 있다고 적고, 고치기는 톱니와 상세 안의 단추 둘 다로 연다', () => {
     sheet([trip], []);
     expect(screen.getByRole('dialog').textContent).toContain('아직 이 세이브에서 쓴 거래가 없습니다');
-    fireEvent.click(screen.getByRole('button', { name: '확보액 · 목표 고치기' }));
+    fireEvent.click(screen.getByRole('button', { name: '확보액 · 목표 · 기간 고치기' }));
     expect(screen.getByDisplayValue('여행')).toBeInTheDocument();
   });
 });

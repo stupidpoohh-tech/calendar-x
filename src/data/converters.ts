@@ -10,7 +10,7 @@ import { MONEY_FLOWS, moneyFlowOf, moneyStatusOf } from '../domain/ledger';
 import { clampSettleDay } from '../domain/period';
 import { MONTH_NOS } from '../domain/annualBudget';
 import type {
-  AnnualBudget, MonthNo, Account, Budget, Card, Category, CategoryBudget, ColorId, Debt, Entry, EntryKind, LedgerNote, LedgerSettings, MonthNote,
+  AnnualBudget, MonthNo, Account, Budget, Card, Category, CategoryBudget, ColorId, DateISO, Debt, Entry, EntryKind, LedgerNote, LedgerSettings, MonthNote,
   MoneyFields, MoneyFlow, MoneyType, Pin, PlannedRef, Reserve, ReservePatch,
   RecoveryFields, RecoveryOption, RecoveryRule, RecoveryWindowId,
   Recurrence, RepeatFreq, TaskStatus,
@@ -459,10 +459,18 @@ export function reserveFromDoc(id: string, raw: Raw): Reserve {
     protected: raw.protected !== false,
     targetAmountMinor: asTargetAmount(raw.targetAmountMinor),
     targetDate: normalizeDate(str(raw.targetDate)) || null,
+    ...periodFrom(raw.periodStart, raw.periodEnd),
     archivedAt: optStr(raw.archivedAt),
     createdAt: str(raw.createdAt),
     updatedAt: str(raw.updatedAt),
   };
+}
+
+/** 세이브의 쓰는 기간. 둘 다 읽히고 순서가 맞을 때만 — 하나만 있거나 뒤집혔으면 "기간 없음"(표시값이다). */
+function periodFrom(a: unknown, b: unknown): { periodStart: DateISO | null; periodEnd: DateISO | null } {
+  const s = normalizeDate(str(a));
+  const e = normalizeDate(str(b));
+  return s && e && e >= s ? { periodStart: s, periodEnd: e } : { periodStart: null, periodEnd: null };
 }
 
 /** 목표 금액. 0 이상의 안전한 정수만 — 그 밖은 "목표 없음" 으로 읽는다(표시용 값이다). */
@@ -486,6 +494,8 @@ export function reserveToDoc(r: Reserve): Raw {
       protected: r.protected !== false,
       targetAmountMinor: r.targetAmountMinor ?? null,
       targetDate: r.targetDate ?? null,
+      periodStart: r.periodStart ?? null,
+      periodEnd: r.periodEnd ?? null,
       archivedAt: r.archivedAt ?? null,
     }),
     createdAt: r.createdAt,
@@ -504,6 +514,8 @@ export function reservePatchToDoc(p: ReservePatch): Raw {
   if (p.protected !== undefined) out.protected = p.protected !== false;
   if (p.targetAmountMinor !== undefined) out.targetAmountMinor = p.targetAmountMinor ?? null;
   if (p.targetDate !== undefined) out.targetDate = p.targetDate ?? null;
+  if (p.periodStart !== undefined) out.periodStart = p.periodStart ?? null;
+  if (p.periodEnd !== undefined) out.periodEnd = p.periodEnd ?? null;
   if (p.archivedAt !== undefined) out.archivedAt = p.archivedAt ?? null;
   return out;
 }

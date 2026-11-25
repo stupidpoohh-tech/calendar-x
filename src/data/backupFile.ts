@@ -480,6 +480,15 @@ function checkReserveRaw(c: Collector, where: string, r: Raw): void {
     c.add(`${where}.targetAmountMinor`, `음수입니다: ${r.targetAmountMinor} — 목표 금액은 0 이상이어야 합니다.`);
   }
   if (r.targetDate !== undefined && r.targetDate !== null) reqDate(c, `${where}.targetDate`, r.targetDate);
+  // 쓰는 기간 — 둘 다 있거나 둘 다 없다. 뒤집힌 기간은 손으로 고친 파일이다.
+  const ps = r.periodStart ?? null;
+  const pe = r.periodEnd ?? null;
+  if (ps !== null) reqDate(c, `${where}.periodStart`, ps);
+  if (pe !== null) reqDate(c, `${where}.periodEnd`, pe);
+  if ((ps === null) !== (pe === null)) c.add(`${where}.periodStart`, '기간의 시작일과 종료일 중 하나만 있습니다.');
+  else if (typeof ps === 'string' && typeof pe === 'string' && isValidDate(ps) && isValidDate(pe) && pe < ps) {
+    c.add(`${where}.periodEnd`, `종료일이 시작일보다 앞섭니다: ${pe} < ${ps}`);
+  }
   if (r.archivedAt !== undefined && r.archivedAt !== null) {
     reqStr(c, `${where}.archivedAt`, r.archivedAt, LIMITS.checkedAt);
     if (r.archivedAt === '') c.add(`${where}.archivedAt`, '보관 시각이 비어 있습니다.');

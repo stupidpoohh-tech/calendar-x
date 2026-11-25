@@ -418,6 +418,13 @@ export interface Reserve {
   /** 목표 날짜. 표시용이고 어떤 계산에도 들어가지 않는다. */
   targetDate?: DateISO | null;
   /**
+   * 쓰는 기간(선택) — 여행 · 경조사처럼 '이 기간에 쓸 돈' 으로 모아 둔 세이브. 둘 다 있거나 둘 다 없다.
+   * 표시값이다: 한도에서 빠지는 몫은 기간과 무관하게 지금까지처럼 남은 금액이고(`protectedReserveTotal`),
+   * 사용도 기간과 무관하게 연결된 실제 지출 전부다(`reserveUsageOf`). 화면이 '쓸 수 있음 / 예산' 과 기간을 적는다.
+   */
+  periodStart?: DateISO | null;
+  periodEnd?: DateISO | null;
+  /**
    * 보관한 순간(ISO). 값이 있으면 일반 목록에서 빠지고 한도 보호도 풀린다. 금액은 지우지 않는다 —
    * 보관 해제하면 같은 금액 · 같은 보호 설정으로 돌아온다.
    */
@@ -434,7 +441,7 @@ export interface Reserve {
  * (`pendingWrites` 의 `reservePatch`). 새 세이브를 만들 때만 문서 전체를 쓴다.
  */
 export type ReservePatch = Partial<Pick<
-  Reserve, 'name' | 'amountMinor' | 'protected' | 'targetAmountMinor' | 'targetDate' | 'archivedAt'
+  Reserve, 'name' | 'amountMinor' | 'protected' | 'targetAmountMinor' | 'targetDate' | 'periodStart' | 'periodEnd' | 'archivedAt'
 >>;
 
 /** 렌즈별 고정 메모. 날짜를 갖지 않으므로 entry 가 아니다. */

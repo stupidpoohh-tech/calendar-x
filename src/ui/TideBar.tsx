@@ -19,7 +19,7 @@
  * "며칠 버티나" 를 지우지 않는다. 계산은 그대로이고 어느 숫자를 크게 적을지만 바뀐다.
  */
 import { useMemo, type ReactNode } from 'react';
-import { activeReserves, budgetEnded, budgetStates, reserveProtects, reserveRemaining } from '../domain/budget';
+import { activeReserves, budgetEnded, budgetStates, reservePeriodLabel, reserveProtects, reserveRemaining } from '../domain/budget';
 import { MONEY_TYPE_BY_ID } from '../domain/constants';
 import { daysBetween, fmtDayShort } from '../domain/date';
 import { calendarAmountOn, type CalendarAmount } from '../domain/layout';
@@ -312,12 +312,16 @@ export function TideBar({
                   // 사용한 적이 있으면 남은 금액을 적는다(확보 − 연결된 실제 지출). 초과면 초과로.
                   const used = reserveUsage.get(r.id) ?? 0;
                   const left = reserveRemaining(r, reserveUsage);
+                  // 기간 세이브(여행 · 경조사 같은 연간 예산)는 생활비처럼 '쓸 수 있음 / 예산' 으로 적는다.
+                  const period = reservePeriodLabel(r);
                   const body = (
                     <>
-                      <span>{r.name} <i>{locked ? '세이브' : '세이브 · 한도에 포함'}</i></span>
+                      <span>{r.name} <i>{period ? `세이브 · ${period}` : '세이브'}{locked ? '' : ' · 한도에 포함'}</i></span>
                       <span className={locked ? undefined : 'tide-pk-off'}>
-                        {used === 0 ? formatAmount(r.amountMinor)
-                          : left < 0 ? `초과 ${formatAmount(-left)}` : `남음 ${formatAmount(left)}`}
+                        {period
+                          ? (left < 0 ? `초과 ${formatAmount(-left)} / ${formatAmount(r.amountMinor)}` : `${formatAmount(left)} / ${formatAmount(r.amountMinor)}`)
+                          : used === 0 ? formatAmount(r.amountMinor)
+                            : left < 0 ? `초과 ${formatAmount(-left)}` : `남음 ${formatAmount(left)}`}
                       </span>
                     </>
                   );

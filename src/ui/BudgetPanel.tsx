@@ -22,7 +22,7 @@ export type PocketFocus =
   | { kind: 'list' };
 import { useEffect, useRef, useState, type KeyboardEvent } from 'react';
 import {
-  activeReserves, archivedReserves, budgetEnded, budgetStates, newBudget, newReserve, reservedTotal,
+  activeReserves, archivedReserves, reservePeriodLabel, budgetEnded, budgetStates, newBudget, newReserve, reservedTotal,
   reserveLinkedEntries, reserveProtects, reserveRemaining, spendingIn, unlinkedSpendingFor, type BudgetState,
 } from '../domain/budget';
 import { COLORS } from '../domain/constants';
@@ -149,7 +149,7 @@ export function BudgetPanel({
   const prevOf = (id: string): Reserve | null => reserves.find((r) => r.id === id) ?? null;
 
   const commitReserve = () => {
-    if (!reserveDraft) return;
+    if (!reserveDraft || periodProblem(reserveDraft)) return;
     // 목표 금액은 선택이다. 비우거나 0 이면 "목표 없음".
     const target = Math.abs(parseAmountToMinor(targetText, reserveDraft.currency) ?? 0);
     onSaveReserve({
@@ -158,6 +158,8 @@ export function BudgetPanel({
       amountMinor: Math.abs(parseAmountToMinor(reserveText, reserveDraft.currency) ?? 0),
       targetAmountMinor: target > 0 ? target : null,
       targetDate: reserveDraft.targetDate || null,
+      periodStart: reserveDraft.periodStart || null,
+      periodEnd: reserveDraft.periodEnd || null,
       updatedAt: new Date().toISOString(),
     }, prevOf(reserveDraft.id));
     setReserveDraft(null);
@@ -250,7 +252,7 @@ export function BudgetPanel({
               />
             ) : (
               <ReserveRow
-                key={r.id} reserve={r} focusKey={r.id}
+                key={r.id} reserve={r} focusKey={r.id} todayISO={todayISO}
                 usedMinor={reserveUsage.get(r.id) ?? 0}
                 remainingMinor={reserveRemaining(r, reserveUsage)}
                 linked={openReserveId === r.id ? reserveLinkedEntries(r.id, reserveLinked) : NO_ENTRIES}
@@ -545,6 +547,16 @@ function reserveProtectsFlag(r: Pick<Reserve, 'protected'>): boolean {
   return r.protected !== false;
 }
 
+/** 기간이 틀렸으면 이유 한 줄. 둘 다 비었거나 둘 다 있고 순서가 맞으면 null. */
+function periodProblem(r: Pick<Reserve, 'periodStart' | 'periodEnd'>): string | null {
+  const s = r.periodStart || null;
+  const e = r.periodEnd || null;
+  if (!s && !e) return null;
+  if (!s || !e) return '기간은 시작일과 종료일을 함께 정합니다.';
+  if (e < s) return '종료일이 시작일보다 앞섭니다.';
+  return null;
+}
+
 /** 목표가 있으면 한 줄로: "목표 1,000,000 · 30% · 3/1까지". 계산에는 쓰지 않는 표시값이다. */
 function targetLine(r: Reserve): string | null {
   const t = r.targetAmountMinor ?? null;
@@ -563,9 +575,10 @@ function targetLine(r: Reserve): string | null {
  * 눈 그림을 쓰지 않는다. 이것은 화면에서 감추는 것이 아니라 쓸 수 있는 돈을 바꾸는 일이다.
  */
 function ReserveRow({
-  reserve: r, focusKey, usedMinor, remainingMinor, linked, open, onToggle, onEntryClick, onEdit, onToggleProtect, onDelete,
+  reserve: r, todayISO, focusKey, usedMinor, remainingMinor, linked, open, onToggle, onEntryClick, onEdit, onToggleProtect, onDelete,
 }: {
   reserve: Reserve;
+  todayISO?: string;
   focusKey?: string;
   /** 연결된 실제 지출의 합. 예정은 들어 있지 않다. */
   usedMinor: number;
@@ -583,6 +596,7 @@ function ReserveRow({
   const locked = reserveProtects(r);
   const target = targetLine(r);
   const over = remainingMinor < 0;
+  const period = reservePeriodLabel(r, todayISO);
   return (
     <div className="bp-i" data-focus={focusKey}>
       <div className="debt-i rv-i">
@@ -601,11 +615,17 @@ function ReserveRow({
             확보액은 거래를 연결해도 줄지 않는다 — 줄어드는 것은 남은 금액이다.
           */}
           <span className="debt-d num">
-            {over
-              ? <b className="bp-over">초과 {formatAmount(-remainingMinor)}원</b>
-              : <>남음 {formatAmount(remainingMinor)}원</>}
+            {period
+              /* 기간 세이브(여행 · 경조사 같은 연간 예산) — 생활비처럼 '쓸 수 있음 / 예산' 으로 적는다. */
+              ? (over
+                ? <><b className="bp-over">초과 {formatAmount(-remainingMinor)}원</b> / {formatAmount(r.amountMinor)}원 예산</>
+                : <>{formatAmount(remainingMinor)}원 쓸 수 있음 / {formatAmount(r.amountMinor)}원 예산</>)
+              : over
+                ? <b className="bp-over">초과 {formatAmount(-remainingMinor)}원</b>
+                : <>남음 {formatAmount(remainingMinor)}원</>}
             {' · '}{locked ? '가용 한도에서 제외' : '가용 한도에 포함'}
           </span>
+          {period && <span className="debt-d num rv-target">{period}</span>}
           {target && <span className="debt-d num rv-target">{target}</span>}
         </button>
         <button className="bp-e" onClick={onEdit} aria-label={`${r.name} 고치기`}>
@@ -655,7 +675,7 @@ function ReserveRow({
             <p className="bp-note">예정은 아직 쓴 돈이 아닙니다 — 확정하면 사용으로 셉니다.</p>
           )}
           {/* 줄의 톱니는 마우스를 올려야 보인다. 손가락으로 쓰는 화면에서도 고칠 자리가 보이게 둔다. */}
-          <button className="chip rv-edit" onClick={onEdit}>확보액 · 목표 고치기</button>
+          <button className="chip rv-edit" onClick={onEdit}>확보액 · 목표 · 기간 고치기</button>
         </div>
       )}
     </div>
@@ -720,6 +740,28 @@ function ReserveForm({
         </label>
       </div>
       <p className="bp-note">목표는 표시만 합니다. 한도 계산에는 들어가지 않습니다.</p>
+      <div className="debt-grid">
+        <label>쓰는 기간 시작 (선택)
+          <input
+            type="date" className="mod-input" {...PICKER} value={draft.periodStart ?? ''}
+            onChange={(e) => onDraft({ ...draft, periodStart: e.target.value || null })}
+          />
+        </label>
+        <label>쓰는 기간 끝 (선택)
+          <input
+            type="date" className="mod-input" {...PICKER} value={draft.periodEnd ?? ''} min={draft.periodStart ?? undefined}
+            onChange={(e) => onDraft({ ...draft, periodEnd: e.target.value || null })}
+          />
+        </label>
+      </div>
+      {periodProblem(draft)
+        ? <p className="bp-note bp-over" role="alert">{periodProblem(draft)}</p>
+        : (
+          <p className="bp-note">
+            여행 · 경조사처럼 정해진 기간에 쓸 돈이면 기간을 정합니다. 목록에 &lsquo;쓸 수 있음 / 예산&rsquo; 으로 보이고,
+            가용 한도에서는 지금처럼 남은 금액이 빠집니다.
+          </p>
+        )}
       <div className="debt-f-a">
         {onArchive && (
           <button className="btn rv-arch-b" onClick={onArchive} title="일반 목록에서 숨김 · 보호 해제">
@@ -727,7 +769,7 @@ function ReserveForm({
           </button>
         )}
         <button className="btn" onClick={onCancel}>취소</button>
-        <button className="btn primary" onClick={onSave}>저장</button>
+        <button className="btn primary" onClick={onSave} disabled={!!periodProblem(draft)}>저장</button>
       </div>
       {onArchive && <p className="bp-note">보관: 일반 목록에서 숨김 · 보호 해제. 금액은 그대로 남고, 언제든 보관을 풀 수 있습니다.</p>}
     </div>

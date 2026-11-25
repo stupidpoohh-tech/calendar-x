@@ -215,7 +215,7 @@ describe('다른 종류의 쓰기도 같은 길로 간다', () => {
 describe('세이브 — 보호 · 목표 · 보관', () => {
   const base: Reserve = {
     id: 's1', name: '비상금', amountMinor: 300_000, currency: 'KRW',
-    protected: false, targetAmountMinor: 1_000_000, targetDate: '2027-03-01', archivedAt: null,
+    protected: false, targetAmountMinor: 1_000_000, targetDate: '2027-03-01', periodStart: null, periodEnd: null, archivedAt: null,
     createdAt: '2026-10-01T00:00:00.000Z', updatedAt: '2026-10-01T00:00:00.000Z',
   };
   const readSave = async (db: Firestore) => {

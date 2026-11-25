@@ -177,7 +177,7 @@ describe('세이브 — 보호 · 목표 · 보관 (P1)', () => {
 
   it('필드가 없는 예전 문서는 보호 켬 · 목표 없음 · 보관 안 함으로 읽는다', () => {
     expect(reserveFromDoc('s1', legacy)).toEqual({
-      id: 's1', ...legacy, protected: true, targetAmountMinor: null, targetDate: null, archivedAt: null,
+      id: 's1', ...legacy, protected: true, targetAmountMinor: null, periodStart: null, periodEnd: null, targetDate: null, archivedAt: null,
     });
   });
 

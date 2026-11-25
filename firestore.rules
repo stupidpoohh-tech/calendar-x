@@ -174,6 +174,9 @@ service cloud.firestore {
         && (d.get('targetAmountMinor', null) == null
             || (d.targetAmountMinor is int && d.targetAmountMinor >= 0))
         && (d.get('targetDate', null) == null || isDateISO(d.targetDate))
+        && ((d.get('periodStart', null) == null && d.get('periodEnd', null) == null)
+            || (isDateISO(d.get('periodStart', null)) && isDateISO(d.get('periodEnd', null))
+                && d.periodEnd >= d.periodStart))
         && (d.get('archivedAt', null) == null
             || (d.archivedAt is string && d.archivedAt.size() > 0 && d.archivedAt.size() <= 40));
     }
@@ -183,6 +186,7 @@ service cloud.firestore {
       return d.get('protected', true) == false
         || d.get('targetAmountMinor', null) != null
         || d.get('targetDate', null) != null
+        || d.get('periodStart', null) != null
         || d.get('archivedAt', null) != null;
     }
 

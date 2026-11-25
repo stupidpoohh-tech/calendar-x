@@ -542,6 +542,11 @@ export function reservePatchOf(before: Reserve, after: Reserve): ReservePatch | 
     out.targetAmountMinor = after.targetAmountMinor ?? null;
   }
   if ((after.targetDate ?? null) !== (before.targetDate ?? null)) out.targetDate = after.targetDate ?? null;
+  // 기간은 두 칸이 한 묶음이다 — 하나만 바뀌어도 둘 다 보낸다(merge 가 짝 잃은 한쪽을 남기지 않게).
+  if ((after.periodStart ?? null) !== (before.periodStart ?? null) || (after.periodEnd ?? null) !== (before.periodEnd ?? null)) {
+    out.periodStart = after.periodStart ?? null;
+    out.periodEnd = after.periodEnd ?? null;
+  }
   if ((after.archivedAt ?? null) !== (before.archivedAt ?? null)) out.archivedAt = after.archivedAt ?? null;
   return Object.keys(out).length > 0 ? out : null;
 }
@@ -553,6 +558,7 @@ export function reservePatchSummary(p: ReservePatch): string {
   if (p.amountMinor !== undefined) out.push('금액');
   if (p.protected !== undefined) out.push(p.protected ? '가용 한도에서 제외' : '가용 한도에 포함');
   if (p.targetAmountMinor !== undefined || p.targetDate !== undefined) out.push('목표');
+  if (p.periodStart !== undefined || p.periodEnd !== undefined) out.push('기간');
   if (p.archivedAt !== undefined) out.push(p.archivedAt ? '보관' : '보관 해제');
   return out.join(' · ');
 }
@@ -560,6 +566,20 @@ export function reservePatchSummary(p: ReservePatch): string {
 /** 부분 쓰기를 메모리의 세이브에 얹는다 — 화면이 서버 확인 전에도 같은 값을 그린다. */
 export function applyReservePatch(r: Reserve, patch: ReservePatch, updatedAt: string): Reserve {
   return { ...r, ...patch, updatedAt };
+}
+
+/**
+ * 기간 세이브의 한 줄 — "1/1–12/31 · 진행 중". 기간이 없으면 null. 오늘을 주지 않으면 진행 상태는 적지 않는다.
+ * 표시값이다. 기간은 한도 · 사용 계산에 들어가지 않는다.
+ */
+export function reservePeriodLabel(r: Pick<Reserve, 'periodStart' | 'periodEnd'>, today?: DateISO): string | null {
+  if (!r.periodStart || !r.periodEnd) return null;
+  // 한 해를 넘나들 수 있어 달 · 일을 적는다("1/1–12/31").
+  const md = (iso: DateISO) => `${Number(iso.slice(5, 7))}/${Number(iso.slice(8, 10))}`;
+  const range = `${md(r.periodStart)}–${md(r.periodEnd)}`;
+  if (!today) return range;
+  const phase = today < r.periodStart ? '시작 전' : today > r.periodEnd ? '기간 끝남' : '진행 중';
+  return `${range} · ${phase}`;
 }
 
 // ---------- 만들기 ----------
@@ -659,6 +679,8 @@ export function newReserve(patch: Partial<Reserve> = {}): Reserve {
     protected: true,
     targetAmountMinor: null,
     targetDate: null,
+    periodStart: null,
+    periodEnd: null,
     archivedAt: null,
     createdAt: now,
     updatedAt: now,

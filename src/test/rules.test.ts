@@ -271,6 +271,14 @@ describe('세이브 — 보호 · 목표 · 보관', () => {
     })));
   });
 
+  it('쓰는 기간 — 둘 다 있거나 둘 다 없고, 순서가 맞아야 한다', async () => {
+    await assertSucceeds(setDoc(doc(db(ME), rpath), p1({ periodStart: '2026-01-01', periodEnd: '2026-12-31' })));
+    await assertSucceeds(setDoc(doc(db(ME), rpath), p1({ periodStart: null, periodEnd: null })));
+    await assertFails(setDoc(doc(db(ME), rpath), p1({ periodStart: '2026-01-01', periodEnd: null })));
+    await assertFails(setDoc(doc(db(ME), rpath), p1({ periodStart: '2026-12-31', periodEnd: '2026-01-01' })));
+    await assertFails(setDoc(doc(db(ME), rpath), p1({ periodStart: 20260101, periodEnd: '2026-12-31' })));
+  });
+
   it('형태가 틀리면 거절한다', async () => {
     await assertFails(setDoc(doc(db(ME), rpath), p1({ protected: 'no' })));
     await assertFails(setDoc(doc(db(ME), rpath), p1({ targetAmountMinor: -1 })));

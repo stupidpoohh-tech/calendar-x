@@ -156,6 +156,8 @@ describe('v8 — 세이브 보호 · 목표 · 보관 (P1)', () => {
     const bad = [
       { protected: 'false' }, { targetAmountMinor: -1 }, { targetAmountMinor: 1.5 }, { targetAmountMinor: '100' },
       { targetDate: '2027-13-01' }, { targetDate: 20270301 }, { archivedAt: '' }, { archivedAt: 3 },
+      { periodStart: '2026-01-01' }, { periodEnd: '2026-12-31' },
+      { periodStart: '2026-12-31', periodEnd: '2026-01-01' }, { periodStart: '2026-13-01', periodEnd: '2026-12-31' },
     ];
     for (const over of bad) {
       const file = { ...buildBackup({ ...empty, reserves: [off] }) } as Record<string, unknown>;
@@ -164,6 +166,13 @@ describe('v8 — 세이브 보호 · 목표 · 보관 (P1)', () => {
       expect(r.ok, JSON.stringify(over)).toBe(false);
       if (!r.ok) expect(r.problems[0]?.where).toMatch(/^reserves\[0\]\./);
     }
+  });
+
+  it('세이브의 쓰는 기간이 내보내기 → 가져오기 뒤에도 그대로다', () => {
+    const yearly = { ...off, periodStart: '2026-01-01', periodEnd: '2026-12-31' };
+    const r = readBackupFile(JSON.stringify(buildBackup({ ...empty, reserves: [yearly] })));
+    expect(r.ok).toBe(true);
+    if (r.ok) expect(r.file.data.reserves[0]).toMatchObject({ periodStart: '2026-01-01', periodEnd: '2026-12-31' });
   });
 
   it('병합은 이미 있는 세이브의 금액 · 보호를 덮지 않는다 — 없는 것만 더한다', () => {
