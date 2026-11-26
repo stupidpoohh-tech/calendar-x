@@ -51,7 +51,7 @@ describe('갱신 쓰기의 모양', () => {
     const doc = sharedItemToDoc({
       id: 'task-a', sourceEntryId: 'task-a', source,
       overrides: { title: '병원 전화하기' }, overriddenBy: 'member',
-      localOnly: false, hiddenBy: ['member'],
+      localOnly: false, toPersonal: false, hiddenBy: ['member'],
       createdBy: 'owner', createdAt: '', updatedAt: '',
     });
     expect(doc.overrides).toEqual({ title: '병원 전화하기' });

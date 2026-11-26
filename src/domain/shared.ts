@@ -107,8 +107,54 @@ export function isShareableTask(e: Entry, todayISO: DateISO): boolean {
  */
 export function isMirrorableTask(e: Entry): boolean {
   if (e.kind !== 'task' || e.recovery != null || e.virtual === true) return false;
+  // 같이 보기에서 내려온 사본은 다시 올리지 않는다 — 올리면 같은 일이 보드에 둘이 된다.
+  if (isSharedCopy(e.id)) return false;
   // 비공개로 표시한 항목은 올리지 않는다. 이미 올라가 있으면 맞추기가 내린다.
   return e.keepPrivate !== true;
+}
+
+/**
+ * 같이 보기에서 내 캘린더로 내려온 사본의 id 앞머리.
+ *
+ * 표식을 `Entry` 의 새 필드로 두지 않고 **id 에 담는다.** 이 저장소가 이미 쓰는 방식이고
+ * (`원본id@회차` · `예정id~회차날짜`), 그래서 백업 파일이 id 를 그대로 싣는 것만으로
+ * "다시 올리지 않는다" 가 함께 따라간다 — 필드였다면 그 필드를 모르는 판이 떨어뜨려
+ * 사본이 보드로 다시 올라갔을 것이다.
+ */
+export const SHARED_COPY_PREFIX = 'shr-';
+
+export function sharedCopyId(itemId: string): string {
+  return SHARED_COPY_PREFIX + itemId;
+}
+
+export function isSharedCopy(entryId: string): boolean {
+  return entryId.startsWith(SHARED_COPY_PREFIX);
+}
+
+/** 사본이 가리키는 공유 항목 id. 사본이 아니면 null. */
+export function sharedCopySourceId(entryId: string): string | null {
+  return isSharedCopy(entryId) ? entryId.slice(SHARED_COPY_PREFIX.length) : null;
+}
+
+/**
+ * 이 항목의 내 캘린더 사본을 내가 따로 만들어야 하는가.
+ *
+ * 내 원본에서 올라온 항목은 **내 캘린더에 이미 있다** — 사본을 또 만들면 같은 일이
+ * 내 달력에 둘이 된다. 반복 항목은 사본에 규칙을 옮길 수 없어 제외한다(그 한 날짜만
+ * 복사하면 매주 하던 일이 한 번짜리로 보인다).
+ */
+export function wantsPersonalCopy(item: SharedTodoItem, myUid: string): boolean {
+  if (!item.toPersonal) return false;
+  if (sharedView(item).recurring) return false;
+  return item.localOnly || item.createdBy !== myUid;
+}
+
+/** 서로 일정에도 등록하기를 켜고 끈다. 다른 칸은 건드리지 않는다. */
+export function setToPersonal(
+  item: SharedTodoItem, on: boolean, now = new Date().toISOString(),
+): SharedTodoItem {
+  if (item.toPersonal === on) return item;
+  return { ...item, toPersonal: on, updatedAt: now };
 }
 
 /**
@@ -299,6 +345,7 @@ export function withSource(
       overrides: {},
       overriddenBy: '',
       localOnly: false,
+      toPersonal: false,
       hiddenBy: [],
       createdBy: ownerUid,
       createdAt: now,
@@ -324,6 +371,7 @@ export function newLocalItem(
     overrides: { title: '', status: 'planned', ...fields },
     overriddenBy: '',
     localOnly: true,
+    toPersonal: false,
     hiddenBy: [],
     createdBy,
     createdAt: now,

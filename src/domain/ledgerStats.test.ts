@@ -7,7 +7,7 @@ import { confirmOccurrence } from './confirm';
 import { newEntry, newMoney } from './entry';
 import {
   actualsIn, averagedPeriods, budgetRows, budgetSummary, byCategory, categoryTrends, groupByDay, historyItems,
-  matchesQuery, periodSeries, totalsOf, UNCATEGORIZED,
+  matchesQuery, periodAverage, periodSeries, totalsOf, UNCATEGORIZED,
 } from './ledgerStats';
 import { periodByKey, periodsOfYear } from './period';
 import type { Entry, MoneyFields } from './types';
@@ -160,6 +160,34 @@ describe('기간 추이 · 월평균', () => {
   it('끝난 기간이 없으면 평균을 내지 않는다', () => {
     const t = categoryTrends(list, periods, cats, 'expense', '2026-01-15');
     expect(t.find((x) => x.categoryId === 'food')!.average).toBeNull();
+  });
+
+  it('표 아래 월평균도 끝난 기간만 센다 — 수지는 반올림한 세 값에서 뺀다', () => {
+    const list2 = [
+      tx('i1', '2026-01-05', 3_000_000, { type: 'income' }),
+      tx('e1', '2026-01-10', 1_000_000, { categoryId: 'food' }),
+      tx('p1', '2026-01-20', 500_000, { flow: 'loanPrincipal' }),
+      tx('i2', '2026-02-05', 2_000_000, { type: 'income' }),
+      // 진행 중인 3월은 평균에 들어가지 않는다.
+      tx('e3', '2026-03-10', 900_000, { categoryId: 'food' }),
+    ];
+    const a = periodAverage(periodSeries(list2, periods, '2026-03-15'))!;
+    expect(a.periods).toBe(2);
+    expect(a.income).toBe(2_500_000);
+    expect(a.spending).toBe(500_000);
+    expect(a.repayment).toBe(250_000);
+    expect(a.net).toBe(2_500_000 - 500_000 - 250_000);
+  });
+
+  it('끝난 기간 수는 거래가 없어도 센다 — 기록이 없는 달이 평균을 낮춘다', () => {
+    const only = [tx('e', '2026-01-10', 600_000, { categoryId: 'food' })];
+    const a = periodAverage(periodSeries(only, periods, '2026-04-15'))!;
+    expect(a.periods).toBe(3); // 1 · 2 · 3월
+    expect(a.spending).toBe(200_000);
+  });
+
+  it('끝난 기간이 없으면 평균을 내지 않는다 (null)', () => {
+    expect(periodAverage(periodSeries(list, periods, '2026-01-15'))).toBeNull();
   });
 
   it('정산 시작일을 바꾸면 같은 거래가 다른 기간에 묶인다 — 거래는 그대로다', () => {

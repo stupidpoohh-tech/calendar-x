@@ -12,6 +12,7 @@ import { newEntry, newMoney } from '../domain/entry';
 import type { CategoryBudget, Entry, LedgerTabId, MoneyFields } from '../domain/types';
 import type { FeedState } from '../app/useStore';
 import { pieSlices } from '../domain/ledgerStats';
+import { formatAmount, formatSigned } from '../domain/money';
 import { LedgerScreen, type LedgerScreenProps } from './LedgerScreen';
 
 afterEach(cleanup);
@@ -394,7 +395,7 @@ describe('분석 · 월별 추이', () => {
       entries: [tx('a', '2026-09-26', 10_000), tx('s', '2026-05-25', 2_000_000, { type: 'income' })],
     });
     expect(screen.getByRole('radio', { name: '월별 추이' })).toHaveAttribute('aria-checked', 'true');
-    const rows = screen.getAllByRole('row').slice(1);
+    const rows = within(document.querySelector('.led-table tbody')!).getAllByRole('row');
     expect(rows).toHaveLength(12);
     expect(rows[0]!.textContent).toContain('2026년 10월');
     expect(rows[0]!.textContent).toContain('진행 중');
@@ -402,6 +403,43 @@ describe('분석 · 월별 추이', () => {
     fireEvent.click(within(rows[4]!).getByRole('button', { name: '2026년 6월' }));
     expect(p.onPeriodKey).toHaveBeenCalledWith('2026-06');
     expect(p.onTab).toHaveBeenCalledWith('history' satisfies LedgerTabId);
+  });
+
+  it('표 맨 아래 월평균 한 줄 — 끝난 기간만 세고 그 수를 함께 적는다', () => {
+    mount({
+      tab: 'stats', periodKey: '2026-10', settleDay: 1,
+      entries: [
+        tx('i1', '2026-08-05', 3_000_000, { type: 'income' }),
+        tx('e1', '2026-08-10', 1_000_000, { categoryId: 'food' }),
+        tx('p1', '2026-09-20', 500_000, { flow: 'loanPrincipal' }),
+        // 진행 중인 10월은 평균에서 빠진다.
+        tx('e2', '2026-10-05', 9_000_000, { categoryId: 'food' }),
+      ],
+    });
+    const foot = document.querySelector('.led-table tfoot .led-avg')!;
+    // 2025-11 ~ 2026-09 열한 기간이 끝났다(거래가 없는 달도 한 기간으로 센다).
+    expect(foot.textContent).toContain('월평균');
+    expect(foot.textContent).toContain('끝난 11개 기간');
+    const cells = [...foot.querySelectorAll('td')].map((c) => c.textContent);
+    expect(cells).toEqual([
+      formatAmount(Math.round(3_000_000 / 11)),
+      formatAmount(Math.round(1_000_000 / 11)),
+      formatAmount(Math.round(500_000 / 11)),
+      formatSigned(Math.round(3_000_000 / 11) - Math.round(1_000_000 / 11) - Math.round(500_000 / 11)),
+    ]);
+    // 평균 줄은 기간이 아니라 눌러도 기간을 옮기지 않는다.
+    expect(foot.querySelector('button')).toBeNull();
+  });
+
+  it('끝난 기간이 하나도 없으면 평균 줄을 그리지 않는다', () => {
+    mount({ tab: 'stats', periodKey: '2026-10', todayISO: '2025-11-05', settleDay: 1, entries: [] });
+    expect(document.querySelector('.led-table tfoot')).toBeNull();
+  });
+
+  it('월평균의 정의를 화면에 적는다', () => {
+    mount({ tab: 'stats', periodKey: '2026-10' });
+    expect(document.querySelector('.led-table caption')!.textContent)
+      .toContain('월평균은 끝난 기간만의 합 ÷ 끝난 기간 수입니다');
   });
 });
 

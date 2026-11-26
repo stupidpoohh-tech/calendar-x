@@ -599,3 +599,8 @@ button.led-cat-n:hover svg { color: var(--accent); }
 .ab-cycle { flex-direction: row; align-items: center; flex-wrap: wrap; gap: 8px; }
 .ab-cycle .led-note { flex-basis: 100%; }
 .ab-cycle-l { font-size: 0.75rem; color: var(--ink-3); font-weight: 600; }
+
+/* 월별 추이 표의 월평균 한 줄. 기간 줄과 달리 누를 자리가 아니라 굵은 선으로 가른다. */
+.led-table tfoot th, .led-table tfoot td { border-bottom: 0; border-top: 2px solid var(--line); font-weight: 600; }
+.led-table tfoot tr { background: var(--bg-soft); }
+.led-table tfoot .led-sub { font-weight: 400; }

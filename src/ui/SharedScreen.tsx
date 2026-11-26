@@ -208,6 +208,8 @@ export function SharedScreen({
               </span>
               {v.startTime && <span>{v.startTime}</span>}
               {item.localOnly && <span className="sh-tag local">같이 보기 전용</span>}
+              {/* 두 사람의 내 공간 캘린더에도 서 있다는 표시. 열어 보지 않고도 읽힌다. */}
+              {item.toPersonal && <span className="sh-tag mine">내 공간에도</span>}
               {/* 양방향이라 "수정됨" 만으로는 누가 고쳤는지 알 수 없다. */}
               {isOverridden(item) && (
                 <span className="sh-tag">

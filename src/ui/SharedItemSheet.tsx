@@ -17,7 +17,7 @@
 import { useState } from 'react';
 import { COLORS, STATUSES } from '../domain/constants';
 import {
-  applyOverrides, canRevert, ownsMirror, revertToSource, sharedView,
+  applyOverrides, canRevert, ownsMirror, revertToSource, setToPersonal, sharedView,
 } from '../domain/shared';
 import type { ColorId, SharedOverridableField, SharedOverrides, SharedTodoItem } from '../domain/types';
 import { Icon } from './Icon';
@@ -56,6 +56,8 @@ interface Form {
   status: string;
   important: boolean;
   urgent: boolean;
+  /** 서로 일정에도 등록하기 — 두 사람의 내 공간 캘린더에 사본을 둔다. */
+  toPersonal: boolean;
 }
 
 export function SharedItemSheet({
@@ -97,8 +99,16 @@ export function SharedItemSheet({
       important: form.important,
       urgent: form.urgent,
     };
-    onSave(applyOverrides(item, patchFields, myUid));
+    onSave(setToPersonal(applyOverrides(item, patchFields, myUid), form.toPersonal));
   };
+
+  /*
+    반복 항목은 사본에 규칙을 옮길 수 없다. 그 한 날짜만 복사하면 매주 하던 일이
+    한 번짜리로 보이므로 아예 고르지 못하게 하고 이유를 적는다.
+  */
+  const recurring = view.recurring;
+  // 내 원본에서 올라온 항목은 내 캘린더에 이미 있다 — 이 칸은 상대 쪽에만 뜻이 있다.
+  const mineAlready = !item.localOnly && ownsMirror(item, myUid);
 
   return (
     <div className="mod-back" onClick={onClose}>
@@ -225,6 +235,32 @@ export function SharedItemSheet({
             />
           </div>
 
+          {/*
+            같이 보기 → 내 공간. '내 공간' 의 같이 보기(개인 → 공유)와 반대 방향이다.
+            상대의 개인 경로에는 아무도 쓸 수 없으므로 각자 자기 사본을 자기가 만든다 —
+            그래서 상대 쪽 사본이 서는 때를 적어 둔다.
+          */}
+          <div className="mod-row">
+            <span className="mod-lbl">내 공간</span>
+            <div className="shi-topersonal">
+              <button
+                className={'chip' + (form.toPersonal ? ' on' : '')}
+                onClick={() => patch({ toPersonal: !form.toPersonal })}
+                aria-pressed={form.toPersonal}
+                disabled={recurring}
+              >
+                <Icon.Calendar size={12} />서로 일정에도 등록하기
+              </button>
+              <p className="mod-hint">
+                {recurring
+                  ? '반복 일정은 사본에 반복 규칙을 옮길 수 없어 고를 수 없습니다.'
+                  : form.toPersonal
+                    ? <>두 사람의 <b>내 공간 캘린더</b>에 각자 사본이 섭니다{mineAlready ? '(내 쪽은 이미 있는 원본이 그 자리입니다)' : ''}. 상대 쪽 사본은 상대가 같이 보기를 열 때 만들어집니다. 사본은 여기 값을 따라가고, 사본을 고쳐도 여기로 돌아오지 않습니다. 끄면 그 사본은 지워집니다.</>
+                    : '켜면 이 일정이 두 사람의 내 공간 캘린더에도 사본으로 섭니다.'}
+              </p>
+            </div>
+          </div>
+
           {canRevert(item) && (
             <div className="mod-row">
               <span className="mod-lbl" />
@@ -285,6 +321,7 @@ function toForm(item: SharedTodoItem): Form {
     status: v.status,
     important: v.important,
     urgent: v.urgent,
+    toPersonal: item.toPersonal,
   };
 }
 

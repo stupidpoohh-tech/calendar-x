@@ -1648,12 +1648,21 @@
   background: var(--accent-soft); border-radius: 3px; padding: 1px 5px;
 }
 .sh-tag.local { color: var(--lens-task); background: color-mix(in oklab, var(--lens-task) 10%, var(--bg-soft)); }
+.sh-tag.mine { color: var(--lens-idea); background: color-mix(in oklab, var(--lens-idea) 10%, var(--bg-soft)); }
+/* 서로 일정에도 등록하기 — 칩 아래에 그 뜻을 한 줄로 적는다. */
+.shi-topersonal { display: flex; flex-direction: column; align-items: flex-start; gap: 5px; min-width: 0; }
+.shi-topersonal .mod-hint { margin: 0; }
+.shi-topersonal .chip:disabled { opacity: .5; cursor: not-allowed; }
 .lst-row.sh-hidden .sh-row { opacity: .55; border-style: dashed; }
 
 /* ---- 공유 모달 ---- */
 .shi-head { font-size: 0.9375rem; font-weight: 700; letter-spacing: -.01em; }
 /* 라벨이 없는 안내문은 라벨 폭만큼 들여쓰지 않는다. */
-.sh-mod .mod-hint { margin-left: 0; }
+/*
+  같이 보기 창의 안내는 아이콘 한 줄이 아니라 여러 줄 글이다. `.mod-hint` 의 기본인
+  flex 로 두면 `<b>` 가 한 칸이 되어 글자가 세로로 쌓인다.
+*/
+.sh-mod .mod-hint { margin-left: 0; display: block; line-height: 1.55; }
 .shi-mark {
   margin-left: 5px; font-size: 0.625rem; font-weight: 600;
   color: var(--lens-task); letter-spacing: 0;

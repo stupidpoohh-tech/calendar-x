@@ -626,7 +626,10 @@ service cloud.firestore {
                 || (data().overriddenBy is string && data().overriddenBy.size() <= 200))
             && (!('hiddenBy' in data())
                 || (data().hiddenBy is list && data().hiddenBy.size() <= memberLimit()))
-            && (!('localOnly' in data()) || data().localOnly is bool);
+            && (!('localOnly' in data()) || data().localOnly is bool)
+            // 서로 일정에도 등록하기. 둘의 결정이라 member 누구나 켜고 끈다
+            // (`sourceUntouched` 가 보는 칸이 아니다). 각자 자기 캘린더에만 사본을 만든다.
+            && (!('toPersonal' in data()) || data().toPersonal is bool);
         }
 
         allow read: if isBoardMember(boardId);

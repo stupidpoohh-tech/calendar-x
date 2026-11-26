@@ -58,7 +58,7 @@ describe('맞추기 계획', () => {
   it('공유 화면에서만 만든 항목은 원본이 없어도 지우지 않는다', () => {
     const local: SharedTodoItem = {
       id: 'local-1', sourceEntryId: null, source: null,
-      overrides: { title: '장보기' }, overriddenBy: '', localOnly: true, hiddenBy: [],
+      overrides: { title: '장보기' }, overriddenBy: '', localOnly: true, toPersonal: false, hiddenBy: [],
       createdBy: 'member', createdAt: '', updatedAt: '',
     };
     expect(planMirrorSync([], [local], TODAY, OWNER).deletes).toEqual([]);
@@ -216,7 +216,7 @@ describe('지나간 일정', () => {
     const local: SharedTodoItem = {
       id: 'local-old', sourceEntryId: null, source: null,
       overrides: { title: '지난 주 약속', startDate: '2026-09-01' }, overriddenBy: '',
-      localOnly: true, hiddenBy: [], createdBy: 'member', createdAt: '', updatedAt: '',
+      localOnly: true, toPersonal: false, hiddenBy: [], createdBy: 'member', createdAt: '', updatedAt: '',
     };
     expect(planMirrorSync([], [local], TODAY, OWNER).deletes).toEqual([]);
   });

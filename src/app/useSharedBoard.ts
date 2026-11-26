@@ -18,6 +18,13 @@
  *   · 화면을 열 때 맞추기가 남은 차이를 메운다.
  * 이 둘이 어긋남을 오래 남기지 않는 장치다.
  *
+ * ── 같이 보기 → 내 공간 사본은 **내 문서만** 쓴다 ───────────────
+ *
+ * '서로 일정에도 등록하기'(`toPersonal`)를 켠 항목은 두 사람의 내 공간 캘린더에 사본으로
+ * 선다. 상대의 개인 경로에는 아무도 쓸 수 없으므로 각자 자기 사본을 자기가 만든다 —
+ * 켠 사람은 저장하는 그 자리에서, 상대는 같이 보기를 열 때 맞추기에서. 쓰는 것은 id 가
+ * `shr-<항목id>` 인 **새 문서**뿐이고, 원본은 여기서도 건드리지 않는다 (`domain/sharedCopy.ts`).
+ *
  * ── 계정이 바뀌면 한 렌더도 남기지 않는다 ───────────────────────
  *
  * 구독을 끊어도 마지막 스냅샷은 상태에 남는다. 개인 자료와 같은 규칙으로 렌더 중에
@@ -34,8 +41,9 @@ import {
 } from '../data/sharedRepo';
 import { uid as newId } from '../domain/entry';
 import {
-  isMirrorableTask, newInviteCode, partnerName, sharedTitle, sourceOf,
+  isMirrorableTask, newInviteCode, partnerName, sharedCopyId, sharedTitle, sourceOf, wantsPersonalCopy,
 } from '../domain/shared';
+import { copyEntryOf, isEmptyCopyPlan, planPersonalCopies } from '../domain/sharedCopy';
 import type {
   Entry, SharedBoard, SharedCollection, SharedCollectionItem, SharedDday, SharedInvite,
   SharedNote, SharedPin, SharedTodoItem,
@@ -230,16 +238,29 @@ export function useSharedBoard({ uid, todayISO, accountName, open, onError, comm
         도착한 뒤에만 부른다 (아래 effect 가 `contentReady` 를 기다린다).
       */
       const tasks = await fetchMyTasks(db, uid);
+      const now = new Date().toISOString();
       const plan = planMirrorSync(tasks, items, todayISO, uid);
-      if (isEmptyPlan(plan)) return 'ok';
-      await applyMirrorSync(db, board.id, uid, plan, new Date().toISOString());
+      if (!isEmptyPlan(plan)) await applyMirrorSync(db, board.id, uid, plan, now);
+      /*
+        같이 보기 → 내 캘린더 사본. 방금 읽은 **전량**으로 판정하므로 창 밖의 사본도
+        센다. 평소 저장과 같은 쓰기 큐로 보낸다 — 거절되면 '저장하지 못한 것' 에 남는다.
+      */
+      const copies = planPersonalCopies(items, tasks, uid, now);
+      if (!isEmptyCopyPlan(copies)) {
+        for (const e of copies.writes) {
+          commit({ kind: 'entry', label: '같이 보기 일정', summary: e.title || '(제목 없음)', payload: e });
+        }
+        for (const id of copies.deleteIds) {
+          commit({ kind: 'entryDelete', label: '같이 보기 일정 내리기', summary: id, payload: { id } });
+        }
+      }
       return 'ok';
     } catch (err) {
       console.error('[shared:sync]', err);
       errorRef.current(`같이 보기를 맞추지 못했습니다. ${describeFirestoreError(err)}`);
       return 'error';
     }
-  }, [db, uid, board, items, todayISO]);
+  }, [db, uid, board, items, todayISO, commit]);
 
   const syncRef = useRef(syncNow);
   syncRef.current = syncNow;
@@ -307,19 +328,40 @@ export function useSharedBoard({ uid, todayISO, accountName, open, onError, comm
       },
 
       saveItem: (item) => {
-        if (!activeBoard) return;
+        if (!activeBoard || !uid) return;
         commit({
           kind: 'sharedItem', label: '같이 보기 항목',
           summary: sharedTitle(item), payload: { boardId: activeBoard.id, item },
         });
+        /*
+          내 사본은 저장하는 그 자리에서 맞춘다 — 보드를 다시 열 때까지 기다리면 방금
+          켠 사람의 캘린더에 한동안 아무것도 안 보인다. 상대 몫은 상대가 열 때 선다.
+
+          id 가 정해져 있어 같은 내용을 두 번 써도 문서 하나다. 끄면 그 사본을 지운다 —
+          없는 문서를 지우는 것은 규칙도 받는다.
+        */
+        const before = items.find((i) => i.id === item.id) ?? null;
+        if (wantsPersonalCopy(item, uid)) {
+          const copy = copyEntryOf(item);
+          commit({ kind: 'entry', label: '같이 보기 일정', summary: copy.title || '(제목 없음)', payload: copy });
+        } else if (before && wantsPersonalCopy(before, uid)) {
+          // 켜 둔 적이 있을 때만 지운다. 평범한 편집마다 없는 문서를 지우는 쓰기를 내보내지 않는다.
+          const id = sharedCopyId(item.id);
+          commit({ kind: 'entryDelete', label: '같이 보기 일정 내리기', summary: id, payload: { id } });
+        }
       },
 
       removeItem: (item) => {
-        if (!activeBoard) return;
+        if (!activeBoard || !uid) return;
         commit({
           kind: 'sharedItemDelete', label: '같이 보기 항목 삭제',
           summary: sharedTitle(item), payload: { boardId: activeBoard.id, id: item.id },
         });
+        // 보드에서 사라지면 내 사본도 함께 내린다. 상대 사본은 상대가 열 때 맞추기가 내린다.
+        if (wantsPersonalCopy(item, uid)) {
+          const id = sharedCopyId(item.id);
+          commit({ kind: 'entryDelete', label: '같이 보기 일정 내리기', summary: id, payload: { id } });
+        }
       },
 
       /**

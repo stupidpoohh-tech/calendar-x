@@ -1220,6 +1220,23 @@ describe('같이 보기 — 보드 안의 자료', () => {
     ));
   });
 
+  /*
+    서로 일정에도 등록하기 — 둘의 결정이라 member 누구나 켜고 끈다. 사본을 만드는 것은
+    각자 자기 캘린더이고, 상대의 개인 경로는 여기서도 열리지 않는다.
+  */
+  it('서로 일정에도 등록하기는 참·거짓이고, member 누구나 켜고 끈다', async () => {
+    await seedItem('task-a');
+    const at = doc(db(OTHER), `sharedBoards/${BOARD}/items/task-a`);
+    await assertSucceeds(setDoc(at, { toPersonal: true, updatedAt: '2026-09-24T00:00:00.000Z' }, { merge: true }));
+    await assertSucceeds(setDoc(at, { toPersonal: false, updatedAt: '2026-09-24T00:00:00.000Z' }, { merge: true }));
+    await assertFails(setDoc(at, { toPersonal: 'yes', updatedAt: '2026-09-24T00:00:00.000Z' }, { merge: true }));
+    // 켠 사람이 상대의 캘린더에 사본을 대신 써 줄 수는 없다.
+    await assertFails(setDoc(doc(db(OTHER), `users/${ME}/entries/shr-task-a`), {
+      kind: 'task', title: '병원 예약', note: '', color: 'blue', tags: [], startDate: '2026-09-25',
+      endDate: null, startTime: null, endTime: null, ymSpan: ['2026-09'], isRecurring: false, money: null,
+    }));
+  });
+
   it('감춘 사람 목록이 배열이 아니면 거부한다', async () => {
     await assertFails(setDoc(
       doc(db(ME), `sharedBoards/${BOARD}/items/task-a`),
